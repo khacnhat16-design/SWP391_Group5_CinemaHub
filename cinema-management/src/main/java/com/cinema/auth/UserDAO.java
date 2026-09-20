@@ -14,6 +14,38 @@ import java.util.Optional;
 public class UserDAO {
 
     
+        public void insert(User user) throws Exception {
+        String sql = """
+            INSERT INTO dbo.user_account 
+            (email, phone, password_hash, full_name, role_code, status, failed_login_count,
+             email_verified, email_verification_token, email_verification_expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, SYSUTCDATETIME())
+            """;
+        
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            ps.setString(1, user.email());
+            ps.setString(2, user.phone());
+            ps.setString(3, user.passwordHash());
+            ps.setString(4, user.fullName());
+            ps.setString(5, user.role().name());
+            ps.setString(6, user.status());
+            ps.setInt(7, user.failedLoginCount());
+            ps.setBoolean(8, user.emailVerified());
+            ps.setString(9, user.verificationToken());
+            ps.setObject(10, user.verificationExpiresAt());
+            
+            ps.executeUpdate();
+            
+            try (ResultSet rs = ps.getGeneratedKeys()) {
+                if (rs.next()) {
+                    user.setId(rs.getLong(1));
+                    user.setCreatedAt(LocalDateTime.now());
+                }
+            }
+        }
+    }
+
     /**
      * Find user by email.
      */
@@ -38,6 +70,29 @@ public class UserDAO {
         return Optional.empty();
     }
 
+    /**
+     * Find user by phone.
+     */
+    public Optional<User> findByPhone(String phone) throws Exception {
+        String sql = """
+            SELECT id, email, phone, password_hash, full_name, role_code, status,
+                   failed_login_count, locked_until, last_login_at, created_at, version,
+                   email_verified, email_verification_token, email_verification_expires_at
+            FROM dbo.user_account
+            WHERE phone = ?
+            """;
+
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, phone);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(mapRow(rs));
+                }
+            }
+        }
+        return Optional.empty();
+    }
 
 
     /**
