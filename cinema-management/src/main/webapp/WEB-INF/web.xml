@@ -245,4 +245,9 @@
         <servlet-name>pageController</servlet-name>
         <url-pattern>/console/*</url-pattern>
     </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>pageController</servlet-name>
+        <url-pattern>/console/*</url-pattern>
+    </servlet-mapping>
+
 </web-app>
