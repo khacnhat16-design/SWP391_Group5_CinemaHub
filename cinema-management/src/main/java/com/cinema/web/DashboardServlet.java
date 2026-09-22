@@ -40,17 +40,19 @@ public class DashboardServlet extends HttpServlet {
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
         try {
+            // 1. Lấy đối tượng AccessScope do AuthFilter đã đính kèm vào Request
             AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
             if (scope == null) {
                 sendForbidden(response, "Yêu cầu đăng nhập");
                 return;
             }
+            // 2. Kiểm tra vai trò (Role-based Authorization)
             Role role = scope.role();
             if (role != Role.ADMIN && role != Role.BRANCH_MANAGER && role != Role.BRANCH_STAFF) {
                 sendForbidden(response, "Chỉ tài khoản nội bộ mới xem được dashboard quản lý");
                 return;
             }
-
+            // 3. Routing (Định tuyến Sub-path)
             String pathInfo = request.getPathInfo() == null ? "" : request.getPathInfo();
             switch (pathInfo) {
                 case "", "/" -> sendDashboard(request, response, scope);
@@ -67,6 +69,7 @@ public class DashboardServlet extends HttpServlet {
 
     private void sendDashboard(HttpServletRequest request, HttpServletResponse response,
                                 AccessScope scope) throws Exception {
+        // 1. Parse khoảng thời gian lọc dữ liệu (Date Range)
         LocalDate from = parseDate(request.getParameter("from"));
         LocalDate to = parseDate(request.getParameter("to"));
         if (from == null) from = LocalDate.now().minusDays(30);
@@ -75,6 +78,7 @@ public class DashboardServlet extends HttpServlet {
         // ADMIN xem toàn chuỗi; Manager/Staff bị ép về 1 chi nhánh.
         // Manager/Staff chưa được gán branch → trả DashboardSummary rỗng (không lộ
         // dữ liệu chuỗi, không 403 để UI vẫn render được).
+        //// 2. Xử lý phạm vi chi nhánh bắt buộc cho Nhân viên / Quản lý (Multi-tenancy Isolation)
         Long branchScope = null;
         if (scope.role() != Role.ADMIN) {
             branchScope = scope.branchIds().isEmpty() ? null : scope.branchIds().iterator().next();
@@ -82,10 +86,10 @@ public class DashboardServlet extends HttpServlet {
                 sendOk(response, emptySummary());
                 return;
             }
-        }
+        } // 3. Xử lý bộ lọc chi nhánh cho ADMIN (Optional Filter)
         Long branchFilter = (scope.role() == Role.ADMIN)
                 ? parseOptionalLong(request.getParameter("branchId")) : null;
-
+        // 4. Gọi Service thực thi truy vấn & Trả kết quả JSON
         ReportService.DashboardSummary summary =
                 reportService.dashboardSummary(from, to, branchScope, branchFilter);
         sendOk(response, summary);
