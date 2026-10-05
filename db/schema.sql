@@ -131,3 +131,46 @@ CREATE TABLE dbo.showtime_seat (
     CONSTRAINT CK_showtime_seat_status CHECK (status IN ('AVAILABLE','HOLD','SOLD'))
 );
 GO
+
+-- ============ Ticketing & Snapshot Pricing (Nguoi 4 - Chuc nang 3) ============
+IF OBJECT_ID(N'dbo.ticket', N'U') IS NULL
+CREATE TABLE dbo.ticket (
+    id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_ticket PRIMARY KEY,
+    ticket_code VARCHAR(32) NOT NULL CONSTRAINT UQ_ticket_code UNIQUE,
+    showtime_id BIGINT NOT NULL CONSTRAINT FK_ticket_showtime REFERENCES dbo.showtime(id),
+    branch_id BIGINT NOT NULL CONSTRAINT FK_ticket_branch REFERENCES dbo.branch(id),
+    user_id BIGINT NULL CONSTRAINT FK_ticket_user REFERENCES dbo.user_account(id),
+    status VARCHAR(20) NOT NULL CONSTRAINT DF_ticket_status DEFAULT 'PENDING',
+    total_amount BIGINT NOT NULL,
+    voucher_code VARCHAR(50) NULL,
+    refund_amount BIGINT NULL,
+    points_earned INT NOT NULL CONSTRAINT DF_ticket_points DEFAULT 0,
+    hold_id BIGINT NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_ticket_created DEFAULT SYSUTCDATETIME(),
+    confirmed_at DATETIME2(3) NULL,
+    cancelled_at DATETIME2(3) NULL,
+    used_at DATETIME2(3) NULL,
+    used_by BIGINT NULL,
+    version INT NOT NULL CONSTRAINT DF_ticket_version DEFAULT 0,
+    CONSTRAINT CK_ticket_status CHECK (status IN ('PENDING','CONFIRMED','CANCELLED','USED')),
+    CONSTRAINT CK_ticket_amount CHECK (total_amount >= 0)
+);
+GO
+IF OBJECT_ID(N'dbo.ticket_seat', N'U') IS NULL
+CREATE TABLE dbo.ticket_seat (
+    ticket_id BIGINT NOT NULL CONSTRAINT FK_ticket_seat_ticket REFERENCES dbo.ticket(id),
+    seat_id BIGINT NOT NULL CONSTRAINT FK_ticket_seat_seat REFERENCES dbo.seat(id),
+    price BIGINT NOT NULL,
+    ticket_type VARCHAR(20) NULL,
+    CONSTRAINT PK_ticket_seat PRIMARY KEY(ticket_id, seat_id),
+    CONSTRAINT CK_ticket_seat_price CHECK (price >= 0),
+    CONSTRAINT CK_ticket_seat_type CHECK
+        (ticket_type IS NULL OR ticket_type IN ('ADULT','CHILD','STUDENT','VIP'))
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.ticket') AND name = N'IX_ticket_user')
+CREATE INDEX IX_ticket_user ON dbo.ticket(user_id, created_at DESC);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.ticket') AND name = N'IX_ticket_hold')
+CREATE INDEX IX_ticket_hold ON dbo.ticket(hold_id);
+GO
