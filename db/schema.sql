@@ -103,3 +103,31 @@ CREATE TABLE dbo.movie (
     
 );
 
+
+-- ============ Seat hold & Concurrency ============
+IF OBJECT_ID(N'dbo.seat_hold', N'U') IS NULL
+CREATE TABLE dbo.seat_hold (
+    id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_seat_hold PRIMARY KEY,
+    showtime_id BIGINT NOT NULL CONSTRAINT FK_hold_showtime REFERENCES dbo.showtime(id),
+    user_id BIGINT NULL CONSTRAINT FK_hold_user REFERENCES dbo.user_account(id),
+    status VARCHAR(20) NOT NULL CONSTRAINT DF_hold_status DEFAULT 'ACTIVE',
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_hold_created DEFAULT SYSUTCDATETIME(),
+    expires_at DATETIME2(3) NOT NULL,
+    CONSTRAINT CK_hold_status CHECK (status IN ('ACTIVE','CONFIRMED','EXPIRED','CANCELLED')),
+    CONSTRAINT CK_hold_expiry CHECK (expires_at > created_at)
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.seat_hold') AND name = N'IX_hold_expiry')
+CREATE INDEX IX_hold_expiry ON dbo.seat_hold(status, expires_at);
+GO
+IF OBJECT_ID(N'dbo.showtime_seat', N'U') IS NULL
+CREATE TABLE dbo.showtime_seat (
+    showtime_id BIGINT NOT NULL CONSTRAINT FK_showtime_seat_showtime REFERENCES dbo.showtime(id),
+    seat_id BIGINT NOT NULL CONSTRAINT FK_showtime_seat_seat REFERENCES dbo.seat(id),
+    status VARCHAR(20) NOT NULL CONSTRAINT DF_showtime_seat_status DEFAULT 'AVAILABLE',
+    hold_id BIGINT NULL,
+    hold_expires_at DATETIME2(3) NULL,
+    CONSTRAINT PK_showtime_seat PRIMARY KEY(showtime_id, seat_id),
+    CONSTRAINT CK_showtime_seat_status CHECK (status IN ('AVAILABLE','HOLD','SOLD'))
+);
+GO
