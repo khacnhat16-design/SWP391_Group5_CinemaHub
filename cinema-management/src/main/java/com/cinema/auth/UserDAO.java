@@ -13,8 +13,10 @@ import java.util.Optional;
 /** Data access for user_account table. */
 public class UserDAO {
 
-    
-        public void insert(User user) throws Exception {
+    /**
+     * Insert a new user account. Throws if email or phone already exists.
+     */
+    public void insert(User user) throws Exception {
         String sql = """
             INSERT INTO dbo.user_account 
             (email, phone, password_hash, full_name, role_code, status, failed_login_count,
@@ -94,6 +96,29 @@ public class UserDAO {
         return Optional.empty();
     }
 
+    /**
+     * Find user by ID.
+     */
+    public Optional<User> findById(Long id) throws Exception {
+        String sql = """
+            SELECT id, email, phone, password_hash, full_name, role_code, status,
+                   failed_login_count, locked_until, last_login_at, created_at, version,
+                   email_verified, email_verification_token, email_verification_expires_at
+            FROM dbo.user_account
+            WHERE id = ?
+            """;
+
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(mapRow(rs));
+                }
+            }
+        }
+        return Optional.empty();
+    }
 
     /**
      * Update failed login count.
@@ -150,7 +175,69 @@ public class UserDAO {
         }
     }
 
+    public boolean verifyEmailToken(String token) throws Exception {
+        String sql = """
+            UPDATE dbo.user_account
+            SET email_verified = 1, email_verification_token = NULL,
+                email_verification_expires_at = NULL, version = version + 1
+            WHERE email_verification_token = ?
+              AND email_verification_expires_at > SYSUTCDATETIME()
+              AND email_verified = 0
+            """;
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, token);
+            return ps.executeUpdate() == 1;
+        }
+    }
 
+    /**
+     * Update user profile (name and phone). Enforces phone uniqueness excluding own account.
+     */
+    public void updateProfile(Long userId, String fullName, String phone) throws Exception {
+        // Loại trừ chính user đang update khỏi WHERE để cho phép giữ nguyên SĐT
+        // cũ mà không bị false-positive "đã tồn tại".
+        String checkSql = "SELECT 1 FROM dbo.user_account WHERE phone = ? AND id != ?";
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(checkSql)) {
+            ps.setString(1, phone);
+            ps.setLong(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    throw new RuntimeException("Phone number already in use");
+                }
+            }
+        }
+
+        String sql = "UPDATE dbo.user_account SET full_name = ?, phone = ? WHERE id = ?";
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, fullName);
+            ps.setString(2, phone);
+            ps.setLong(3, userId);
+            ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Update the password hash for a user (used by forgot-password flow and admin reset).
+     * Bumps version for optimistic locking.
+     */
+    public void updatePassword(Long userId, String passwordHash) throws Exception {
+        String sql = """
+                UPDATE dbo.user_account
+                SET password_hash = ?, version = version + 1
+                WHERE id = ?
+                """;
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, passwordHash);
+            ps.setLong(2, userId);
+            ps.executeUpdate();
+        }
+    }
+
+    private User mapRow(ResultSet rs) throws Exception {
         User user = new User();
         user.setId(rs.getLong("id"));
         user.email = rs.getString("email");
