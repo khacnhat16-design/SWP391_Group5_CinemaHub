@@ -12,8 +12,11 @@ import com.cinema.pricing.PriceRuleDAO;
 import com.cinema.pricing.PricingService;
 import com.cinema.screen.ScreenDAO;
 import com.cinema.showtime.Showtime;
+<<<<<<< HEAD
 import com.cinema.showtime.ShowtimeAllocationDAO;
 import com.cinema.showtime.ShowtimeAllocationService;
+=======
+>>>>>>> TuanLM
 import com.cinema.showtime.ShowtimeDAO;
 import com.cinema.showtime.ShowtimeService;
 import jakarta.servlet.ServletException;
@@ -47,12 +50,22 @@ public class ShowtimeController extends HttpServlet {
         this.showtimeService = new ShowtimeService(
                 new ShowtimeDAO(), screenDao, new MovieDAO(), new BranchDAO());
         this.pricingService = new PricingService(new PriceRuleDAO(), new ShowtimeDAO(),
+<<<<<<< HEAD
                 new com.cinema.voucher.HolidayDAO(),
                 new com.cinema.pricing.PricingConfigDAO());
         // Hook cập nhật allocation khi showtime được tạo/hủy.
         // (best-effort — lỗi hook không chặn luồng chính của ShowtimeService)
         this.showtimeService.setAllocationHook(
                 new ShowtimeAllocationService(new ShowtimeAllocationDAO()));
+=======
+                new com.cinema.pricing.HolidayDAO(),
+                new com.cinema.pricing.PricingConfigDAO());
+        this.showtimeService.setAllocationHook(
+                new com.cinema.showtime.ShowtimeAllocationService(
+                        new com.cinema.showtime.ShowtimeAllocationDAO(),
+                        new com.cinema.notification.NotificationService(
+                                new com.cinema.notification.NotificationDAO())));
+>>>>>>> TuanLM
     }
 
     @Override
