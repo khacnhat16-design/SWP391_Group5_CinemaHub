@@ -995,7 +995,7 @@
         }
     });
 
-    // ================================================================
+   // ================================================================
     //  SHOWTIME (Admin + Manager)
     // ================================================================
     router.register('showtime', {
@@ -1032,7 +1032,6 @@
                     emptyTitle: 'Chưa có suất chiếu',
                     emptyMessage: 'Hãy tạo suất chiếu đầu tiên cho chi nhánh.',
                     columns: [
-                        { label: 'ID', key: 'id', width: '60px' },
                         { label: 'Phim', key: 'movieTitle' },
                         { label: 'Chi nhánh', key: 'branchName' },
                         { label: 'Phòng', key: 'screenName' },
@@ -1041,30 +1040,104 @@
                         { label: 'Trạng thái', render: function (s) { return statusBadge(s.status); } }
                     ],
                     actions: function (row) {
+                        if (row.status === 'CANCELLED') {
+                            return [{
+                                label: 'Khôi phục', class: 'primary', onClick: function () {
+                                    confirmAction('Khôi phục suất chiếu này?', function () {
+                                        hub.api('/showtime/' + row.id,
+                                            { method: 'PUT', body: { action: 'restore' } })
+                                            .then(function () {
+                                                hub.notify('Đã khôi phục suất chiếu.', 'ok');
+                                                router.go('showtime');
+                                            })
+                                            .catch(notifyError);
+                                    });
+                                }
+                            }];
+                        }
                         if (row.status !== 'OPEN') return [];
-                        return [{ label: 'Hủy', class: 'danger', onClick: function () {
-                            confirmAction('Hủy suất chiếu này?', function () {
-                                hub.api('/showtime/' + row.id, { method: 'PUT', body: { action: 'cancel' } })
-                                    .then(function () {
-                                        hub.notify('Đã hủy suất chiếu.', 'ok');
-                                        router.go('showtime');
-                                    })
-                                    .catch(notifyError);
-                            });
-                        }}];
+                        return [
+                            { label: 'Sửa giờ', class: 'secondary',
+                              href: ctx + '/console?module=showtime&action=edit&id=' + row.id },
+                            { label: 'Hủy', class: 'danger', onClick: function () {
+                                confirmAction('Hủy suất chiếu này?', function () {
+                                    hub.api('/showtime/' + row.id, { method: 'PUT', body: { action: 'cancel' } })
+                                        .then(function () {
+                                            hub.notify('Đã hủy suất chiếu.', 'ok');
+                                            router.go('showtime');
+                                        })
+                                        .catch(notifyError);
+                                });
+                            }}
+                        ];
                     }
                 });
             }).catch(notifyError);
         },
         create: function () {
+            var params = new URLSearchParams(window.location.search);
+            var requestedBranchId = params.get('branchId') || '';
+            var requestedMovieId = params.get('movieId') || '';
+            function getVietnamDateTimeParts() {
+                return new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'Asia/Ho_Chi_Minh',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hourCycle: 'h23'
+                }).formatToParts(new Date()).reduce(function (parts, part) {
+                    if (part.type !== 'literal') parts[part.type] = part.value;
+                    return parts;
+                }, {});
+            }
+            var currentDateTime = getVietnamDateTimeParts();
+            var today = currentDateTime.year + '-' + currentDateTime.month + '-' + currentDateTime.day;
             Promise.all([
                 hub.api('/branch').catch(function () { return []; }),
-                hub.api('/movie').catch(function () { return []; }),
-                hub.api('/screen').catch(function () { return []; })
+                requestedMovieId ? hub.api('/movie/' + encodeURIComponent(requestedMovieId))
+                    : hub.api('/movie')
             ]).then(function (results) {
                 var branches = results[0] || [];
-                var movies = results[1] || [];
-                var screens = results[2] || [];
+                var movies = requestedMovieId
+                    ? (results[1] ? [results[1]] : [])
+                    : (results[1] || []);
+                var initialBranch = branches.find(function (branch) {
+                    return String(branch.id) === String(requestedBranchId);
+                }) || branches[0];
+                var initialBranchId = initialBranch ? String(initialBranch.id) : '';
+                var screensPromise = initialBranchId
+                    ? hub.api('/screen?branchId=' + encodeURIComponent(initialBranchId))
+                        .then(function (items) { return Array.isArray(items) ? items : []; })
+                    : Promise.resolve([]);
+                return screensPromise.then(function (screens) {
+                    return {
+                        branches: branches,
+                        movies: movies,
+                        screens: screens,
+                        initialBranchId: initialBranchId
+                    };
+                });
+            }).then(function (data) {
+                var branches = data.branches;
+                var movies = data.movies;
+                var screens = data.screens;
+                var updateMovieLoadingButton = function () {};
+                var requestedMovie = requestedMovieId
+                    ? movies.find(function (movie) {
+                        return String(movie.id) === String(requestedMovieId);
+                    })
+                    : null;
+                var showDateMin = requestedMovie && requestedMovie.releaseDate > today
+                    ? requestedMovie.releaseDate
+                    : today;
+                var initialShowDate = '';
+                if (requestedMovie && requestedMovie.releaseDate && requestedMovie.endDate) {
+                    if (showDateMin <= requestedMovie.endDate) {
+                        initialShowDate = showDateMin;
+                    }
+                }
                 form.renderFormPage({
                     breadcrumb: ['Quản lý', { label: 'Suất chiếu', href: ctx + '/console?module=showtime' }, 'Tạo mới'],
                     title: 'Tạo suất chiếu mới',
@@ -1074,18 +1147,43 @@
                         title: 'Thông tin suất chiếu',
                         fields: [
                             { name: 'branchId', label: 'Chi nhánh', type: 'select', required: true,
+                              value: data.initialBranchId,
                               options: (branches || []).map(function (b) { return { value: String(b.id), label: b.name }; }),
-                              hint: 'Lọc lại phòng chiếu sau khi chọn chi nhánh.' },
+                              },
                             { name: 'movieId', label: 'Phim', type: 'select', required: true,
+                              value: requestedMovieId,
                               options: (movies || []).filter(function (m) { return m.status === 'PUBLISHED'; }).map(function (m) {
                                   return { value: String(m.id), label: m.title + ' (' + (m.durationMin || '?') + 'p)' };
                               }) },
                             { name: 'screenId', label: 'Phòng chiếu', type: 'select', required: true,
                               options: (screens || []).map(function (s) { return { value: String(s.id), label: (s.name || 'Phòng #' + s.id) }; }) },
-                            { name: 'startTime', label: 'Giờ bắt đầu', type: 'datetime-local', required: true,
-                              hint: 'Định dạng: yyyy-MM-ddTHH:mm. Suất chiếu sẽ tự tính giờ kết thúc theo thời lượng phim.' },
-                            { name: 'cleaningBufferMin', label: 'Thời gian vệ sinh giữa ca (phút)', type: 'number', min: 0, max: 60, value: 15,
-                              hint: 'Khoảng đệm giữa suất chiếu này và suất kế tiếp.' }
+                            { name: 'showDate', label: 'Ngày chiếu', type: 'date', required: true,
+                              value: initialShowDate, min: showDateMin,
+                              max: requestedMovie ? requestedMovie.endDate : undefined,
+
+                              customValidate: function (value) {
+                                  var now = getVietnamDateTimeParts();
+                                  var currentDate = now.year + '-' + now.month + '-' + now.day;
+                                  if (value < currentDate) return 'Không thể chọn ngày trong quá khứ.';
+                                  if (requestedMovie && (value < requestedMovie.releaseDate || value > requestedMovie.endDate)) {
+                                      return 'Ngày chiếu phải nằm trong thời hạn hiệu lực của phim.';
+                                  }
+                                  return '';
+                              } },
+                            { name: 'startHour', label: 'Giờ bắt đầu', type: 'time', required: true,
+                              customValidate: function (value) {
+                                  var showDateInput = document.querySelector('input[name="showDate"]');
+                                  var now = getVietnamDateTimeParts();
+                                  var currentDate = now.year + '-' + now.month + '-' + now.day;
+                                  var currentTimeValue = now.hour + ':' + now.minute;
+                                  if (showDateInput && showDateInput.value === currentDate && value < currentTimeValue) {
+                                      return 'Giờ bắt đầu phải nằm trong tương lai.';
+                                  }
+                                  return '';
+                              } },
+                            { name: 'startTime', type: 'hidden' },
+                            { name: 'cleaningBufferMin', label: 'Thời gian vệ sinh giữa ca (phút)', type: 'number', min: 0, max: 60, value: 15,required: true
+                               }
                         ]
                     }],
                     // Khi đổi chi nhánh → refetch /screen?branchId=X và repopulate dropdown "Phòng chiếu".
@@ -1128,14 +1226,100 @@
                                 .catch(function () { populateScreens([]); });
                         }
 
+                        var scopedBranchId = screens.length ? String(screens[0].branchId) : '';
+                        var scopedBranch = (branches || []).find(function (branch) {
+                            return String(branch.id) === scopedBranchId;
+                        });
+                        if (scopedBranch) {
+                            branchSelect.innerHTML = '';
+                            var branchOption = document.createElement('option');
+                            branchOption.value = scopedBranchId;
+                            branchOption.textContent = scopedBranch.name;
+                            branchSelect.appendChild(branchOption);
+                            branchSelect.value = scopedBranchId;
+                        }
+
                         branchSelect.addEventListener('change', function () {
                             loadScreensForBranch(branchSelect.value);
                         });
 
                         // Khởi tạo dropdown theo branchId đang được chọn (nếu có)
                         loadScreensForBranch(branchSelect.value);
+
+                        var movieSelect = formEl.querySelector('select[name="movieId"]');
+                        var showDateInput = formEl.querySelector('input[name="showDate"]');
+                        if (movieSelect && showDateInput) {
+                            var movieRequestId = 0;
+
+                            function setMovieLoading(loading) {
+                                movieSelect.disabled = loading;
+                                updateMovieLoadingButton(loading);
+                            }
+
+                            function populateMovies(items, emptyMessage) {
+                                var previous = movieSelect.value || requestedMovieId;
+                                movieSelect.innerHTML = '';
+                                var placeholder = document.createElement('option');
+                                placeholder.value = '';
+                                placeholder.textContent = items.length
+                                    ? '— Chọn phim —'
+                                    : (emptyMessage || '— Ngày này không có phim đang phát hành —');
+                                movieSelect.appendChild(placeholder);
+                                items.forEach(function (movie) {
+                                    var option = document.createElement('option');
+                                    option.value = String(movie.id);
+                                    option.textContent = movie.title + ' (' + (movie.durationMin || '?') + 'p)';
+                                    movieSelect.appendChild(option);
+                                });
+                                movieSelect.value = items.some(function (movie) {
+                                    return String(movie.id) === previous;
+                                }) ? previous : '';
+                            }
+
+                            function loadMoviesForStartDate() {
+                                if (requestedMovieId) {
+                                    return;
+                                }
+                                var requestId = ++movieRequestId;
+                                var date = showDateInput.value || '';
+                                var query = date ? '?date=' + encodeURIComponent(date) : '';
+                                setMovieLoading(true);
+                                hub.api('/movie' + query)
+                                    .then(function (items) {
+                                        if (requestId !== movieRequestId) return;
+                                        var selectable = (Array.isArray(items) ? items : [])
+                                            .filter(function (movie) {
+                                                return movie.status === 'PUBLISHED'
+                                                    && (!date || (movie.releaseDate && movie.endDate
+                                                        && movie.releaseDate <= date
+                                                        && movie.endDate >= date));
+                                            });
+                                        populateMovies(selectable);
+                                        setMovieLoading(false);
+                                    })
+                                    .catch(function (error) {
+                                        if (requestId !== movieRequestId) return;
+                                        populateMovies([], '— Không tải được danh sách phim —');
+                                        setMovieLoading(false);
+                                        notifyError(error);
+                                    });
+                            }
+
+                            showDateInput.addEventListener('change', loadMoviesForStartDate);
+                        }
+                    },
+                    onReady: function (formEl) {
+                        var submitButton = formEl.querySelector('button[type="submit"]');
+                        if (submitButton) {
+                            updateMovieLoadingButton = function (loading) {
+                                submitButton.disabled = loading;
+                            };
+                        }
                     },
                     onSubmit: function (data) {
+                        data.startTime = data.showDate + 'T' + data.startHour;
+                        delete data.showDate;
+                        delete data.startHour;
                         hub.api('/showtime', { method: 'POST', body: data })
                             .then(function () { router.go('showtime'); })
                             .catch(notifyError);
@@ -1145,11 +1329,14 @@
             }).catch(notifyError);
         },
         edit: function (id) {
-            hub.api('/showtime/' + id).then(function (showtime) {
+            hub.api('/showtime/' + id).then(function (detail) {
+                var showtime = detail.showtime || detail;
                 form.renderFormPage({
                     breadcrumb: ['Quản lý', { label: 'Suất chiếu', href: ctx + '/console?module=showtime' }, 'Chỉnh sửa'],
                     title: 'Chỉnh sửa suất chiếu',
-                    subtitle: showtime.movieTitle + ' — ' + showtime.branchName,
+                    subtitle: showtime.movieTitle && showtime.branchName
+                        ? showtime.movieTitle + ' — ' + showtime.branchName
+                        : 'Chỉ thay đổi giờ bắt đầu; phim, phòng và chi nhánh được giữ nguyên.',
                     submitLabel: 'Lưu thay đổi',
                     sections: [{
                         title: 'Thông tin suất chiếu',
@@ -1168,6 +1355,7 @@
             }).catch(notifyError);
         }
     });
+
 
     // ================================================================
     //  PRICING (Admin only)
@@ -1278,120 +1466,7 @@
         }
     });
 
-    // ================================================================
-    //  INVENTORY (Admin + Manager)
-    // ================================================================
-    router.register('inventory', {
-        list: function () {
-            hub.api('/branch').then(function (branches) {
-                var params = new URLSearchParams(window.location.search);
-                var branchId = params.get('branchId') || (branches[0] && branches[0].id);
-                list.render({
-                    title: 'Kho hàng',
-                    subtitle: 'Theo dõi và điều chỉnh tồn kho tại từng chi nhánh.',
-                    addUrl: ctx + '/console?module=inventory&action=create&branchId=' + (branchId || ''),
-                    addLabel: 'Nhập kho',
-                    pageSize: 50,
-                    filters: [{
-                        name: 'branchId', label: 'Chi nhánh',
-                        initialValue: branchId ? String(branchId) : '',
-                        options: (branches || []).map(function (b) { return { value: String(b.id), label: b.name }; })
-                    }],
-                    fetcher: function (qs) {
-                        var url = '/inventory' + (qs.toString() ? '?' + qs.toString() : '');
-                        return hub.api(url).then(function (list) {
-                            return { items: list || [], total: (list || []).length };
-                        });
-                    },
-                    emptyTitle: 'Chưa có tồn kho',
-                    emptyMessage: 'Chi nhánh chưa có sản phẩm nào trong kho.',
-                    columns: [
-                        { label: 'Sản phẩm', key: 'name' },
-                        { label: 'Loại', key: 'type' },
-                        { label: 'Số lượng', render: function (s) { return (s.qty || 0) + ' ' + (s.unit || ''); } },
-                        { label: 'Giá bán', render: function (s) { return hub.fmtMoney(s.price); } }
-                    ],
-                    actions: function (row) {
-                        return [
-                            { label: 'Nhập', class: 'secondary', href: ctx + '/console?module=inventory&action=create&branchId=' + (branchId || '') + '&productId=' + row.productId },
-                            { label: 'Điều chỉnh', class: 'danger', href: ctx + '/console?module=inventory&action=edit&branchId=' + (branchId || '') + '&productId=' + row.productId }
-                        ];
-                    }
-                });
-            }).catch(notifyError);
-        },
-        create: function () {
-            Promise.all([
-                hub.api('/branch').catch(function () { return []; }),
-                hub.api('/concession/products').catch(function () { return []; })
-            ]).then(function (results) {
-                var branches = results[0] || [];
-                var products = results[1] || [];
-                var params = new URLSearchParams(window.location.search);
-                var preselectedBranch = params.get('branchId');
-                var preselectedProduct = params.get('productId');
-                form.renderFormPage({
-                    breadcrumb: ['Vận hành', { label: 'Kho hàng', href: ctx + '/console?module=inventory' }, 'Nhập kho'],
-                    title: 'Nhập kho',
-                    subtitle: 'Thêm số lượng tồn cho sản phẩm tại chi nhánh.',
-                    submitLabel: 'Nhập kho',
-                    sections: [{
-                        title: 'Thông tin nhập kho',
-                        fields: [
-                            { name: 'branchId', label: 'Chi nhánh', type: 'select', required: true,
-                              value: preselectedBranch,
-                              options: (branches || []).map(function (b) { return { value: String(b.id), label: b.name }; }) },
-                            { name: 'productId', label: 'Sản phẩm', type: 'select', required: true,
-                              value: preselectedProduct,
-                              options: (products || []).map(function (p) { return { value: String(p.id), label: p.name }; }) },
-                            { name: 'quantity', label: 'Số lượng nhập', type: 'number', required: true, min: 1 },
-                            { name: 'reason', label: 'Lý do / Ghi chú', required: true, value: 'Nhập kho',
-                              hint: 'Bắt buộc để theo dõi lịch sử tồn kho.' }
-                        ]
-                    }],
-                    onSubmit: function (data) {
-                        hub.api('/inventory', { method: 'POST', body: data })
-                            .then(function () { router.go('inventory'); })
-                            .catch(notifyError);
-                    },
-                    onCancel: function () { router.go('inventory'); }
-                });
-            }).catch(notifyError);
-        },
-        edit: function (id) {
-            hub.api('/concession/products').then(function (products) {
-                var params = new URLSearchParams(window.location.search);
-                var branchId = params.get('branchId');
-                var productId = params.get('productId') || id;
-                var product = (products || []).find(function (p) { return String(p.id) === String(productId); });
-                form.renderFormPage({
-                    breadcrumb: ['Vận hành', { label: 'Kho hàng', href: ctx + '/console?module=inventory' }, 'Điều chỉnh'],
-                    title: 'Điều chỉnh tồn kho',
-                    subtitle: product ? product.name : 'Điều chỉnh chênh lệch tồn kho',
-                    submitLabel: 'Lưu điều chỉnh',
-                    sections: [{
-                        title: 'Thông tin điều chỉnh',
-                        description: 'Số dương = thêm, số âm = giảm. Lý do bắt buộc.',
-                        fields: [
-                            { name: 'branchId', label: 'Chi nhánh', type: 'hidden', required: true, value: branchId },
-                            { name: 'productId', label: 'Sản phẩm', type: 'hidden', required: true, value: productId },
-                            { name: 'quantity', label: 'Chênh lệch (+ hoặc -)', type: 'number', required: true, step: 1 },
-                            { name: 'reason', label: 'Lý do', required: true, value: 'Kiểm kê',
-                              hint: 'Tối thiểu 5 ký tự để audit trail.' }
-                        ]
-                    }],
-                    onSubmit: function (data) {
-                        data.action = 'adjust';
-                        hub.api('/inventory', { method: 'POST', body: data })
-                            .then(function () { router.go('inventory'); })
-                            .catch(notifyError);
-                    },
-                    onCancel: function () { router.go('inventory'); }
-                });
-            }).catch(notifyError);
-        }
-    });
-
+    
     // ================================================================
     //  SHIFT (Staff + Manager)
     // ================================================================
