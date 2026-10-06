@@ -1153,6 +1153,590 @@
     });
 
     // ================================================================
+    //  SCREEN (Admin + Manager)
+    // ================================================================
+    /**
+     * Render chọn ghế VIP với 3 cơ chế:
+     *  - Click ghế = toggle VIP/Standard (nhanh cho 1 ghế).
+     *  - Click nhãn hàng A/B/C... = set cả hàng thành VIP.
+     *  - Kéo chuột (drag) trên nhiều ghế = chọn cả vùng.
+     *    + Nếu bắt đầu kéo trên ghế thường → cả vùng thành VIP.
+     *    + Nếu bắt đầu kéo trên ghế VIP → cả vùng thành ghế thường.
+     *    + Giữ phím Alt khi kéo = toggle ngược lại từng ghế trong vùng.
+     *
+     * Trải nghiệm giống các tool thiết kế phòng chiếu: chọn vùng nhanh,
+     * không cần click từng ghế một.
+     */
+    function renderSeatPicker(container, vipInputOrRows, rowCount, colCount) {
+        // Alias helper `el`: renderSeatPicker ban đầu được viết phụ thuộc vào helper el(),
+        // nhưng `el` không có sẵn trong scope — gây ReferenceError khi re-render từ rowCount/colCount.
+        // Lấy từ CinemaHub (đã được đăng ký trong app.js) hoặc fallback về createElement.bind(document).
+        var el = (hub && hub.el) || (function () {
+            return function (tag, attrs, children) {
+                var node = document.createElement(tag);
+                if (attrs) {
+                    Object.keys(attrs).forEach(function (k) {
+                        if (k === 'class') node.className = attrs[k];
+                        else if (k === 'text') node.textContent = attrs[k];
+                        else node.setAttribute(k, attrs[k]);
+                    });
+                }
+                if (children) {
+                    (Array.isArray(children) ? children : [children]).forEach(function (c) {
+                        if (c == null) return;
+                        node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+                    });
+                }
+                return node;
+            };
+        })();
+
+        container.innerHTML = '';
+
+        // Hỗ trợ 2 kiểu tham số để không phá code cũ:
+        //  - Nếu caller truyền <input type=hidden> thì bind trực tiếp vào đó.
+        //  - Nếu truyền chuỗi vipRows thì tự tạo hidden input mới (chỉ dùng cho
+        //    smoke test / debug).
+        var hiddenVip;
+        var initialVipRows;
+        if (vipInputOrRows && vipInputOrRows.tagName === 'INPUT') {
+            hiddenVip = vipInputOrRows;
+            initialVipRows = hiddenVip.value || '';
+        } else {
+            initialVipRows = vipInputOrRows || '';
+            hiddenVip = document.createElement('input');
+            hiddenVip.type = 'hidden';
+            hiddenVip.name = 'vipRows';
+            hiddenVip.value = initialVipRows;
+            container.appendChild(hiddenVip);
+        }
+
+        var vipRowSet = new Set();
+        if (initialVipRows) {
+            initialVipRows.split(/[,;\s]+/).forEach(function (s) {
+                var t = s.trim().toUpperCase();
+                if (t) vipRowSet.add(t);
+            });
+        }
+
+        // Toolbar với legend phím tắt
+        var toolbar = el('div', { class: 'seat-picker-toolbar' });
+        toolbar.appendChild(el('span', { class: 'seat-picker-label' }, ['Sơ đồ ghế']));
+        toolbar.appendChild(el('span', { class: 'seat-picker-hint' },
+            ['Click ghế: toggle. Kéo chuột: chọn vùng. Click nhãn hàng: chọn cả hàng.']));
+        container.appendChild(toolbar);
+
+        // Mode indicator (Vip/Standard) — phản ánh mode hiện tại khi đang kéo
+        var modeBadge = el('span', { class: 'seat-picker-mode-badge', 'aria-live': 'polite' });
+
+        var scrollWrap = el('div', { class: 'seat-picker-scroll' });
+        var screen = el('div', { class: 'seat-picker-screen' });
+        screen.appendChild(el('div', { class: 'seat-picker-curtain' }, ['— Màn hình —']));
+        var grid = el('div', { class: 'seat-grid' });
+
+        // --------- Trạng thái cho drag-select ---------
+        // dragging: đang kéo hay không
+        // dragMode: 'add-vip' (set VIP) hoặc 'remove-vip' (set thường) — dựa trên
+        //   trạng thái GỐC (chưa apply) của ghế đầu tiên user pointer-down vào.
+        // originalStates: Map<seatBtn, boolean> lưu VIP/GỐC của từng ghế đã chạm
+        //   trong lần kéo — để click đơn (size=1) biết phải toggle về phía ngược lại.
+        var dragging = false;
+        var dragMode = null;
+        var originalStates = new Map(); // btn -> bool (wasVip trước khi apply)
+        var dragHandled = new Set();
+
+        var rowCells = {};
+        for (var i = 0; i < rowCount; i++) {
+            var rowLabel = String.fromCharCode(65 + i);
+            var row = el('div', { class: 'seat-row' });
+            var rowLabelBtn = el('button', {
+                type: 'button',
+                class: 'seat-row-label',
+                title: 'Bấm để chọn cả hàng ' + rowLabel + ' là ghế VIP'
+            }, [rowLabel]);
+            rowLabelBtn.addEventListener('click', (function (capRow) {
+                return function () {
+                    var nodes = rowCells[capRow] || [];
+                    var anyNotVip = nodes.some(function (n) { return !n.classList.contains('is-vip'); });
+                    nodes.forEach(function (n) {
+                        if (anyNotVip) n.classList.add('is-vip');
+                        else n.classList.remove('is-vip');
+                    });
+                    updateSummary();
+                };
+            })(rowLabel));
+            row.appendChild(rowLabelBtn);
+
+            rowCells[rowLabel] = [];
+            for (var c = 1; c <= colCount; c++) {
+                var isVip = vipRowSet.has(rowLabel);
+                var seatBtn = el('button', {
+                    type: 'button',
+                    class: 'seat-cell' + (isVip ? ' is-vip' : ''),
+                    'data-row': rowLabel,
+                    'data-col': String(c),
+                    'aria-label': rowLabel + c + (isVip ? ' (VIP)' : '')
+                }, [String(c)]);
+
+                // ---- Drag-select với pointer events ----
+                // pointerdown: bắt đầu theo dõi, lưu trạng thái GỐC của ghế,
+                //   set mode dựa trên trạng thái gốc (click vào ghế VIP sẽ
+                //   đi theo hướng 'remove-vip' — kéo để bỏ chọn vùng VIP).
+                seatBtn.addEventListener('pointerdown', (function (btn) {
+                    return function (ev) {
+                        if (ev.button !== undefined && ev.button !== 0) return;
+                        dragging = true;
+                        // Lưu trạng thái GỐC trước khi apply.
+                        originalStates.set(btn, btn.classList.contains('is-vip'));
+                        dragMode = originalStates.get(btn) ? 'remove-vip' : 'add-vip';
+                        dragHandled = new Set();
+                        ev.preventDefault();
+                        try { btn.setPointerCapture(ev.pointerId); } catch (_) {}
+                        // KHÔNG apply ngay tại đây — đợi pointerenter/pointerup để
+                        //   biết đây là click đơn (toggle) hay kéo (set theo mode).
+                        updateSummary();
+                    };
+                })(seatBtn));
+
+                seatBtn.addEventListener('pointerenter', (function (btn) {
+                    return function (ev) {
+                        if (!dragging) return;
+                        if (!originalStates.has(btn)) {
+                            originalStates.set(btn, btn.classList.contains('is-vip'));
+                        }
+                        if (dragHandled.has(btn)) return;
+                        dragHandled.add(btn);
+                        applyDragMode(btn);
+                        updateSummary();
+                    };
+                })(seatBtn));
+
+                seatBtn.addEventListener('pointerup', (function (btn) {
+                    return function () {
+                        if (!dragging) return;
+                        // Click đơn (dragHandled chỉ có 1 phần tử, đúng btn) → toggle.
+                        // Kéo vùng (size > 1) → giữ nguyên mode đã apply.
+                        if (dragHandled.size <= 1 && originalStates.has(btn)) {
+                            var wasVip = originalStates.get(btn);
+                            if (wasVip) btn.classList.remove('is-vip');
+                            else btn.classList.add('is-vip');
+                            updateSummary();
+                        }
+                        endDrag();
+                    };
+                })(seatBtn));
+
+                // Khi chuột rời grid cũng kết thúc drag
+                seatBtn.addEventListener('pointercancel', function () { endDrag(); });
+
+                row.appendChild(seatBtn);
+                rowCells[rowLabel].push(seatBtn);
+            }
+            grid.appendChild(row);
+        }
+        screen.appendChild(grid);
+        scrollWrap.appendChild(screen);
+        container.appendChild(scrollWrap);
+
+        // Kết thúc kéo khi thả chuột ở bất cứ đâu (kể cả ngoài grid) — áp dụng
+        // toggle cho click đơn vào bất kỳ ghế nào (kể cả khi up ngoài grid thì
+        // đã có pointerup riêng trên ghế down xử lý rồi).
+        document.addEventListener('pointerup', endDrag);
+        document.addEventListener('pointercancel', endDrag);
+
+        function applyDragMode(btn) {
+            // Mode dựa trên trạng thái GỐC của ghế đó (đã lưu trong originalStates),
+            //   không phải trạng thái hiện tại — để kéo qua vùng đã có sẵn VIP/standard
+            //   vẫn cho ra kết quả đúng theo ý user (kéo từ 1 ghế chưa VIP sang
+            //   1 vùng đã VIP thì cả vùng thành VIP).
+            var wasVip = originalStates.get(btn);
+            if (wasVip === undefined) {
+                wasVip = btn.classList.contains('is-vip');
+                originalStates.set(btn, wasVip);
+            }
+            if (wasVip) btn.classList.remove('is-vip');
+            else btn.classList.add('is-vip');
+        }
+
+        function endDrag() {
+            if (!dragging) return;
+            dragging = false;
+            dragMode = null;
+            dragHandled = new Set();
+            originalStates = new Map();
+        }
+
+        // Legend
+        var legend = el('div', { class: 'seat-picker-legend' });
+        legend.appendChild(el('div', { class: 'legend-item' }, [
+            el('span', { class: 'legend-swatch seat-cell' }, []),
+            el('span', {}, ['Ghế thường'])
+        ]));
+        legend.appendChild(el('div', { class: 'legend-item' }, [
+            el('span', { class: 'legend-swatch seat-cell is-vip' }, []),
+            el('span', {}, ['Ghế VIP (giá cao hơn)'])
+        ]));
+        legend.appendChild(modeBadge);
+        container.appendChild(legend);
+
+        // Summary bar
+        var summary = el('div', { class: 'seat-picker-summary' });
+        var summaryText = el('span', { class: 'seat-picker-text' }, []);
+        var resetAllBtn = el('button', {
+            type: 'button',
+            class: 'ws-btn secondary small'
+        }, ['Bỏ chọn tất cả VIP']);
+        resetAllBtn.addEventListener('click', function () {
+            container.querySelectorAll('.seat-cell.is-vip').forEach(function (b) {
+                b.classList.remove('is-vip');
+            });
+            updateSummary();
+        });
+        summary.appendChild(summaryText);
+        summary.appendChild(resetAllBtn);
+        container.appendChild(summary);
+
+        function updateSummary() {
+            var vipButtons = container.querySelectorAll('.seat-cell.is-vip');
+            var uniqueRows = new Set();
+            vipButtons.forEach(function (b) { uniqueRows.add(b.getAttribute('data-row')); });
+            var rows = Array.from(uniqueRows).sort();
+            hiddenVip.value = rows.join(',');
+            summaryText.textContent = vipButtons.length === 0
+                ? 'Chưa chọn ghế VIP nào.'
+                : 'Đã chọn ' + vipButtons.length + ' ghế VIP thuộc hàng: ' + (rows.join(', ') || '—');
+            // Cập nhật mode badge cho thấy action sẽ xảy ra khi click/kéo
+            if (dragging) {
+                modeBadge.textContent = dragMode === 'add-vip'
+                    ? 'Đang chọn: thành VIP'
+                    : 'Đang chọn: thành ghế thường';
+                modeBadge.className = 'seat-picker-mode-badge is-active ' +
+                    (dragMode === 'add-vip' ? 'is-vip-mode' : 'is-standard-mode');
+            } else {
+                modeBadge.textContent = '';
+                modeBadge.className = 'seat-picker-mode-badge';
+            }
+        }
+        updateSummary();
+    }
+
+    function renderSeatLayoutPicker(container, hiddenLayout, rowCount, colCount, initialSeats) {
+        var el = (hub && hub.el) || function (tag, attrs, children) {
+            var node = document.createElement(tag);
+            Object.keys(attrs || {}).forEach(function (key) {
+                if (key === 'class') node.className = attrs[key];
+                else node.setAttribute(key, attrs[key]);
+            });
+            (Array.isArray(children) ? children : children ? [children] : []).forEach(function (child) {
+                node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+            });
+            return node;
+        };
+        container.replaceChildren();
+        var layout = new Map();
+        (initialSeats || []).forEach(function (seat) {
+            if ((!seat.status || seat.status === 'ACTIVE')
+                    && seat.rowLabel.charCodeAt(0) - 65 < rowCount
+                    && Number(seat.colNo) <= colCount) {
+                layout.set(seat.rowLabel + ':' + seat.colNo, seat.seatType);
+            }
+        });
+        var selectedTool = 'STANDARD';
+        var dragging = false;
+        var painted = new Set();
+        var grid = el('div', { class: 'seat-grid seat-layout-grid' });
+        var tools = el('div', { class: 'seat-layout-tools' });
+        var summary = el('span', { class: 'seat-picker-hint', 'aria-live': 'polite' });
+
+        function syncLayout() {
+            hiddenLayout.value = JSON.stringify(Array.from(layout.entries()).map(function (entry) {
+                var parts = entry[0].split(':');
+                return { rowLabel: parts[0], colNo: Number(parts[1]), seatType: entry[1] };
+            }));
+            var counts = { STANDARD: 0, VIP: 0, COUPLE: 0 };
+            layout.forEach(function (type) { counts[type] = (counts[type] || 0) + 1; });
+            summary.textContent = 'Tổng ' + layout.size + ' ghế · Thường ' + counts.STANDARD
+                + ' · VIP ' + counts.VIP + ' · Đôi ' + counts.COUPLE;
+        }
+
+        [
+            { type: 'STANDARD', label: 'Thêm ghế thường' },
+            { type: 'VIP', label: 'Thêm ghế VIP' },
+            { type: 'COUPLE', label: 'Thêm ghế đôi' },
+            { type: 'REMOVE', label: 'Xóa ghế' }
+        ].forEach(function (tool) {
+            var button = el('button', { type: 'button', class: 'ws-btn secondary small' }, [tool.label]);
+            button.setAttribute('aria-pressed', String(selectedTool === tool.type));
+            button.addEventListener('click', function () {
+                selectedTool = tool.type;
+                tools.querySelectorAll('button').forEach(function (item) {
+                    item.setAttribute('aria-pressed', String(item === button));
+                });
+            });
+            tools.appendChild(button);
+        });
+        container.appendChild(tools);
+        container.appendChild(el('p', { class: 'seat-picker-hint' },
+            ['Chọn loại ghế hoặc Xóa ghế, rồi bấm/kéo trên ô để thêm hay xóa nhiều ghế. Ô trống sẽ không xuất hiện khi khách đặt vé.']));
+
+        function paint(cell) {
+            var key = cell.getAttribute('data-row') + ':' + cell.getAttribute('data-col');
+            if (painted.has(key)) return;
+            painted.add(key);
+            if (selectedTool === 'REMOVE') layout.delete(key);
+            else layout.set(key, selectedTool);
+            var type = layout.get(key);
+            cell.classList.toggle('is-empty', !type);
+            cell.classList.toggle('is-vip', type === 'VIP');
+            cell.classList.toggle('is-couple', type === 'COUPLE');
+            cell.textContent = type ? cell.getAttribute('data-col') : '';
+            cell.setAttribute('aria-label', cell.getAttribute('data-row') + cell.getAttribute('data-col')
+                + (type ? ' ' + type : ' - không có ghế'));
+            syncLayout();
+        }
+
+        for (var r = 0; r < rowCount; r++) {
+            var rowLabel = String.fromCharCode(65 + r);
+            var row = el('div', { class: 'seat-row' });
+            row.appendChild(el('span', { class: 'seat-row-label seat-layout-row-label' }, [rowLabel]));
+            for (var c = 1; c <= colCount; c++) {
+                var key = rowLabel + ':' + c;
+                var type = layout.get(key);
+                var cell = el('button', {
+                    type: 'button',
+                    class: 'seat-cell seat-layout-cell' + (type ? '' : ' is-empty')
+                        + (type === 'VIP' ? ' is-vip' : '')
+                        + (type === 'COUPLE' ? ' is-couple' : ''),
+                    'data-row': rowLabel,
+                    'data-col': String(c),
+                    'aria-label': rowLabel + c + (type ? ' ' + type : ' - không có ghế')
+                }, [type ? String(c) : '']);
+                cell.addEventListener('pointerdown', function (event) {
+                    if (event.button !== undefined && event.button !== 0) return;
+                    dragging = true;
+                    painted = new Set();
+                    paint(event.currentTarget);
+                    document.addEventListener('pointerup', function endPaint() {
+                        dragging = false;
+                    }, { once: true });
+                    document.addEventListener('pointercancel', function endPaint() {
+                        dragging = false;
+                    }, { once: true });
+                    event.preventDefault();
+                });
+                cell.addEventListener('pointerenter', function (event) {
+                    if (dragging) paint(event.currentTarget);
+                });
+                cell.addEventListener('click', function (event) {
+                    if (event.detail === 0) {
+                        painted = new Set();
+                        paint(event.currentTarget);
+                    }
+                });
+                row.appendChild(cell);
+            }
+            grid.appendChild(row);
+        }
+        container.appendChild(grid);
+        container.appendChild(summary);
+        syncLayout();
+    }
+
+    function renderScreenForm(screen, branches, preselectedBranchId) {
+        var isEdit = !!screen;
+        var fields = [
+            isEdit ? null : { name: 'branchId', label: 'Chi nhánh', type: 'select', required: true, value: preselectedBranchId, options: (branches || []).map(function (b) { return { value: String(b.id), label: b.name }; }) },
+            { name: 'code', label: 'Mã phòng', required: true, value: screen && screen.code, placeholder: 'VD: R01' },
+            { name: 'name', label: 'Tên phòng', required: true, value: screen && screen.name, placeholder: 'Phòng chiếu 1' },
+            { name: 'rowCount', label: 'Số hàng', type: 'number', required: true, min: 1, max: 26, value: (screen && screen.rowCount) || 8 },
+            { name: 'colCount', label: 'Số cột', type: 'number', required: true, min: 1, max: 30, value: (screen && screen.colCount) || 12 }
+        ].filter(Boolean);
+
+        var initialRowCount = Number(((screen && screen.rowCount) || 8));
+        var initialColCount = Number(((screen && screen.colCount) || 12));
+
+        // Render form bằng renderFormPage, sau đó append seat picker theo row/col động.
+        form.renderFormPage({
+            breadcrumb: ['Quản lý', { label: 'Phòng chiếu', href: ctx + '/console?module=screen' }, isEdit ? 'Chỉnh sửa' : 'Tạo mới'],
+            title: isEdit ? 'Chỉnh sửa phòng chiếu' : 'Tạo phòng chiếu mới',
+            subtitle: isEdit ? screen.name : 'Thêm phòng chiếu cho chi nhánh.',
+            submitLabel: isEdit ? 'Lưu thay đổi' : 'Tạo phòng',
+            sections: [{
+                title: 'Thông tin phòng',
+                fields: fields
+            }],
+            // Bỏ phần "vipRows" cũ ra khỏi sections, ta nhúng vào renderFooter bên dưới.
+            renderFooter: function (formEl) {
+                // Section sơ đồ ghế VIP
+                var section = document.createElement('section');
+                section.className = 'ws-form-section';
+                var heading = document.createElement('h2');
+                heading.className = 'ws-form-section-title';
+                heading.textContent = 'Sơ đồ ghế';
+                section.appendChild(heading);
+                var desc = document.createElement('p');
+                desc.className = 'ws-form-section-desc';
+                desc.textContent = 'Cấu hình kích thước, sau đó thêm, xóa và phân loại ghế trực tiếp trên sơ đồ.';
+                section.appendChild(desc);
+
+                var seatHost = document.createElement('div');
+                seatHost.id = 'seat-picker-host';
+                seatHost.className = 'seat-picker-host';
+                section.appendChild(seatHost);
+
+                formEl.appendChild(section);
+
+                var hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.name = 'seatLayout';
+                formEl.appendChild(hidden);
+
+                var currentRows = initialRowCount;
+                var currentCols = initialColCount;
+                var initialSeats = (screen && screen.seats) || [];
+
+                function redrawSeatPicker() {
+                    var rowInput = formEl.querySelector('input[name="rowCount"]');
+                    var colInput = formEl.querySelector('input[name="colCount"]');
+                    if (!rowInput || !colInput) return;
+                    if (hidden.value) {
+                        try { initialSeats = JSON.parse(hidden.value); } catch (_) {
+                            throw new Error('Không đọc được sơ đồ ghế hiện tại.');
+                        }
+                    }
+                    currentRows = Math.max(1, Math.min(26, parseInt(rowInput.value, 10) || 1));
+                    currentCols = Math.max(1, Math.min(30, parseInt(colInput.value, 10) || 1));
+                    renderSeatLayoutPicker(seatHost, hidden, currentRows, currentCols, initialSeats);
+                }
+
+                setTimeout(redrawSeatPicker, 0);
+                var rowInput = formEl.querySelector('input[name="rowCount"]');
+                var colInput = formEl.querySelector('input[name="colCount"]');
+                if (rowInput) rowInput.addEventListener('change', redrawSeatPicker);
+                if (colInput) colInput.addEventListener('change', redrawSeatPicker);
+            },
+            onSubmit: function (data) {
+                var url = isEdit ? '/screen/' + screen.id : '/screen';
+                var method = isEdit ? 'PUT' : 'POST';
+                hub.api(url, { method: method, body: data })
+                    .then(function () {
+                        var branchId = isEdit ? screen.branchId : data.branchId;
+                        window.location.href = ctx + '/console?module=screen&branchId='
+                            + encodeURIComponent(branchId);
+                    })
+                    .catch(notifyError);
+            },
+            onCancel: function () { router.go('screen'); }
+        });
+    }
+
+    router.register('screen', {
+        list: function () {
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
+            hub.api(branchListApiPath(roleMeta)).then(function (branches) {
+                var params = new URLSearchParams(window.location.search);
+                var branchId = params.get('branchId')
+                    || (roleMeta === 'ADMIN' ? '' : (branches[0] && branches[0].id));
+                list.render({
+                    title: 'Phòng chiếu & sơ đồ ghế',
+                    subtitle: 'Quản lý phòng chiếu và sơ đồ ghế cho từng chi nhánh.',
+                    addUrl: function () {
+                        var selectedBranch = document.querySelector('#viewRoot select[name="branchId"]');
+                        var selectedBranchId = selectedBranch ? selectedBranch.value : '';
+                        return ctx + '/console?module=screen&action=create'
+                            + (selectedBranchId
+                                ? '&branchId=' + encodeURIComponent(selectedBranchId) : '');
+                    },
+                    addLabel: 'Tạo phòng chiếu',
+                    pageSize: 20,
+                    filters: [{
+                        name: 'branchId', label: 'Chi nhánh',
+                        initialValue: branchId ? String(branchId) : '',
+                        options: (branches || []).map(function (b) { return { value: String(b.id), label: b.name }; })
+                    }],
+                    fetcher: function (qs) {
+                        var selectedBranchId = qs.get('branchId');
+                        var url = selectedBranchId
+                            ? '/screen?branchId=' + encodeURIComponent(selectedBranchId)
+                            : '/screen';
+                        return hub.api(url).then(function (result) {
+                            var branchNames = new Map((branches || []).map(function (branch) {
+                                return [String(branch.id), branch.name];
+                            }));
+                            var screens = Array.isArray(result) ? result : [];
+                            screens.forEach(function (screen) {
+                                screen.branchName = branchNames.get(String(screen.branchId)) || '—';
+                            });
+                            return { items: screens, total: screens.length };
+                        });
+                    },
+                    emptyTitle: 'Chưa có phòng chiếu',
+                    emptyMessage: 'Chi nhánh này chưa có phòng chiếu nào.',
+                    columns: (roleMeta === 'ADMIN' ? [{ label: 'Chi nhánh', key: 'branchName' }] : []).concat([
+                        { label: 'Mã', key: 'code' },
+                        { label: 'Tên', key: 'name' },
+                        { label: 'Số hàng', key: 'rowCount' },
+                        { label: 'Số cột', key: 'colCount' },
+                        { label: 'Kích thước', render: function (s) { return s.rowCount + ' × ' + s.colCount; } },
+                        { label: 'Trạng thái', render: function (s) { return statusBadge(s.status); } }
+                    ]),
+                    actions: function (row) {
+                        var arr = [{ label: 'Sửa', class: 'secondary', href: ctx + '/console?module=screen&action=edit&id=' + row.id }];
+                        if (row.status === 'ACTIVE') {
+                            arr.push({ label: 'Ngưng', class: 'danger', onClick: function () {
+                                confirmAction('Ngưng hoạt động phòng chiếu?', function () {
+                                    hub.api('/screen/' + row.id, { method: 'PUT', body: { action: 'deactivate' } })
+                                        .then(function () {
+                                            hub.notify('Đã ngưng phòng chiếu.', 'ok');
+                                            router.go('screen');
+                                        })
+                                        .catch(notifyError);
+                                });
+                            }});
+                        }
+                        return arr;
+                    }
+                });
+            }).catch(notifyError);
+        },
+        create: function () {
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
+            hub.api(branchListApiPath(roleMeta)).then(function (branches) {
+                var params = new URLSearchParams(window.location.search);
+                var branchId = params.get('branchId') || (branches[0] && branches[0].id);
+                renderScreenForm(null, branches, branchId);
+            }).catch(notifyError);
+        },
+        edit: function (id) {
+            var branches = null;
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
+            hub.api(branchListApiPath(roleMeta))
+                .then(function (b) {
+                    branches = Array.isArray(b) ? b : [];
+                    if (!branches.length) throw new Error('Chưa có chi nhánh để tải phòng chiếu');
+                    return Promise.all(branches.map(function (branch) {
+                        return hub.api('/screen?branchId=' + encodeURIComponent(branch.id))
+                            .then(function (screens) {
+                                return Array.isArray(screens) ? screens : [];
+                            });
+                    }));
+                })
+                .then(function (screenLists) {
+                    var screens = [];
+                    screenLists.forEach(function (items) {
+                        screens = screens.concat(items);
+                    });
+                    var screen = screens.find(function (s) { return String(s.id) === String(id); });
+                    if (!screen) throw new Error('Không tìm thấy phòng chiếu');
+                    return hub.api('/screen/' + screen.id + '/seats').then(function (seats) {
+                        screen.seats = Array.isArray(seats) ? seats : [];
+                        renderScreenForm(screen, branches, screen.branchId);
+                    });
+                })
+                .catch(notifyError);
+        }
+    });
+    // ================================================================
     //  PROFILE (Customer account)
     // ================================================================
     router.register('profile', {
