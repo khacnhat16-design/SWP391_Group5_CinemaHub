@@ -1,0 +1,244 @@
+/* Auth pages (login / register / forgot-password) — shared styles
+   extracted from cinema.css so all three pages look consistent
+   and there is no inline-JSP duplicate CSS. */
+
+.auth-page {
+    background: var(--bg, #0e1116);
+    color: var(--text, #f3f4f6);
+    min-height: 100vh;
+    margin: 0;
+}
+
+.auth-page .nav-wrapper {
+    background: rgba(14, 17, 22, 0.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line, #2a2f37);
+}
+
+.auth-page .nav.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+}
+
+.auth-page .nav nav a {
+    color: var(--text, #f3f4f6);
+    text-decoration: none;
+    margin-left: 14px;
+    font-size: 0.92rem;
+}
+
+.auth-page .nav nav a:hover {
+    color: var(--red, #d9363e);
+}
+
+.auth-main {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+}
+
+.auth-card {
+    background: var(--panel, #161a21);
+    border: 1px solid var(--line, #2a2f37);
+    border-radius: 14px;
+    padding: 36px 30px;
+    max-width: 440px;
+    width: 100%;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+
+.auth-card h1 {
+    margin: 0 0 8px;
+    color: var(--red, #d9363e);
+    font-size: 1.55rem;
+}
+
+.auth-card .muted {
+    color: var(--muted, #9aa3b2);
+    margin: 0 0 18px;
+    font-size: 0.92rem;
+}
+
+.auth-card label {
+    display: block;
+    margin: 14px 0 6px;
+    color: var(--text, #f3f4f6);
+    font-size: 0.9rem;
+}
+
+.auth-card .required-mark {
+    color: var(--err, #ff6e78);
+    margin-left: 4px;
+}
+
+.auth-card input[type="email"],
+.auth-card input[type="password"],
+.auth-card input[type="text"],
+.auth-card input[type="number"] {
+    width: 100%;
+    padding: 10px 12px;
+    margin-top: 4px;
+    background: var(--bg, #0e1116);
+    border: 1px solid var(--line, #2a2f37);
+    border-radius: 8px;
+    color: var(--text, #f3f4f6);
+    font-size: 0.95rem;
+    box-sizing: border-box;
+}
+
+.auth-card input:focus {
+    outline: none;
+    border-color: var(--red, #d9363e);
+    box-shadow: 0 0 0 2px rgba(217, 54, 62, 0.2);
+}
+
+.auth-card .btn.full,
+.auth-card button.full {
+    width: 100%;
+    margin-top: 22px;
+    padding: 11px;
+    background: var(--red, #d9363e);
+    color: #fff;
+    border: 0;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.auth-card .btn.full:hover,
+.auth-card button.full:hover {
+    background: #c02830;
+}
+
+.auth-card .btn.full:disabled,
+.auth-card button.full:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.auth-card .flash {
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    font-size: 0.9rem;
+}
+
+.auth-card .flash-ok {
+    background: rgba(121, 200, 152, 0.18);
+    border: 1px solid rgba(121, 200, 152, 0.35);
+    color: var(--ok, #79c898);
+}
+
+.auth-card .flash-err {
+    background: rgba(255, 100, 110, 0.16);
+    border: 1px solid rgba(255, 110, 120, 0.35);
+    color: var(--err, #ff6e78);
+}
+
+.auth-card .otp-row {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin: 16px 0;
+}
+
+.auth-card .otp-row input {
+    width: 44px;
+    height: 52px;
+    text-align: center;
+    font-size: 1.4rem;
+    font-weight: 700;
+    font-family: ui-monospace, "Cascadia Code", monospace;
+    padding: 0;
+}
+
+.auth-card .resend {
+    margin-top: 16px;
+    text-align: center;
+    font-size: 0.88rem;
+    color: var(--muted, #9aa3b2);
+}
+
+.auth-card .resend a {
+    color: var(--red, #d9363e);
+    text-decoration: none;
+}
+
+.auth-card .resend a.disabled {
+    color: var(--muted, #9aa3b2);
+    pointer-events: none;
+}
+
+.auth-card .demo-hint {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line, #2a2f37);
+    font-size: 0.85rem;
+    color: var(--muted, #9aa3b2);
+    text-align: center;
+}
+
+.auth-card .demo-hint a {
+    color: var(--red, #d9363e);
+    text-decoration: none;
+}
+
+.auth-card .demo-hint a:hover {
+    text-decoration: underline;
+}
+
+.auth-card .password-strength {
+    margin-top: 4px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line, #2a2f37);
+    overflow: hidden;
+}
+
+.auth-card .password-strength > div {
+    height: 100%;
+    width: 0;
+    transition: width 0.2s, background 0.2s;
+}
+
+.auth-card .password-strength.weak > div { width: 33%; background: var(--err, #ff6e78); }
+.auth-card .password-strength.medium > div { width: 66%; background: var(--warn, #ce8b29); }
+.auth-card .password-strength.strong > div { width: 100%; background: var(--ok, #79c898); }
+
+.auth-card .toggle-pw {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: 0;
+    color: var(--muted, #9aa3b2);
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.auth-card .input-wrap {
+    position: relative;
+}
+
+.forgot-card {
+    max-width: 480px;
+}
+
+@media (max-width: 480px) {
+    .auth-card {
+        padding: 24px 18px;
+    }
+    .auth-card .otp-row input {
+        width: 38px;
+        height: 46px;
+        font-size: 1.2rem;
+    }
+}
