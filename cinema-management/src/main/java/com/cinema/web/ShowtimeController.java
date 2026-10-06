@@ -47,6 +47,11 @@ public class ShowtimeController extends HttpServlet {
         this.pricingService = new PricingService(new PriceRuleDAO(), new ShowtimeDAO(),
                 new com.cinema.pricing.HolidayDAO(),
                 new com.cinema.pricing.PricingConfigDAO());
+        this.showtimeService.setAllocationHook(
+                new com.cinema.showtime.ShowtimeAllocationService(
+                        new com.cinema.showtime.ShowtimeAllocationDAO(),
+                        new com.cinema.notification.NotificationService(
+                                new com.cinema.notification.NotificationDAO())));
     }
 
     @Override
