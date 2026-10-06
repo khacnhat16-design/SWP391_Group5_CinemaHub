@@ -1847,7 +1847,7 @@
         }
     });
 
-    // ================================================================
+     // ================================================================
     //  NOTIFICATION
     // ================================================================
     router.register('notification', {
@@ -1883,34 +1883,85 @@
                     var list = (data && data.notifications) || [];
                     if (!list.length) {
                         tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
-                            hub.el('h3', {}, ['Không có thông báo']),
-                            hub.el('p', {}, ['Bạn sẽ nhận thông báo khi có hoạt động mới.'])
+                            hub.el('h3', {}, ['Không có thông báo'])
                         ]));
                         return;
                     }
-                    var table = hub.el('table', { class: 'ws-table' });
-                    table.innerHTML = '<thead><tr><th>Nội dung</th><th>Thời điểm</th><th>Trạng thái</th><th></th></tr></thead>';
-                    var tbody = hub.el('tbody');
-                    list.forEach(function (n) {
-                        var tr = hub.el('tr');
-                        tr.appendChild(hub.el('td', {}, [n.body || n.title || '—']));
-                        tr.appendChild(hub.el('td', {}, [n.createdAt ? hub.fmtDateTime(n.createdAt) : '—']));
-                        tr.appendChild(hub.el('td', {}, [statusBadge(n.read ? 'USED' : 'PENDING')]));
-                        var actions = hub.el('td', { class: 'row-actions' });
-                        if (!n.read) {
-                            var btn = hub.el('button', { class: 'ws-btn ws-btn-sm secondary', type: 'button' }, ['Đã đọc']);
-                            btn.addEventListener('click', function () {
-                                hub.api('/notification/' + n.id + '/read', { method: 'POST' })
-                                    .then(load)
-                                    .catch(notifyError);
-                            });
-                            actions.appendChild(btn);
-                        }
-                        tr.appendChild(actions);
-                        tbody.appendChild(tr);
+                    var hasLegacyAllocationText = list.some(function (n) {
+                        return /^SHOWTIME_ALLOCATION_/.test(n.type || '')
+                            && /(?:movie|chi nhánh)\s+#\d+/i.test(n.body || '');
                     });
-                    table.appendChild(tbody);
-                    tableWrap.replaceChildren(table);
+                    var references = hasLegacyAllocationText
+                        ? Promise.all([hub.api('/movie'), hub.api('/branch')]).then(function (results) {
+                            var movies = {};
+                            var branches = {};
+                            (results[0] || []).forEach(function (movie) {
+                                movies[String(movie.id)] = movie.title;
+                            });
+                            (results[1] || []).forEach(function (branch) {
+                                branches[String(branch.id)] = branch.name;
+                            });
+                            return { movies: movies, branches: branches };
+                        })
+                        : Promise.resolve({ movies: {}, branches: {} });
+                    return references.then(function (names) {
+                        var table = hub.el('table', { class: 'ws-table' });
+                        table.innerHTML = '<thead><tr><th>Nội dung</th><th>Thời điểm</th><th>Trạng thái</th><th></th></tr></thead>';
+                        var tbody = hub.el('tbody');
+                        list.forEach(function (n) {
+                            var tr = hub.el('tr');
+                            var action = hub.showtimeScheduleReminderAction(n);
+                            var body = action ? action.body : (n.body || n.title || '—');
+                            body = body.replace(/\s*·\s*\/console\?[^\s]*\s*$/, '');
+                            if (/^SHOWTIME_ALLOCATION_/.test(n.type || '')) {
+                                body = body.replace(/movie\s+#(\d+)/gi, function (match, id) {
+                                    return names.movies[id] ? 'phim ' + names.movies[id] : match;
+                                });
+                                body = body.replace(/chi nhánh\s+#(\d+)/gi, function (match, id) {
+                                    if (!names.branches[id]) return match;
+                                    var label = 'chi nhánh ' + names.branches[id];
+                                    return match.charAt(0) === match.charAt(0).toUpperCase()
+                                        ? 'Chi nhánh ' + names.branches[id] : label;
+                                });
+                                body = body.replace(
+                                    'Vui lòng tạo Time Sheet và Room Seat tương ứng.',
+                                    'Vui lòng tạo lịch chiếu và phòng chiếu tương ứng.');
+                            }
+                            var contentCell = hub.el('td');
+                            if (action) {
+                                contentCell.appendChild(hub.el('span', {
+                                    class: 'notification-severity '
+                                        + (action.urgent ? 'urgent' : 'normal')
+                                }, [action.urgent ? 'Khẩn cấp' : 'Cần xếp lịch']));
+                            }
+                            contentCell.appendChild(document.createTextNode(body));
+                            tr.appendChild(contentCell);
+                            tr.appendChild(hub.el('td', {}, [
+                                n.createdAt ? hub.fmtNotificationDateTime(n.createdAt) : '—'
+                            ]));
+                            tr.appendChild(hub.el('td', {}, [statusBadge(n.read ? 'USED' : 'PENDING')]));
+                            var actions = hub.el('td', { class: 'row-actions' });
+                            if (action) {
+                                actions.appendChild(hub.el('a', {
+                                    class: 'ws-btn ws-btn-sm primary',
+                                    href: action.href
+                                }, ['Xếp lịch ngay']));
+                            }
+                            if (!n.read) {
+                                var btn = hub.el('button', { class: 'ws-btn ws-btn-sm secondary', type: 'button' }, ['Đã đọc']);
+                                btn.addEventListener('click', function () {
+                                    hub.api('/notification/' + n.id + '/read', { method: 'POST' })
+                                        .then(load)
+                                        .catch(notifyError);
+                            });
+                                actions.appendChild(btn);
+                            }
+                            tr.appendChild(actions);
+                            tbody.appendChild(tr);
+                        });
+                        table.appendChild(tbody);
+                        tableWrap.replaceChildren(table);
+                    });
                 }).catch(notifyError);
             }
             markAllBtn.addEventListener('click', function () {
