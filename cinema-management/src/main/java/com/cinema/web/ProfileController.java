@@ -22,9 +22,13 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /** Customer profile API used by /console profile workspace. */
 public final class ProfileController extends HttpServlet {
+    private static final Logger logger = Logger.getLogger(ProfileController.class.getName());
+
     private UserDAO userDao;
     private CustomerProfileDAO profileDao;
     private AuthService authService;
@@ -71,46 +75,23 @@ public final class ProfileController extends HttpServlet {
         Map<String, Object> membership = new LinkedHashMap<>();
         Map<String, Object> walletData = new LinkedHashMap<>();
 
-        try {
-            User user = userDao.findById(userId).orElse(null);
-            if (user != null) {
-                account.put("id", user.id());
-                account.put("email", user.email());
-                account.put("phone", user.phone());
-                account.put("fullName", user.fullName());
-                account.put("role", user.role() == null ? "CUSTOMER" : user.role().name());
-                account.put("status", user.status());
-            }
-        } catch (Exception ignored) {
-            // Profile endpoint là best-effort: lỗi user lookup không nên kéo cả
-            // response 500 — trả account rỗng để frontend vẫn render được UI.
-        }
-        if (account.isEmpty()) {
-            account.put("id", userId);
-            account.put("email", "");
-            account.put("phone", "");
-            account.put("fullName", "Customer");
-            account.put("role", "CUSTOMER");
-            account.put("status", "ACTIVE");
-        }
+        User user = userDao.findById(userId)
+                .orElseThrow(() -> new ServiceException.NotFound("Tài khoản không tồn tại"));
+        account.put("id", user.id());
+        account.put("email", user.email());
+        account.put("phone", user.phone());
+        account.put("fullName", user.fullName());
+        account.put("role", user.role() == null ? "CUSTOMER" : user.role().name());
+        account.put("status", user.status());
 
-        try {
-            CustomerProfile profile = profileDao.findByUserId(userId).orElse(null);
-            membership.put("tier", profile == null ? "STANDARD" : profile.tier());
-            membership.put("points", profile == null ? 0 : profile.points());
-        } catch (Exception ignored) {
-            membership.put("tier", "STANDARD");
-            membership.put("points", 0);
-        }
+        CustomerProfile profile = profileDao.findByUserId(userId)
+                .orElseThrow(() -> new ServiceException.NotFound("Hồ sơ khách hàng không tồn tại"));
+        membership.put("tier", profile.tier());
+        membership.put("points", profile.points());
 
-        try {
-            Wallet wallet = walletService.getWallet(userId);
-            walletData.put("balance", wallet == null ? 0 : wallet.balance());
-            walletData.put("version", wallet == null ? 0 : wallet.version());
-        } catch (Exception ignored) {
-            walletData.put("balance", 0);
-            walletData.put("version", 0);
-        }
+        Wallet wallet = walletService.getWallet(userId);
+        walletData.put("balance", wallet.balance());
+        walletData.put("version", wallet.version());
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("user", account);
@@ -152,6 +133,7 @@ public final class ProfileController extends HttpServlet {
         if (e instanceof ServiceException service) {
             sendError(response, service.httpStatus(), service.code(), service.getMessage());
         } else {
+            logger.log(Level.SEVERE, "Không thể tải hồ sơ khách hàng", e);
             sendError(response, 500, "INTERNAL_ERROR", "Loi he thong");
         }
     }

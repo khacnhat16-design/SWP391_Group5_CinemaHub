@@ -52,6 +52,7 @@ public final class BookingEntryServlet extends HttpServlet {
             <meta name="ctx" content="__CTX__">
             <meta name="user-role" content="CUSTOMER">
             <link rel="stylesheet" href="__CTX__/assets/css/cinema.css?v=20261003-booking-showtime-cards-1">
+            <link rel="stylesheet" href="__CTX__/assets/css/dashboard.css?v=20261006-payment-result-1">
             <script src="__CTX__/assets/js/app.js?v=20261003-notification-time-2"></script>
             <title>Đặt vé - CinemaHub</title></head><body>
             <header class="nav-wrapper"><div class="nav container">
@@ -65,7 +66,7 @@ public final class BookingEntryServlet extends HttpServlet {
             <main class="container booking-page">
               <div class="page-heading"><div><span class="eyebrow">CINEMAHUB BOOKING</span>
               <h1>Chọn suất chiếu và ghế</h1>
-              <p class="muted">Chọn lịch chiếu, giữ ghế trong 10 phút và thanh toán bằng ví CinemaHub.</p></div></div>
+              <p class="muted">Chọn lịch chiếu, giữ ghế trong 10 phút và thanh toán an toàn.</p></div></div>
               <div id="message"></div>
               <div class="booking-layout">
                 <section class="panel"><h2>Suất chiếu đang mở bán</h2>
@@ -87,11 +88,11 @@ public final class BookingEntryServlet extends HttpServlet {
                     <p class="tiny">Ghế được giữ trong 10 phút. Chọn phương thức thanh toán để tiếp tục.</p>
                     <div class="payment-methods" role="radiogroup" aria-label="Phương thức thanh toán">
                       <label class="payment-method selected"><input type="radio" name="paymentMethod" value="WALLET" checked>
-                        <span><strong>Ví CinemaHub</strong><small>Thanh toán ngay bằng số dư ví</small></span></label>
+                        <span><strong>Ví CinemaHub</strong><small>Thanh toán bằng số dư ví. Tiền hoàn vé đủ điều kiện được cộng lại vào ví.</small></span></label>
                       <label class="payment-method"><input type="radio" name="paymentMethod" value="VNPAY">
                         <span><strong>VNPay Sandbox</strong><small>Thanh toán trực tiếp qua cổng thử nghiệm VNPay</small></span></label>
                     </div>
-                    <button id="payButton" class="btn full" type="button">Thanh toán bằng ví</button>
+                    <button id="payButton" class="btn full" type="button">Thanh toán bằng Ví CinemaHub</button>
                   </div>
                   <div class="wallet-quick panel-light">
                     <div class="panel-title"><h3>Ví CinemaHub</h3><a href="__CTX__/console?module=wallet">Quản lý ví</a></div>
@@ -102,7 +103,6 @@ public final class BookingEntryServlet extends HttpServlet {
                     </div>
                     <div id="walletStatus" class="tiny" role="status"></div>
                   </div>
-                  <div id="successTicket" class="ticket-success" hidden></div>
                 </aside>
               </div>
             </main>
@@ -154,8 +154,9 @@ public final class BookingEntryServlet extends HttpServlet {
                 return selected ? selected.value : 'WALLET';
               }
               function updatePaymentButton() {
-                payButton.textContent = selectedPaymentMethod() === 'VNPAY'
-                  ? 'Thanh toán qua VNPay Sandbox' : 'Thanh toán bằng ví';
+                payButton.textContent = selectedPaymentMethod() === 'WALLET'
+                  ? 'Thanh toán bằng Ví CinemaHub'
+                  : 'Thanh toán qua VNPay Sandbox';
                 document.querySelectorAll('.payment-method').forEach(item => {
                   const radio = item.querySelector('input');
                   item.classList.toggle('selected', radio && radio.checked);
@@ -166,12 +167,54 @@ public final class BookingEntryServlet extends HttpServlet {
                   const data = await api('/wallet');
                   walletBalance.textContent = 'Số dư hiện tại: '
                     + money(data && data.wallet ? data.wallet.balance : 0);
+                  walletStatus.textContent = '';
                 } catch (error) {
                   walletBalance.textContent = 'Không tải được số dư ví.';
+                  walletStatus.textContent = error.message || 'Vui lòng thử tải lại trang.';
                 }
               }
               function money(value) {
                 return Number(value || 0).toLocaleString('vi-VN') + 'đ';
+              }
+              function showPaymentSuccess(ticketCode) {
+                const modal = document.createElement('div');
+                modal.className = 'modal';
+                modal.innerHTML = `
+                  <div class="modal-backdrop"></div>
+                  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="paymentSuccessTitle">
+                    <div class="modal-head">
+                      <h2 id="paymentSuccessTitle">Thanh toán thành công</h2>
+                      <button type="button" class="btn secondary modal-x" aria-label="Đóng">×</button>
+                    </div>
+                    <div class="modal-body ticket-result-modal">
+                      <div class="payment-result-icon ok">OK</div>
+                      <h3>Vé của bạn đã sẵn sàng</h3>
+                      <p class="muted">Đưa mã barcode này cho nhân viên tại rạp để vào suất chiếu.</p>
+                      <strong class="ticket-result-code"></strong>
+                      <canvas class="ticket-barcode" width="240" height="82"></canvas>
+                    </div>
+                    <div class="modal-foot">
+                      <a class="btn secondary" href="${ctx}/console?module=booking">Xem vé của tôi</a>
+                      <button type="button" class="btn" data-close-payment>Đóng</button>
+                    </div>
+                  </div>`;
+                document.body.appendChild(modal);
+                modal.querySelector('.ticket-result-code').textContent = ticketCode;
+                if (window.CinemaHub && window.CinemaHub.renderBarcode) {
+                  window.CinemaHub.renderBarcode(modal.querySelector('canvas'), ticketCode);
+                }
+                const dismiss = function () {
+                  modal.remove();
+                  const clean = new URL(location.href);
+                  clean.searchParams.delete('payment');
+                  clean.searchParams.delete('ticketCode');
+                  clean.searchParams.delete('reason');
+                  window.history.replaceState(null, '', clean.pathname + clean.search);
+                  window.location.reload();
+                };
+                modal.querySelector('.modal-backdrop').addEventListener('click', dismiss);
+                modal.querySelector('.modal-x').addEventListener('click', dismiss);
+                modal.querySelector('[data-close-payment]').addEventListener('click', dismiss);
               }
               function holdOwnerId(seat) {
                 return seat.holdUserId ?? seat.hold_user_id ?? seat.userId ?? seat.user_id;
@@ -256,16 +299,8 @@ public final class BookingEntryServlet extends HttpServlet {
                     node('div', { class: 'summary-line' }, currentShow.movieTitle || 'Suất chiếu'),
                     node('div', { class: 'summary-line' }, 'Đang chọn: ' + seats.length + ' ghế'),
                     node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seat => seat.rowLabel + seat.colNo).join(', ')),
-                    node('div', { class: 'summary-line' }, 'Giá vé trước ưu đãi: ' + money(order.baseTotal))
+                    node('div', { class: 'summary-line' }, 'Giá vé: ' + money(order.baseTotal))
                   ];
-                  if (order.tierDiscount > 0) {
-                    lines.push(node('div', { class: 'summary-line' },
-                      'Ưu đãi hạng thành viên: -' + money(order.tierDiscount)));
-                  }
-                  if (order.voucherDiscount > 0) {
-                    lines.push(node('div', { class: 'summary-line' },
-                      'Ưu đãi mã voucher: -' + money(order.voucherDiscount)));
-                  }
                   lines.push(node('div', { class: 'summary-line total' },
                     'Cần thanh toán: ' + money(order.payable)));
                   summary.replaceChildren(...lines);
@@ -473,7 +508,6 @@ public final class BookingEntryServlet extends HttpServlet {
                   }
                   const ticket = result.ticket || result;
                   notify('Thanh toán thành công. Mã vé: ' + (ticket.ticketCode || ticket.id), 'ok');
-                  await refreshWallet();
                   if (window.CinemaHub && window.CinemaHub.refreshNotifications) {
                     await window.CinemaHub.refreshNotifications();
                     setTimeout(function () { window.CinemaHub.refreshNotifications(); }, 300);
@@ -487,19 +521,9 @@ public final class BookingEntryServlet extends HttpServlet {
                   selectedSeats = [];
                   paymentArea.hidden = true;
                   const code = ticket.ticketCode || String(ticket.id);
-                  const success = document.getElementById('successTicket');
-                  success.hidden = false;
-                  success.replaceChildren(
-                    node('h3', {}, 'Vé đã sẵn sàng'),
-                    node('p', { class: 'muted' }, 'Đưa barcode này cho nhân viên khi vào rạp.'),
-                    node('canvas', { class: 'ticket-barcode', width: '220', height: '76' }),
-                    node('strong', {}, code)
-                  );
-                  if (window.CinemaHub && window.CinemaHub.renderBarcode) {
-                    window.CinemaHub.renderBarcode(success.querySelector('canvas'), code);
-                  }
                   renderSummary();
                   await selectShow(currentShow);
+                  showPaymentSuccess(code);
                 } catch (error) {
                   payButton.disabled = false;
                   notify(error.message);
@@ -517,9 +541,12 @@ public final class BookingEntryServlet extends HttpServlet {
                   const result = await api('/wallet/top-up', {
                     method: 'POST', body: { amount: amount }
                   });
+                  if (!result || typeof result.redirectUrl !== 'string' || !result.redirectUrl) {
+                    throw new Error('Không nhận được liên kết thanh toán từ máy chủ. Vui lòng thử lại.');
+                  }
                   window.location.href = result.redirectUrl;
                 } catch (error) {
-                  walletStatus.textContent = error.message;
+                  walletStatus.textContent = error.message || 'Không thể tạo giao dịch nạp tiền.';
                   topupButton.disabled = false;
                 }
               });
@@ -539,46 +566,8 @@ public final class BookingEntryServlet extends HttpServlet {
                   if (window.CinemaHub && window.CinemaHub.refreshNotifications) {
                     window.CinemaHub.refreshNotifications();
                   }
-                  const modal = document.createElement('div');
-                  modal.className = 'modal';
-                  modal.innerHTML = `
-                    <div class="modal-backdrop"></div>
-                    <div class="modal-panel" role="dialog" aria-modal="true">
-                      <div class="modal-head">
-                        <h2>Thanh toán thành công</h2>
-                        <button type="button" class="btn secondary modal-x" aria-label="Đóng">×</button>
-                      </div>
-                      <div class="modal-body ticket-result-modal">
-                        <div class="payment-result-icon ok">OK</div>
-                        <h3>Vé của bạn đã sẵn sàng</h3>
-                        <p class="muted">Đưa mã barcode này cho nhân viên tại rạp để vào suất chiếu.</p>
-                        <strong class="ticket-result-code"></strong>
-                        <canvas class="ticket-barcode" width="240" height="82"></canvas>
-                      </div>
-                      <div class="modal-foot">
-                        <a class="btn secondary" href="${ctx}/console/booking/list">Xem vé của tôi</a>
-                        <button type="button" class="btn" id="__closeAndReload">Đóng</button>
-                      </div>
-                    </div>`;
-                  document.body.appendChild(modal);
-                  modal.querySelector('.ticket-result-code').textContent = __code;
-                  if (window.CinemaHub && window.CinemaHub.renderBarcode) {
-                    window.CinemaHub.renderBarcode(modal.querySelector('canvas'), __code);
-                  }
-                  const __dismiss = function () {
-                    modal.remove();
-                    const __clean = new URL(location.href);
-                    __clean.searchParams.delete('payment');
-                    __clean.searchParams.delete('ticketCode');
-                    __clean.searchParams.delete('reason');
-                    window.history.replaceState(null, '', __clean.pathname + __clean.search);
-                    // Sau IPN, reload để frontend đọc lại DB mới nhất — tránh trường hợp
-                    // trang cache hiển thị status "PENDING" dù IPN đã set "CONFIRMED".
-                    window.location.reload();
-                  };
-                  modal.querySelector('.modal-backdrop').addEventListener('click', __dismiss);
-                  modal.querySelector('.modal-x').addEventListener('click', __dismiss);
-                  modal.querySelector('#__closeAndReload').addEventListener('click', __dismiss);
+                  // Sau IPN, reload khi đóng để đọc lại trạng thái vé chính thức từ DB.
+                  showPaymentSuccess(__code);
                 } else {
                   // payment=failed: thông báo thân thiện, dọn query
                   const clean = new URL(location.href);

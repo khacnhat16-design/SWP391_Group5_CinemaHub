@@ -12,7 +12,6 @@ import com.cinema.movie.MovieDAO;
 import com.cinema.movie.MovieService;
 import com.cinema.movie.Genre;
 import com.cinema.movie.GenreDAO;
-import com.cinema.review.ReviewDAO;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -25,7 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * REST API controller for the centralized movie catalog (Req 2.1-2.6).
@@ -39,13 +37,11 @@ import java.util.stream.Collectors;
  */
 public class MovieController extends HttpServlet {
     private MovieService movieService;
-    private ReviewDAO reviewDao;
     private GenreDAO genreDao;
 
     @Override
     public void init() throws ServletException {
         this.movieService = new MovieService(new MovieDAO());
-        this.reviewDao = new ReviewDAO();
         this.genreDao = new GenreDAO();
     }
 
@@ -104,7 +100,7 @@ public class MovieController extends HttpServlet {
                     q.branchIds = scope.branchIds();
                 }
                 long total = movieService.countSearch(q);
-                List<Movie> items = enrichWithReviews(movieService.search(q));
+                List<Movie> items = movieService.search(q);
                 sendOk(response, java.util.Map.of(
                         "items", items,
                         "total", total,
@@ -119,10 +115,10 @@ public class MovieController extends HttpServlet {
                             .filter(m -> m.id().equals(movieId))
                             .findFirst())
                     .orElseThrow(() -> new ServiceException.NotFound("Phim không tồn tại"));
-                List<Movie> single = enrichWithReviews(List.of(movie));
+                List<Movie> single = List.of(movie);
                 sendOk(response, single.get(0));
             } else if (scope.role() == Role.ADMIN) {
-                sendOk(response, enrichWithReviews(movieService.listAll()));
+                sendOk(response, movieService.listAll());
             } else if (scope.role() == Role.BRANCH_MANAGER || scope.role() == Role.BRANCH_STAFF) {
                 if (pathInfo != null && !pathInfo.equals("/")) {
                     sendForbidden(response, "Không có quyền truy cập phim này");
@@ -132,10 +128,10 @@ public class MovieController extends HttpServlet {
                 LocalDate date = parseDate(request.getParameter("date"));
                 List<Movie> movies = movieService.listSelectableForScheduling(
                         date, scope.branchIds());
-                sendOk(response, enrichWithReviews(movies));
+                sendOk(response, movies);
             } else if (scope.role() == Role.CUSTOMER || scope.isGuest()) {
                 // Customer/Guest cũng cần list phim (booking flow, trang khám phá).
-                sendOk(response, enrichWithReviews(movieService.listAll()));
+                sendOk(response, movieService.listAll());
             } else {
                 sendForbidden(response, "Không có quyền truy cập");
             }
@@ -300,36 +296,6 @@ public class MovieController extends HttpServlet {
         } catch (NumberFormatException e) {
             return fallback;
         }
-    }
-
-    /**
-     * Gắn averageRating + reviewCount vào từng Movie (1 batch query tránh N+1).
-     * Nếu lỗi (DB chưa có bảng review) thì set mặc định 0 để response vẫn thành công.
-     */
-    private List<Movie> enrichWithReviews(List<Movie> movies) {
-        if (movies == null || movies.isEmpty()) return movies;
-        try {
-            List<Long> ids = movies.stream().map(Movie::id).filter(java.util.Objects::nonNull).collect(Collectors.toList());
-            if (ids.isEmpty()) return movies;
-            Map<Long, ReviewDAO.ReviewStats> stats = reviewDao.statsByMovieIds(ids);
-            for (Movie m : movies) {
-                ReviewDAO.ReviewStats s = stats.get(m.id());
-                if (s != null) {
-                    m.setAverageRating(s.average);
-                    m.setReviewCount(s.count);
-                } else {
-                    m.setAverageRating(0d);
-                    m.setReviewCount(0L);
-                }
-            }
-        } catch (Exception e) {
-            // Best-effort: không block API nếu bảng review chưa sẵn sàng.
-            for (Movie m : movies) {
-                if (m.averageRating() == null) m.setAverageRating(0d);
-                if (m.reviewCount() == null) m.setReviewCount(0L);
-            }
-        }
-        return movies;
     }
 
     private void sendOk(HttpServletResponse response, Object data) throws IOException {

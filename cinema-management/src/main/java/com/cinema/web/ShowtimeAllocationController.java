@@ -3,9 +3,10 @@ package com.cinema.web;
 import com.cinema.auth.AccessScope;
 import com.cinema.auth.Role;
 import com.cinema.common.ErrorEnvelope;
-import com.cinema.common.SerializationUtil;
 import com.cinema.common.ServiceException;
 import com.cinema.filter.AuthFilter;
+import com.cinema.notification.NotificationDAO;
+import com.cinema.notification.NotificationService;
 import com.cinema.showtime.ShowtimeAllocation;
 import com.cinema.showtime.ShowtimeAllocationDAO;
 import com.cinema.showtime.ShowtimeAllocationService;
@@ -15,215 +16,173 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/**
- * REST API cho phân bổ suất chiếu (Admin → Manager).
- *
- * <ul>
- *   <li>GET    /api/showtime-allocations                — Admin: tất cả; Manager: của branch mình.</li>
- *   <li>GET    /api/showtime-allocations/{id}           — chi tiết.</li>
- *   <li>GET    /api/showtime-allocations/{id}/history   — lịch sử thay đổi.</li>
- *   <li>POST   /api/showtime-allocations                — Admin tạo.</li>
- *   <li>PUT    /api/showtime-allocations/{id}           — Admin sửa số lượng.</li>
- *   <li>DELETE /api/showtime-allocations/{id}           — Admin xóa (chỉ khi created=0).</li>
- * </ul>
- */
-public class ShowtimeAllocationController extends HttpServlet {
-
-    private ShowtimeAllocationService service;
+/** Admin allocation CRUD and branch-scoped manager listing. */
+public final class ShowtimeAllocationController extends HttpServlet {
+    private ShowtimeAllocationService allocationService;
 
     @Override
     public void init() throws ServletException {
-        this.service = new ShowtimeAllocationService(new ShowtimeAllocationDAO());
+        allocationService = new ShowtimeAllocationService(new ShowtimeAllocationDAO(),
+                new NotificationService(new NotificationDAO()));
     }
 
     @Override
-    protected void doGet(HttpServletRequest req, HttpServletResponse resp)
-            throws ServletException, IOException {
+    protected void doGet(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
         try {
-            AccessScope scope = requireScope(req);
-            String path = req.getPathInfo() == null ? "" : req.getPathInfo();
+            AccessScope scope = requireReader(request, response);
+            if (scope == null) return;
+            String status = request.getParameter("status");
+            Long branchId = parseOptionalLong(request.getParameter("branchId"));
+            Long movieId = parseOptionalLong(request.getParameter("movieId"));
+            List<ShowtimeAllocation> items = new ArrayList<>();
 
-            if ("/mine".equals(path)) {
-                // Manager view: chỉ branch của mình, tất cả status
-                Long branchId = pickBranchFilter(scope, req);
-                List<ShowtimeAllocation> items = service.listForScope(scope, branchId,
-                        parseLong(req.getParameter("movieId")),
-                        req.getParameter("status"));
-                sendOk(resp, Map.of("items", items, "total", items.size()));
-                return;
-            }
-
-            if (path.matches("/\\d+/history")) {
-                long id = Long.parseLong(path.split("/")[1]);
-                sendOk(resp, Map.of("items", service.listHistory(scope, id), "total", 0));
-                return;
-            }
-
-            if (path.matches("/\\d+")) {
-                long id = Long.parseLong(path.substring(1));
-                ShowtimeAllocation a = service.getForScope(scope, id);
-                sendOk(resp, a);
-                return;
-            }
-
-            if (path.isEmpty() || "/".equals(path)) {
-                Long branchId = parseLong(req.getParameter("branchId"));
-                if (scope.role() == Role.BRANCH_MANAGER) {
-                    if (branchId != null && !scope.includesBranch(branchId)) {
-                        sendForbidden(resp, "Manager không thể xem phân bổ của chi nhánh khác");
-                        return;
-                    }
-                    if (scope.branchIds().isEmpty()) {
-                        sendOk(resp, Map.of("items", List.of(), "total", 0));
-                        return;
-                    }
+            if (scope.role() == Role.ADMIN) {
+                items = allocationService.list(status, branchId, movieId);
+            } else if (branchId != null) {
+                if (!scope.includesBranch(branchId)) {
+                    sendError(response, 403, "FORBIDDEN", "Không thể xem phân bổ của chi nhánh khác");
+                    return;
                 }
-                List<ShowtimeAllocation> items = service.listForScope(scope, branchId,
-                        parseLong(req.getParameter("movieId")),
-                        req.getParameter("status"));
-                sendOk(resp, Map.of("items", items, "total", items.size()));
-                return;
+                items = allocationService.list(status, branchId, movieId);
+            } else {
+                for (Long scopedBranch : scope.branchIds()) {
+                    items.addAll(allocationService.list(status, scopedBranch, movieId));
+                }
             }
-
-            sendBadRequest(resp, "Endpoint không hợp lệ");
+            sendOk(response, Map.of("items", items));
         } catch (NumberFormatException e) {
-            sendBadRequest(resp, "ID không hợp lệ");
-        } catch (ServiceException se) {
-            sendError(resp, se.httpStatus(), se.code(), se.getMessage());
+            sendError(response, 400, "BAD_REQUEST", "Tham số số không hợp lệ");
         } catch (Exception e) {
-            getServletContext().log("ShowtimeAllocation GET error", e);
-            sendInternalError(resp);
+            handleException(response, e);
         }
     }
 
     @Override
-    protected void doPost(HttpServletRequest req, HttpServletResponse resp)
-            throws ServletException, IOException {
+    protected void doPost(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
         try {
-            AccessScope scope = requireScope(req);
-            String path = req.getPathInfo() == null ? "" : req.getPathInfo();
-            if (path.isEmpty() || "/".equals(path)) {
-                long movieId = parseLong(req.getParameter("movieId"));
-                long branchId = parseLong(req.getParameter("branchId"));
-                int qty = Integer.parseInt(req.getParameter("allocatedQuantity"));
-                String note = req.getParameter("note");
-                ShowtimeAllocation created = service.adminCreate(scope, movieId, branchId,
-                        qty, note);
-                sendOk(resp, created);
-                return;
-            }
-            sendBadRequest(resp, "Endpoint không hợp lệ");
+            AccessScope scope = requireAdmin(request, response);
+            if (scope == null) return;
+            long movieId = requiredLong(request, "movieId");
+            long branchId = requiredLong(request, "branchId");
+            int quantity = requiredInt(request, "allocatedQuantity");
+            ShowtimeAllocation allocation = allocationService.create(movieId, branchId, quantity,
+                    request.getParameter("note"), scope.userId());
+            sendOk(response, allocation);
         } catch (NumberFormatException e) {
-            sendBadRequest(resp, "Thiếu hoặc sai định dạng tham số");
-        } catch (ServiceException se) {
-            sendError(resp, se.httpStatus(), se.code(), se.getMessage());
+            sendError(response, 400, "BAD_REQUEST", "Dữ liệu số không hợp lệ");
         } catch (Exception e) {
-            getServletContext().log("ShowtimeAllocation POST error", e);
-            sendInternalError(resp);
+            handleException(response, e);
         }
     }
 
     @Override
-    protected void doPut(HttpServletRequest req, HttpServletResponse resp)
-            throws ServletException, IOException {
+    protected void doPut(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
         try {
-            AccessScope scope = requireScope(req);
-            String path = req.getPathInfo() == null ? "" : req.getPathInfo();
-            if (path.matches("/\\d+")) {
-                long id = Long.parseLong(path.substring(1));
-                int qty = Integer.parseInt(req.getParameter("allocatedQuantity"));
-                String note = req.getParameter("note");
-                ShowtimeAllocation updated = service.adminUpdate(scope, id, qty, note);
-                sendOk(resp, updated);
-                return;
-            }
-            sendBadRequest(resp, "Endpoint không hợp lệ");
+            AccessScope scope = requireAdmin(request, response);
+            if (scope == null) return;
+            long id = pathId(request);
+            int quantity = requiredInt(request, "allocatedQuantity");
+            ShowtimeAllocation updated = allocationService.update(id, quantity,
+                    request.getParameter("note"), scope.userId());
+            sendOk(response, updated);
         } catch (NumberFormatException e) {
-            sendBadRequest(resp, "Thiếu hoặc sai định dạng tham số");
-        } catch (ServiceException se) {
-            sendError(resp, se.httpStatus(), se.code(), se.getMessage());
+            sendError(response, 400, "BAD_REQUEST", "Dữ liệu số không hợp lệ");
         } catch (Exception e) {
-            getServletContext().log("ShowtimeAllocation PUT error", e);
-            sendInternalError(resp);
+            handleException(response, e);
         }
     }
 
     @Override
-    protected void doDelete(HttpServletRequest req, HttpServletResponse resp)
-            throws ServletException, IOException {
+    protected void doDelete(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
         try {
-            AccessScope scope = requireScope(req);
-            String path = req.getPathInfo() == null ? "" : req.getPathInfo();
-            if (path.matches("/\\d+")) {
-                long id = Long.parseLong(path.substring(1));
-                boolean ok = service.adminDelete(scope, id);
-                sendOk(resp, Map.of("deleted", ok));
-                return;
-            }
-            sendBadRequest(resp, "Endpoint không hợp lệ");
+            if (requireAdmin(request, response) == null) return;
+            allocationService.delete(pathId(request));
+            sendOk(response, Map.of("deleted", true));
         } catch (NumberFormatException e) {
-            sendBadRequest(resp, "ID không hợp lệ");
-        } catch (ServiceException se) {
-            sendError(resp, se.httpStatus(), se.code(), se.getMessage());
+            sendError(response, 400, "BAD_REQUEST", "ID phân bổ không hợp lệ");
         } catch (Exception e) {
-            getServletContext().log("ShowtimeAllocation DELETE error", e);
-            sendInternalError(resp);
+            handleException(response, e);
         }
     }
 
-    // ---- helpers ----
-
-    private AccessScope requireScope(HttpServletRequest req) {
-        AccessScope scope = (AccessScope) req.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
-        if (scope == null) throw new ServiceException.Unauthorized("Yêu cầu đăng nhập");
+    private AccessScope requireReader(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+        if (scope == null || scope.isGuest()
+                || (scope.role() != Role.ADMIN && scope.role() != Role.BRANCH_MANAGER)) {
+            sendError(response, 403, "FORBIDDEN", "Chỉ Admin hoặc quản lý chi nhánh mới được xem phân bổ");
+            return null;
+        }
         return scope;
     }
 
-    private Long parseLong(String raw) {
-        if (raw == null || raw.isBlank()) return null;
-        try {
-            return Long.parseLong(raw.trim());
-        } catch (NumberFormatException e) {
-            throw new ServiceException.Validation("Tham số số không hợp lệ: " + raw);
+    private AccessScope requireAdmin(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+        if (scope == null || scope.role() != Role.ADMIN) {
+            sendError(response, 403, "FORBIDDEN", "Chỉ Admin mới được quản lý phân bổ suất chiếu");
+            return null;
+        }
+        return scope;
+    }
+
+    private static long pathId(HttpServletRequest request) {
+        String path = request.getPathInfo();
+        if (path == null || !path.matches("/\\d+")) {
+            throw new NumberFormatException("Missing allocation id");
+        }
+        return Long.parseLong(path.substring(1));
+    }
+
+    private static Long parseOptionalLong(String value) {
+        return value == null || value.isBlank() ? null : Long.parseLong(value.trim());
+    }
+
+    private static long requiredLong(HttpServletRequest request, String name) {
+        String value = request.getParameter(name);
+        if (value == null || value.isBlank()) {
+            throw new ServiceException.Validation(name + " là bắt buộc");
+        }
+        return Long.parseLong(value.trim());
+    }
+
+    private static int requiredInt(HttpServletRequest request, String name) {
+        String value = request.getParameter(name);
+        if (value == null || value.isBlank()) {
+            throw new ServiceException.Validation(name + " là bắt buộc");
+        }
+        return Integer.parseInt(value.trim());
+    }
+
+    private void handleException(HttpServletResponse response, Exception exception) throws IOException {
+        if (exception instanceof ServiceException serviceException) {
+            sendError(response, serviceException.httpStatus(), serviceException.code(),
+                    serviceException.getMessage());
+        } else {
+            getServletContext().log("Showtime allocation request failed", exception);
+            sendError(response, 500, "INTERNAL_ERROR", "Không thể xử lý phân bổ suất chiếu");
         }
     }
 
-    /** Manager: scope chỉ trong branchIds của mình. Admin: dùng query param nếu có. */
-    private Long pickBranchFilter(AccessScope scope, HttpServletRequest req) {
-        if (scope.role() == Role.ADMIN) return parseLong(req.getParameter("branchId"));
-        if (scope.branchIds().isEmpty()) return -1L;
-        return scope.branchIds().iterator().next();
+    private void sendOk(HttpServletResponse response, Object body) throws IOException {
+        response.setStatus(HttpServletResponse.SC_OK);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write(com.cinema.common.SerializationUtil.toJson(body));
     }
 
-    private void sendOk(HttpServletResponse resp, Object data) throws IOException {
-        resp.setStatus(HttpServletResponse.SC_OK);
-        resp.setContentType("application/json;charset=UTF-8");
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("ok", true);
-        body.put("data", data);
-        resp.getWriter().write(SerializationUtil.toJson(body));
-    }
-
-    private void sendForbidden(HttpServletResponse resp, String msg) throws IOException {
-        sendError(resp, 403, "FORBIDDEN", msg);
-    }
-
-    private void sendBadRequest(HttpServletResponse resp, String msg) throws IOException {
-        sendError(resp, 400, "BAD_REQUEST", msg);
-    }
-
-    private void sendInternalError(HttpServletResponse resp) throws IOException {
-        sendError(resp, 500, "INTERNAL_ERROR", "Lỗi hệ thống");
-    }
-
-    private void sendError(HttpServletResponse resp, int status, String code, String msg)
+    private void sendError(HttpServletResponse response, int status, String code, String message)
             throws IOException {
-        resp.setStatus(status);
-        resp.setContentType("application/json;charset=UTF-8");
-        resp.getWriter().write(SerializationUtil.toJson(new ErrorEnvelope(code, msg)));
+        response.setStatus(status);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write(com.cinema.common.SerializationUtil.toJson(
+                new ErrorEnvelope(code, message)));
     }
 }

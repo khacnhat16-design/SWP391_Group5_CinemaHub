@@ -6,7 +6,6 @@ import com.cinema.branch.BranchService;
 import com.cinema.auth.AccessScope;
 import com.cinema.auth.Role;
 import com.cinema.common.ErrorEnvelope;
-import com.cinema.common.FormParameters;
 import com.cinema.filter.AuthFilter;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
@@ -30,32 +29,36 @@ public class BranchController extends HttpServlet {
     }
 
     @Override
-    protected void doGet(HttpServletRequest request, HttpServletResponse response)
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) 
             throws ServletException, IOException {
         try {
             AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
-            if (scope == null) {
+            if (scope == null || scope.isGuest()) {
                 sendForbidden(response, "Cần đăng nhập");
                 return;
             }
 
             String pathInfo = request.getPathInfo();
-            if (pathInfo == null || pathInfo.equals("/")) {
-                // Admin sees all branches. Managers only see assigned branches so
-                // management dropdowns cannot offer a branch outside their scope.
-                if (scope.role() == Role.ADMIN) {
-                    listBranches(response);
-                } else if (scope.role() == Role.BRANCH_MANAGER) {
-                    listActiveBranches(response, scope.branchIds());
-                } else {
-                    // Staff, customers and guests need active branches for ticketing.
-                    listActiveBranches(response, null);
+            if ("/my-location".equals(pathInfo)) {
+                if (scope.role() != Role.BRANCH_MANAGER) {
+                    sendForbidden(response, "Chỉ quản lý chi nhánh mới có thể xem chi nhánh được phân công");
+                    return;
                 }
+                BranchDAO dao = new BranchDAO();
+                List<Branch> assignedBranches = dao.findAll().stream()
+                        .filter(branch -> scope.branchIds().contains(branch.id()))
+                        .toList();
+                sendOk(response, assignedBranches);
                 return;
             }
-            // /branch/{id} và /branch/search — yêu cầu đăng nhập (không guest)
-            if (scope.isGuest()) {
-                sendForbidden(response, "Cần đăng nhập để xem chi tiết chi nhánh");
+            if (pathInfo == null || pathInfo.equals("/")) {
+                if (scope.role() == Role.CUSTOMER) {
+                    listActiveBranches(response);
+                } else if (scope.role() == Role.ADMIN) {
+                    listBranches(response);
+                } else {
+                    sendForbidden(response, "Không có quyền xem danh sách chi nhánh");
+                }
                 return;
             }
             if (scope.role() != Role.ADMIN) {
@@ -91,7 +94,7 @@ public class BranchController extends HttpServlet {
     }
 
     @Override
-    protected void doPost(HttpServletRequest request, HttpServletResponse response)
+    protected void doPost(HttpServletRequest request, HttpServletResponse response) 
             throws ServletException, IOException {
         try {
             AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
@@ -103,6 +106,7 @@ public class BranchController extends HttpServlet {
             String name = request.getParameter("name");
             String address = request.getParameter("address");
             String phone = request.getParameter("phone");
+
             Branch branch = branchService.createBranch(name, address, phone);
             sendOk(response, branch);
         } catch (Exception e) {
@@ -111,7 +115,7 @@ public class BranchController extends HttpServlet {
     }
 
     @Override
-    protected void doPut(HttpServletRequest request, HttpServletResponse response)
+    protected void doPut(HttpServletRequest request, HttpServletResponse response) 
             throws ServletException, IOException {
         try {
             AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
@@ -120,24 +124,11 @@ public class BranchController extends HttpServlet {
                 return;
             }
 
-            // pathInfo luôn dạng "/{id}" với servlet mapping /branch/*.
-            // Trim "/" cuối nếu có và lấy phần tử đầu tiên để tránh NumberFormatException
-            // khi client gọi /branch/5/ (có trailing slash).
-            String pathInfo = request.getPathInfo();
-            String idPart = (pathInfo == null) ? "" : pathInfo.replaceAll("^/+", "");
-            if (idPart.contains("/")) {
-                idPart = idPart.substring(0, idPart.indexOf('/'));
-            }
-            if (idPart.isEmpty()) {
-                sendBadRequest(response, "Thiếu ID chi nhánh");
-                return;
-            }
-            Long branchId = parseLongId(idPart);
-            var parameters = FormParameters.readPut(request);
-            String name = parameters.get("name");
-            String address = parameters.get("address");
-            String phone = parameters.get("phone");
-            String action = parameters.get("action");
+            Long branchId = parseLongId(request.getPathInfo().substring(1));
+            String name = request.getParameter("name");
+            String address = request.getParameter("address");
+            String phone = request.getParameter("phone");
+            String action = request.getParameter("action");
 
             if ("deactivate".equals(action)) {
                 Branch deactivated = branchService.deactivateBranch(branchId);
@@ -163,18 +154,12 @@ public class BranchController extends HttpServlet {
         sendOk(response, branches);
     }
 
-    private void listActiveBranches(HttpServletResponse response, java.util.Set<Long> allowedBranchIds)
-            throws Exception {
+    private void listActiveBranches(HttpServletResponse response) throws Exception {
         BranchDAO dao = new BranchDAO();
         sendOk(response, dao.findAll().stream()
                 .filter(branch -> "ACTIVE".equalsIgnoreCase(branch.status()))
-                .filter(branch -> allowedBranchIds == null || allowedBranchIds.contains(branch.id()))
-                .map(branch -> new BranchSummary(branch.id(), branch.name(), branch.address(),
-                        branch.phone(), branch.status()))
                 .toList());
     }
-
-    private record BranchSummary(Long id, String name, String address, String phone, String status) { }
 
     private void getBranch(Long branchId, HttpServletResponse response) throws Exception {
         BranchDAO dao = new BranchDAO();
@@ -235,11 +220,6 @@ public class BranchController extends HttpServlet {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             response.setContentType("application/json;charset=UTF-8");
             ErrorEnvelope error = new ErrorEnvelope("NOT_FOUND", e.getMessage());
-            response.getWriter().write(com.cinema.common.SerializationUtil.toJson(error));
-        } else if (e instanceof com.cinema.common.ServiceException.BusinessRule businessRule) {
-            response.setStatus(businessRule.httpStatus());
-            response.setContentType("application/json;charset=UTF-8");
-            ErrorEnvelope error = new ErrorEnvelope(businessRule.code(), businessRule.getMessage());
             response.getWriter().write(com.cinema.common.SerializationUtil.toJson(error));
         } else {
             sendInternalError(response, e);
