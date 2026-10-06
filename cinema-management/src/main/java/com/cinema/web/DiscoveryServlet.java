@@ -14,9 +14,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,7 +38,7 @@ public final class DiscoveryServlet extends HttpServlet {
         out.printf("""
             <!doctype html><html lang="vi"><head><meta charset="UTF-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
-            <link rel="stylesheet" href="%s/assets/css/cinema.css?v=20261003-discovery-group-1">
+            <link rel="stylesheet" href="%s/assets/css/cinema.css">
             <title>Khám phá suất chiếu - CinemaHub</title></head><body>
             <header class="nav-wrapper"><div class="nav container">
             <a class="logo" href="%s/">Cinema<span class="accent">Hub</span></a>
@@ -54,7 +52,7 @@ public final class DiscoveryServlet extends HttpServlet {
             """, ctx, ctx, renderAccountNav(request, ctx), ctx);
 
         try {
-            List<Movie> movies = movieDao.findPublished(LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh")));
+            List<Movie> movies = movieDao.findPublished(LocalDate.now());
             Map<Long, Movie> movieById = new HashMap<>();
             for (Movie movie : movies) {
                 movieById.put(movie.id(), movie);
@@ -86,45 +84,25 @@ public final class DiscoveryServlet extends HttpServlet {
                     <p>Hãy chọn ngày, phim hoặc chi nhánh khác.</p></div>
                     """);
             } else {
-                Map<Long, List<Showtime>> showtimesByMovie = new LinkedHashMap<>();
                 for (Showtime showtime : showtimes) {
-                    showtimesByMovie.computeIfAbsent(showtime.movieId(), ignored -> new java.util.ArrayList<>())
-                            .add(showtime);
-                }
-                for (Map.Entry<Long, List<Showtime>> movieEntry : showtimesByMovie.entrySet()) {
-                    Showtime firstShowtime = movieEntry.getValue().get(0);
-                    Movie movie = movieById.get(movieEntry.getKey());
+                    Movie movie = movieById.get(showtime.movieId());
                     String poster = movie == null ? null : movie.posterUrl();
-                    String detailUrl = ctx + "/movie-detail?movieId=" + movieEntry.getKey();
+                    String bookingUrl = ctx + "/booking?movieId=" + showtime.movieId();
                     String image = poster == null || poster.isBlank()
                             ? "<div class=\"show-poster-placeholder\">NO POSTER</div>"
-                            : "<img data-poster-fallback=\"show-poster-placeholder\" loading=\"lazy\" referrerpolicy=\"no-referrer\" src=\""
-                                    + escape(poster) + "\" alt=\"" + escape(firstShowtime.movieTitle()) + "\">";
+                            : "<img src=\"" + escape(poster) + "\" alt=\""
+                                    + escape(showtime.movieTitle()) + "\">";
                     out.printf("""
-                        <article class="panel discovery-movie">
-                          <div class="discovery-movie-heading">
-                            <a class="discovery-movie-poster" href="%s">%s</a>
-                            <div class="show-details">
-                              <a class="discovery-movie-title" href="%s"><b>%s</b></a>
-                              <span>%d suất chiếu</span>
-                            </div>
+                        <article class="panel show-row">
+                          <div class="show-poster">%s</div>
+                          <div class="show-details"><a href="%s"><b>%s</b></a>
+                            <span>%s · %s · %s</span>
                           </div>
-                          <div class="discovery-movie-showtimes">
-                        """, escape(detailUrl), image, escape(detailUrl), escape(firstShowtime.movieTitle()),
-                            movieEntry.getValue().size());
-                    for (Showtime showtime : movieEntry.getValue()) {
-                    String bookingUrl = ctx + "/booking?movieId=" + showtime.movieId();
-                    out.printf("""
-                        <div class="discovery-showtime">
-                          <span><b>%s</b><small>%s · %s</small></span>
-                          <span class="discovery-seat-count">%d ghế trống</span>
-                          <a class="btn small" href="%s">Đặt vé</a>
-                        </div>
-                        """, escape(showtime.branchName()), escape(showtime.screenName()),
-                              escape(String.valueOf(showtime.startTime()).replace('T', ' ')),
-                              showtime.availableSeats(), escape(bookingUrl));
-                    }
-                    out.print("</div></article>");
+                          <strong>%d ghế trống</strong>
+                        </article>
+                        """, image, escape(bookingUrl), escape(showtime.movieTitle()),
+                            escape(showtime.branchName()), escape(showtime.screenName()),
+                            showtime.startTime(), showtime.availableSeats());
                 }
             }
         } catch (Exception e) {
@@ -133,7 +111,7 @@ public final class DiscoveryServlet extends HttpServlet {
                 <p>Vui lòng thử lại sau.</p></div>
                 """);
         }
-        out.printf("</section></main><script src=\"%s/assets/js/app.js?v=20261003-notification-time-2\" defer></script></body></html>", ctx);
+        out.print("</section></main></body></html>");
     }
 
     private Long parseLong(String value) {

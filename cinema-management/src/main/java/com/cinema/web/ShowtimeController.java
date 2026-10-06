@@ -4,6 +4,7 @@ import com.cinema.auth.AccessScope;
 import com.cinema.auth.Role;
 import com.cinema.branch.BranchDAO;
 import com.cinema.common.ErrorEnvelope;
+import com.cinema.common.FormParameters;
 import com.cinema.common.SerializationUtil;
 import com.cinema.common.ServiceException;
 import com.cinema.filter.AuthFilter;
@@ -12,11 +13,6 @@ import com.cinema.pricing.PriceRuleDAO;
 import com.cinema.pricing.PricingService;
 import com.cinema.screen.ScreenDAO;
 import com.cinema.showtime.Showtime;
-<<<<<<< HEAD
-import com.cinema.showtime.ShowtimeAllocationDAO;
-import com.cinema.showtime.ShowtimeAllocationService;
-=======
->>>>>>> TuanLM
 import com.cinema.showtime.ShowtimeDAO;
 import com.cinema.showtime.ShowtimeService;
 import jakarta.servlet.ServletException;
@@ -50,14 +46,6 @@ public class ShowtimeController extends HttpServlet {
         this.showtimeService = new ShowtimeService(
                 new ShowtimeDAO(), screenDao, new MovieDAO(), new BranchDAO());
         this.pricingService = new PricingService(new PriceRuleDAO(), new ShowtimeDAO(),
-<<<<<<< HEAD
-                new com.cinema.voucher.HolidayDAO(),
-                new com.cinema.pricing.PricingConfigDAO());
-        // Hook cập nhật allocation khi showtime được tạo/hủy.
-        // (best-effort — lỗi hook không chặn luồng chính của ShowtimeService)
-        this.showtimeService.setAllocationHook(
-                new ShowtimeAllocationService(new ShowtimeAllocationDAO()));
-=======
                 new com.cinema.pricing.HolidayDAO(),
                 new com.cinema.pricing.PricingConfigDAO());
         this.showtimeService.setAllocationHook(
@@ -65,7 +53,6 @@ public class ShowtimeController extends HttpServlet {
                         new com.cinema.showtime.ShowtimeAllocationDAO(),
                         new com.cinema.notification.NotificationService(
                                 new com.cinema.notification.NotificationDAO())));
->>>>>>> TuanLM
     }
 
     @Override
@@ -235,15 +222,25 @@ public class ShowtimeController extends HttpServlet {
             AccessScope scope = requireManager(request, response);
             if (scope == null) return;
 
-            long showtimeId = Long.parseLong(request.getPathInfo().substring(1));
-            String action = request.getParameter("action");
+            String pathInfo = request.getPathInfo();
+            if (pathInfo == null || !pathInfo.matches("/\\d+")) {
+                sendBadRequest(response, "ID suất chiếu không hợp lệ");
+                return;
+            }
+            long showtimeId = Long.parseLong(pathInfo.substring(1));
+            java.util.Map<String, String> parameters = FormParameters.readPut(request);
+            String action = parameters.get("action");
 
             if ("cancel".equals(action)) {
                 sendOk(response, showtimeService.cancel(scopeBranch(scope), showtimeId));
             } else if ("restore".equals(action)) {
                 sendOk(response, showtimeService.restore(scopeBranch(scope), showtimeId));
             } else {
-                LocalDateTime newStart = parseDateTime(requireParam(request, "startTime"));
+                String startTime = parameters.get("startTime");
+                if (startTime == null || startTime.isBlank()) {
+                    throw new ServiceException.Validation("Thiếu tham số bắt buộc: startTime");
+                }
+                LocalDateTime newStart = parseDateTime(startTime);
                 sendOk(response, showtimeService.updateTime(scopeBranch(scope), showtimeId, newStart));
             }
         } catch (NumberFormatException e) {
