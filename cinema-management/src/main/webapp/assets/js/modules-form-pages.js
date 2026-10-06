@@ -408,7 +408,384 @@
         }
     });
 
+  // ============================================================
+    // Showtime Allocation — Admin phân bổ suất chiếu cho từng branch,
+    // Manager xem & tạo suất chiếu để đáp ứng quota.
+    // ============================================================
+    router.register('showtime-allocation', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            if (!viewRoot) return;
+            if (typeof hub.setWorkspaceHeader === 'function') {
+                hub.setWorkspaceHeader('Phân bổ suất chiếu');
+            }
+            viewRoot.replaceChildren();
 
+            Promise.all([
+                hub.api('/branch'),
+                hub.api('/movie')
+            ]).then(function (results) {
+                var branches = results[0] || [];
+                var movies = results[1] || [];
+                var branchNames = new Map(branches.map(function (branch) {
+                    return [String(branch.id), branch.name];
+                }));
+                var movieNames = new Map(movies.map(function (movie) {
+                    return [String(movie.id), movie.title];
+                }));
+                var roleMeta = document.querySelector('meta[name="user-role"]');
+                var userRole = roleMeta ? roleMeta.content : '';
+                var isAdmin = userRole === 'ADMIN';
+
+                var header = hub.el('div', { class: 'ws-page-header' }, [
+                    hub.el('div', {}, [
+                        hub.el('h1', {}, ['Phân bổ suất chiếu']),
+                        hub.el('p', { class: 'ws-tone-muted' }, [
+                            'Admin phân bổ tổng số suất chiếu cho phim tại chi nhánh, gộp tất cả phòng. ',
+                            'Mỗi suất chiếu được tạo sẽ dùng một slot; hủy suất sẽ hoàn lại slot.'
+                        ])
+                    ])
+                ]);
+                viewRoot.appendChild(header);
+
+                // Filter bar
+                var filterWrap = hub.el('div', { class: 'ws-card', style: 'margin-bottom:12px' });
+                var filterRow = hub.el('div', { class: 'ws-form-row' });
+                var statusSelect = hub.el('select', { class: 'ws-input' }, [
+                    hub.el('option', { value: '' }, ['-- Tất cả trạng thái --']),
+                    hub.el('option', { value: 'PENDING' }, ['PENDING (chờ)']),
+                    hub.el('option', { value: 'IN_PROGRESS' }, ['IN_PROGRESS (đang làm)']),
+                    hub.el('option', { value: 'COMPLETED' }, ['COMPLETED (đủ)']),
+                    hub.el('option', { value: 'OVER_ALLOCATED' }, ['OVER_ALLOCATED (vượt)'])
+                ]);
+                var branchSelect = hub.el('select', { class: 'ws-input' });
+                branchSelect.appendChild(hub.el('option', { value: '' }, ['-- Tất cả chi nhánh --']));
+                branches.forEach(function (b) {
+                    branchSelect.appendChild(hub.el('option', { value: String(b.id) }, [b.name]));
+                });
+                var movieSelect = hub.el('select', { class: 'ws-input' });
+                movieSelect.appendChild(hub.el('option', { value: '' }, ['-- Tất cả phim --']));
+                movies.forEach(function (m) {
+                    movieSelect.appendChild(hub.el('option', { value: String(m.id) }, [m.title]));
+                });
+                var queryParams = new URLSearchParams(window.location.search);
+                var requestedBranch = queryParams.get('branchId');
+                var requestedMovie = queryParams.get('movieId');
+                if (/^\d+$/.test(requestedBranch || '')
+                        && branches.some(function (branch) {
+                            return String(branch.id) === requestedBranch;
+                        })) {
+                    branchSelect.value = requestedBranch;
+                }
+                if (/^\d+$/.test(requestedMovie || '')
+                        && movies.some(function (movie) {
+                            return String(movie.id) === requestedMovie;
+                        })) {
+                    movieSelect.value = requestedMovie;
+                }
+                if (!isAdmin) {
+                    branchSelect.disabled = true;
+                }
+                filterRow.appendChild(hub.el('div', { class: 'ws-form-col' }, [
+                    hub.el('label', {}, ['Trạng thái']), statusSelect
+                ]));
+                filterRow.appendChild(hub.el('div', { class: 'ws-form-col' }, [
+                    hub.el('label', {}, ['Chi nhánh']), branchSelect
+                ]));
+                filterRow.appendChild(hub.el('div', { class: 'ws-form-col' }, [
+                    hub.el('label', {}, ['Phim']), movieSelect
+                ]));
+                filterWrap.appendChild(filterRow);
+                if (isAdmin) {
+                    var addBtn = hub.el('button', {
+                        class: 'ws-btn primary',
+                        type: 'button',
+                        style: 'margin-top:12px'
+                    }, ['+ Tạo phân bổ mới']);
+                    addBtn.addEventListener('click', function () { openCreateDialog(); });
+                    filterWrap.appendChild(addBtn);
+                }
+                viewRoot.appendChild(filterWrap);
+
+                var listCard = hub.el('article', { class: 'ws-card' });
+                listCard.appendChild(hub.el('h2', {}, ['Danh sách phân bổ']));
+                var listWrap = hub.el('div', {});
+                listCard.appendChild(listWrap);
+                viewRoot.appendChild(listCard);
+
+                function buildQuery() {
+                    var qs = new URLSearchParams();
+                    if (statusSelect.value) qs.append('status', statusSelect.value);
+                    if (branchSelect.value) qs.append('branchId', branchSelect.value);
+                    if (movieSelect.value) qs.append('movieId', movieSelect.value);
+                    return qs.toString();
+                }
+
+                function load() {
+                    var qs = buildQuery();
+                    var path = '/api/showtime-allocations' + (qs ? '?' + qs : '');
+                    hub.api(path).then(function (resp) {
+                        var data = resp && resp.data ? resp.data : resp;
+                        var items = (data && data.items) || [];
+                        listWrap.replaceChildren();
+                        if (!items.length) {
+                            listWrap.appendChild(hub.el('div', { class: 'ws-empty' }, [
+                                hub.el('p', {}, ['Chưa có phân bổ nào.'])
+                            ]));
+                            return;
+                        }
+                        var table = hub.el('table', { class: 'ws-table' });
+                        var thead = hub.el('thead', {}, [hub.el('tr', {}, [
+                            hub.el('th', {}, ['Phim']),
+                            hub.el('th', {}, ['Chi nhánh']),
+                            hub.el('th', {}, ['Phân bổ']),
+                            hub.el('th', {}, ['Đã tạo']),
+                            hub.el('th', {}, ['Còn thiếu']),
+                            hub.el('th', {}, ['Trạng thái']),
+                            hub.el('th', {}, ['Ngày phân bổ']),
+                            hub.el('th', {}, ['Thao tác'])
+                        ])]);
+                        table.appendChild(thead);
+                        var tbody = hub.el('tbody');
+                        items.forEach(function (a) {
+                            var row = hub.el('tr');
+                            var remaining = a.remainingQuantity;
+                            var remainingCell = remaining > 0
+                                ? hub.el('span', { class: 'ws-tone-warn' }, [String(remaining)])
+                                : remaining < 0
+                                    ? hub.el('span', { class: 'ws-tone-danger' },
+                                        [(remaining) + ' (vượt)'])
+                                    : hub.el('span', { class: 'ws-tone-ok' }, ['0']);
+                            row.appendChild(hub.el('td', {}, [
+                                a.movieTitle || movieNames.get(String(a.movieId)) || '—'
+                            ]));
+                            row.appendChild(hub.el('td', {}, [
+                                a.branchName || branchNames.get(String(a.branchId)) || '—'
+                            ]));
+                            row.appendChild(hub.el('td', {}, [String(a.allocatedQuantity)]));
+                            row.appendChild(hub.el('td', {}, [String(a.createdQuantity)]));
+                            row.appendChild(hub.el('td', {}, [remainingCell]));
+                            row.appendChild(hub.el('td', {}, [statusBadge(a.status)]));
+                            row.appendChild(hub.el('td', {}, [a.allocatedAt
+                                ? hub.fmtDateTime(a.allocatedAt) : '—']));
+                            var actions = hub.el('div', { class: 'ws-action-group' });
+                            if (isAdmin) {
+                                var editBtn = hub.el('button', {
+                                    class: 'ws-btn secondary small', type: 'button'
+                                }, ['Sửa SL']);
+                                editBtn.addEventListener('click', function () {
+                                    openEditDialog(a);
+                                });
+                                actions.appendChild(editBtn);
+                                if (a.createdQuantity === 0) {
+                                    var delBtn = hub.el('button', {
+                                        class: 'ws-btn danger small', type: 'button'
+                                    }, ['Xóa']);
+                                    delBtn.addEventListener('click', function () {
+                                        confirmAction('Xóa phân bổ #' + a.id + '?', function () {
+                                            hub.api('/api/showtime-allocations/' + a.id,
+                                                { method: 'DELETE' })
+                                                .then(function () {
+                                                    hub.notify('Đã xóa phân bổ.', 'ok');
+                                                    load();
+                                                })
+                                                .catch(notifyError);
+                                        });
+                                    });
+                                    actions.appendChild(delBtn);
+                                }
+                            } else {
+                                // Manager chỉ tạo thêm Showtime khi allocation còn quota.
+                                var remainingQuota = remaining != null && remaining !== ''
+                                    && Number.isFinite(Number(remaining))
+                                    ? Number(remaining)
+                                    : Number(a.allocatedQuantity) - Number(a.createdQuantity);
+                                if (remainingQuota > 0) {
+                                    var createShowtime = hub.el('a', {
+                                        class: 'ws-btn primary small',
+                                        href: ctx + '/console?module=showtime&action=create'
+                                            + '&movieId=' + a.movieId
+                                            + '&branchId=' + a.branchId
+                                    }, ['+ Tạo suất chiếu']);
+                                    actions.appendChild(createShowtime);
+                                }
+                            }
+                            row.appendChild(hub.el('td', {}, [actions]));
+                            tbody.appendChild(row);
+                        });
+                        table.appendChild(tbody);
+                        listWrap.appendChild(table);
+                    }).catch(notifyError);
+                }
+
+                [statusSelect, branchSelect, movieSelect].forEach(function (el) {
+                    el.addEventListener('change', load);
+                });
+
+                function openDialog(opts) {
+                    var previousFocus = document.activeElement;
+                    var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+                    var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+                    var panel = hub.el('div', {
+                        class: 'ws-modal-panel', role: 'dialog',
+                        'aria-modal': 'true'
+                    });
+                    panel.style.maxWidth = '560px';
+                    var head = hub.el('div', { class: 'ws-modal-head' }, [
+                        hub.el('h2', {}, [opts.title || 'Thao tác'])
+                    ]);
+                    var body = hub.el('div', { class: 'ws-modal-body' });
+                    if (typeof opts.body === 'string') {
+                        body.appendChild(hub.el('p', {}, [opts.body]));
+                    } else if (opts.body instanceof Node) {
+                        body.appendChild(opts.body);
+                    }
+                    var cancelBtn = hub.el('button', {
+                        class: 'ws-btn secondary', type: 'button'
+                    }, ['Huỷ']);
+                    var confirmBtn = hub.el('button', {
+                        class: 'ws-btn primary', type: 'button'
+                    }, [opts.confirmLabel || 'Xác nhận']);
+                    var footer = hub.el('div', { class: 'ws-form-actions' }, [cancelBtn, confirmBtn]);
+                    panel.appendChild(head);
+                    panel.appendChild(body);
+                    panel.appendChild(footer);
+                    overlay.appendChild(backdrop);
+                    overlay.appendChild(panel);
+                    document.body.appendChild(overlay);
+                    function close() {
+                        document.body.removeChild(overlay);
+                        if (previousFocus && previousFocus.focus) {
+                            try { previousFocus.focus(); } catch (e) { /* ignore */ }
+                        }
+                    }
+                    cancelBtn.addEventListener('click', close);
+                    backdrop.addEventListener('click', close);
+                    confirmBtn.addEventListener('click', function () {
+                        try {
+                            if (typeof opts.onConfirm === 'function') {
+                                opts.onConfirm();
+                            }
+                            close();
+                        } catch (e) {
+                            // leave dialog open if caller throws — but our callers
+                            // don't throw, so this is just safety.
+                        }
+                    });
+                }
+
+                function openCreateDialog() {
+                    if (!branches.length || !movies.length) {
+                        hub.notify('Cần có chi nhánh và phim trước khi tạo phân bổ.', 'warn');
+                        return;
+                    }
+                    var movieSel = hub.el('select', { class: 'ws-input' });
+                    movies.forEach(function (m) {
+                        movieSel.appendChild(hub.el('option', { value: String(m.id) },
+                            [m.title]));
+                    });
+                    var branchSel = hub.el('select', { class: 'ws-input' });
+                    branches.forEach(function (b) {
+                        branchSel.appendChild(hub.el('option', { value: String(b.id) },
+                            [b.name]));
+                    });
+                    var qtyInput = hub.el('input', {
+                        class: 'ws-input', type: 'number', min: '1',
+                        value: '1', required: 'required'
+                    });
+                    var noteInput = hub.el('textarea', {
+                        class: 'ws-input', rows: '2',
+                        placeholder: 'Ghi chú (tuỳ chọn)'
+                    });
+                    var formEl = hub.el('div', {}, [
+                        hub.el('div', { class: 'ws-form-row' }, [
+                            hub.el('div', { class: 'ws-form-col' }, [
+                                hub.el('label', {}, ['Phim']), movieSel
+                            ]),
+                            hub.el('div', { class: 'ws-form-col' }, [
+                                hub.el('label', {}, ['Chi nhánh']), branchSel
+                            ])
+                        ]),
+                        hub.el('div', { class: 'ws-form-row' }, [
+                            hub.el('div', { class: 'ws-form-col' }, [
+                                hub.el('label', {}, ['Số suất phân bổ']), qtyInput
+                            ])
+                        ]),
+                        hub.el('div', { class: 'ws-form-row' }, [
+                            hub.el('div', { class: 'ws-form-col' }, [
+                                hub.el('label', {}, ['Ghi chú']), noteInput
+                            ])
+                        ])
+                    ]);
+                    openDialog({
+                        title: 'Tạo phân bổ suất chiếu',
+                        body: formEl,
+                        confirmLabel: 'Tạo phân bổ',
+                        onConfirm: function () {
+                            var body = {
+                                movieId: movieSel.value,
+                                branchId: branchSel.value,
+                                allocatedQuantity: qtyInput.value,
+                                note: noteInput.value
+                            };
+                            hub.api('/api/showtime-allocations', {
+                                method: 'POST', body: body
+                            }).then(function () {
+                                hub.notify('Đã tạo phân bổ — Manager sẽ nhận thông báo.', 'ok');
+                                load();
+                            }).catch(notifyError);
+                        }
+                    });
+                }
+
+                function openEditDialog(a) {
+                    var qtyInput = hub.el('input', {
+                        class: 'ws-input', type: 'number', min: '0',
+                        value: String(a.allocatedQuantity), required: 'required'
+                    });
+                    var noteInput = hub.el('textarea', {
+                        class: 'ws-input', rows: '2',
+                        placeholder: 'Lý do cập nhật (tuỳ chọn)'
+                    });
+                    noteInput.value = a.note || '';
+                    var body = hub.el('div', {}, [
+                        hub.el('p', { class: 'ws-tone-muted' }, [
+                            'Phân bổ hiện tại: ', String(a.allocatedQuantity),
+                            ' — Đã tạo: ', String(a.createdQuantity)
+                        ]),
+                        hub.el('div', { class: 'ws-form-row' }, [
+                            hub.el('div', { class: 'ws-form-col' }, [
+                                hub.el('label', {}, ['Số suất phân bổ mới']), qtyInput
+                            ])
+                        ]),
+                        hub.el('div', { class: 'ws-form-row' }, [
+                            hub.el('div', { class: 'ws-form-col' }, [
+                                hub.el('label', {}, ['Ghi chú']), noteInput
+                            ])
+                        ])
+                    ]);
+                    openDialog({
+                        title: 'Cập nhật phân bổ #' + a.id,
+                        body: body,
+                        confirmLabel: 'Cập nhật',
+                        onConfirm: function () {
+                            hub.api('/api/showtime-allocations/' + a.id, {
+                                method: 'PUT', body: {
+                                    allocatedQuantity: qtyInput.value,
+                                    note: noteInput.value
+                                }
+                            }).then(function () {
+                                hub.notify('Đã cập nhật.', 'ok');
+                                load();
+                            }).catch(notifyError);
+                        }
+                    });
+                }
+
+                load();
+            }).catch(notifyError);
+        }
+    });
      // ================================================================
     //  NOTIFICATION
     // ================================================================
