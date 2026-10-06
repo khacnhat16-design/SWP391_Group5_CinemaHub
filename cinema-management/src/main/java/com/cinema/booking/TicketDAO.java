@@ -87,6 +87,17 @@ public class TicketDAO {
     }
 
     /** Khóa + đọc vé theo mã (luồng soát vé Req 12.1). */
+        /** KhÃ³a + Ä‘á»c vÃ© theo hold_id (luá»“ng xÃ¡c nháº­n Ä‘áº·t vÃ©). */
+    public Optional<Ticket> findByHoldIdLocked(Connection conn, long holdId) throws SQLException {
+        String sql = "SELECT " + BASE_COLUMNS + " FROM dbo.ticket WITH (UPDLOCK, HOLDLOCK, ROWLOCK) WHERE hold_id = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, holdId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(mapRow(rs)) : Optional.empty();
+            }
+        }
+    }
+
     public Optional<Ticket> findByCodeLocked(Connection conn, String ticketCode) throws SQLException {
         String sql = "SELECT " + BASE_COLUMNS + " FROM dbo.ticket WITH (UPDLOCK, HOLDLOCK, ROWLOCK) WHERE ticket_code = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -241,6 +252,23 @@ public class TicketDAO {
      * PENDING → CONFIRMED guarded (Req 7.5, 8.2, 9.7): chỉ một giao dịch chuyển được;
      * confirm lần hai trượt guard → 0 rows.
      */
+        public boolean confirmGuarded(Connection conn, long ticketId, long totalAmount,
+                                  String voucherCode, int pointsEarned) throws SQLException {
+        String sql = """
+            UPDATE dbo.ticket
+            SET status = 'CONFIRMED', total_amount = ?, voucher_code = ?, points_earned = ?,
+                confirmed_at = SYSUTCDATETIME(), version = version + 1
+            WHERE id = ? AND status = 'PENDING'
+            """;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, totalAmount);
+            ps.setString(2, voucherCode);
+            ps.setInt(3, pointsEarned);
+            ps.setLong(4, ticketId);
+            return ps.executeUpdate() == 1;
+        }
+    }
+
     public boolean confirmGuarded(Connection conn, long ticketId, long totalAmount) throws SQLException {
         String sql = """
             UPDATE dbo.ticket
