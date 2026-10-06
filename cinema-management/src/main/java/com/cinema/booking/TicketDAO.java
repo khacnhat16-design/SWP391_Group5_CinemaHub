@@ -22,7 +22,7 @@ public class TicketDAO {
 
     private static final String BASE_COLUMNS = """
         id, ticket_code, showtime_id, branch_id, user_id, status, total_amount,
-        voucher_code, refund_amount, points_earned, hold_id, created_at, confirmed_at,
+        refund_amount, hold_id, created_at, confirmed_at,
         cancelled_at, used_at, used_by, version
         """;
 
@@ -30,8 +30,8 @@ public class TicketDAO {
     public long insert(Connection conn, Ticket ticket) throws SQLException {
         String sql = """
             INSERT INTO dbo.ticket (ticket_code, showtime_id, branch_id, user_id, status,
-                                    total_amount, voucher_code, hold_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                    total_amount, hold_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """;
         try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, ticket.ticketCode());
@@ -41,9 +41,8 @@ public class TicketDAO {
             else ps.setLong(4, ticket.userId());
             ps.setString(5, ticket.status());
             ps.setLong(6, ticket.totalAmount());
-            ps.setString(7, ticket.voucherCode());
-            if (ticket.holdId() == null) ps.setNull(8, java.sql.Types.BIGINT);
-            else ps.setLong(8, ticket.holdId());
+            if (ticket.holdId() == null) ps.setNull(7, java.sql.Types.BIGINT);
+            else ps.setLong(7, ticket.holdId());
             ps.executeUpdate();
             try (ResultSet rs = ps.getGeneratedKeys()) {
                 if (!rs.next()) throw new SQLException("Không tạo được vé");
@@ -242,19 +241,16 @@ public class TicketDAO {
      * PENDING → CONFIRMED guarded (Req 7.5, 8.2, 9.7): chỉ một giao dịch chuyển được;
      * confirm lần hai trượt guard → 0 rows.
      */
-    public boolean confirmGuarded(Connection conn, long ticketId, long totalAmount,
-                                  String voucherCode, int pointsEarned) throws SQLException {
+    public boolean confirmGuarded(Connection conn, long ticketId, long totalAmount) throws SQLException {
         String sql = """
             UPDATE dbo.ticket
-            SET status = 'CONFIRMED', total_amount = ?, voucher_code = ?, points_earned = ?,
+            SET status = 'CONFIRMED', total_amount = ?,
                 confirmed_at = SYSUTCDATETIME(), version = version + 1
             WHERE id = ? AND status = 'PENDING'
             """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, totalAmount);
-            ps.setString(2, voucherCode);
-            ps.setInt(3, pointsEarned);
-            ps.setLong(4, ticketId);
+            ps.setLong(2, ticketId);
             return ps.executeUpdate() == 1;
         }
     }
@@ -337,10 +333,8 @@ public class TicketDAO {
         ticket.setUserId(rs.wasNull() ? null : userId);
         ticket.setStatus(rs.getString("status"));
         ticket.setTotalAmount(rs.getLong("total_amount"));
-        ticket.setVoucherCode(rs.getString("voucher_code"));
         long refund = rs.getLong("refund_amount");
         ticket.setRefundAmount(rs.wasNull() ? null : refund);
-        ticket.setPointsEarned(rs.getInt("points_earned"));
         long holdId = rs.getLong("hold_id");
         ticket.setHoldId(rs.wasNull() ? null : holdId);
         Timestamp created = rs.getTimestamp("created_at");

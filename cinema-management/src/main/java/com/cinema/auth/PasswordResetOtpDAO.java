@@ -15,8 +15,11 @@ import java.util.Optional;
 /**
  * DAO for {@link PasswordResetOtp} (table {@code dbo.password_reset_otp}).
  *
- * <p>This table is reused for both Register email verification and Forgot Password OTP;
- * they are distinguished by the {@code purpose} column so an OTP issued for one flow
+ * <p>
+ * This table is reused for both Register email verification and Forgot Password
+ * OTP;
+ * they are distinguished by the {@code purpose} column so an OTP issued for one
+ * flow
  * cannot verify the other.
  */
 public class PasswordResetOtpDAO {
@@ -31,7 +34,7 @@ public class PasswordResetOtpDAO {
                 VALUES (?, ?, ?, 0, ?)
                 """;
         try (Connection conn = DBContext.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setLong(1, otp.getUserId());
             ps.setString(2, otp.getOtpHash());
             ps.setTimestamp(3, Timestamp.valueOf(otp.getExpiresAt()));
@@ -60,11 +63,12 @@ public class PasswordResetOtpDAO {
                 ORDER BY created_at DESC
                 """;
         try (Connection conn = DBContext.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, userId);
             ps.setString(2, purpose);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return Optional.of(mapRow(rs));
+                if (rs.next())
+                    return Optional.of(mapRow(rs));
             }
         }
         return Optional.empty();
@@ -81,7 +85,7 @@ public class PasswordResetOtpDAO {
                 WHERE user_id = ? AND purpose = ? AND used_at IS NULL
                 """;
         try (Connection conn = DBContext.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, userId);
             ps.setString(2, purpose);
             return ps.executeUpdate();
@@ -96,11 +100,12 @@ public class PasswordResetOtpDAO {
                 WHERE id = ?
                 """;
         try (Connection conn = DBContext.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, otpId);
             ps.executeUpdate();
             try (ResultSet rs = ps.executeQuery("SELECT attempts FROM dbo.password_reset_otp WHERE id = " + otpId)) {
-                if (rs.next()) return rs.getInt(1);
+                if (rs.next())
+                    return rs.getInt(1);
             }
         }
         return 0;
@@ -114,14 +119,15 @@ public class PasswordResetOtpDAO {
                 WHERE id = ?
                 """;
         try (Connection conn = DBContext.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, otpId);
             ps.executeUpdate();
         }
     }
 
     /**
-     * Count recent OTP requests for rate-limiting (max 5 per hour per user/purpose).
+     * Count recent OTP requests for rate-limiting (max 5 per hour per
+     * user/purpose).
      */
     public long countRecent(long userId, String purpose, int withinMinutes) throws Exception {
         String sql = """
