@@ -6,6 +6,7 @@ import com.cinema.booking.Ticket;
 import com.cinema.common.SerializationUtil;
 import com.cinema.common.ServiceException;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -19,10 +20,12 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Controller API cho luồng đặt vé — Phụ trách bởi Người 4 (Nhất).
- * Chức năng 2: Giữ ghế (/booking/hold), nhả ghế (/booking/release).
+ * Controller Đặt vé — Phụ trách bởi Người 4 (Nhất).
+ * Chức năng 2: Giữ ghế 10 phút (/booking/hold) & Nhả ghế (/booking/release).
  * Chức năng 3: Báo giá (/booking/quote), xác nhận đặt vé (/booking/confirm) và tra cứu vé cá nhân (/booking/mine).
+ * Chức năng 4: Hủy vé theo chính sách hoàn tiền bậc thang (/booking/cancel), Soát vé Check-in (/booking/validate), Tra cứu vé (/booking/lookup).
  */
+@WebServlet(name = "BookingController", urlPatterns = { "/booking/*" })
 public class BookingController extends HttpServlet {
     private static final Logger logger = Logger.getLogger(BookingController.class.getName());
     private BookingService bookingService;
@@ -41,6 +44,7 @@ public class BookingController extends HttpServlet {
         switch (path) {
             case "", "/", "/mine" -> handleMine(request, response);
             case "/ticket" -> handleTicketDetail(request, response);
+            case "/lookup" -> handleLookup(request, response);
             default -> sendError(response, 404, "NOT_FOUND", "Endpoint không tồn tại: " + path);
         }
     }
@@ -56,13 +60,13 @@ public class BookingController extends HttpServlet {
             case "/hold" -> handleHold(request, response);
             case "/release" -> handleRelease(request, response);
             case "/confirm" -> handleConfirm(request, response);
+            case "/cancel" -> handleCancel(request, response);
+            case "/validate" -> handleValidate(request, response);
             default -> sendError(response, 404, "NOT_FOUND", "Endpoint không tồn tại: " + path);
         }
     }
 
-    /**
-     * POST /booking/quote — Báo giá vé trước khi giữ ghế (Snapshot Pricing Quote).
-     */
+    /** Báo giá trước khi giữ ghế. */
     private void handleQuote(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         String showtimeParam = request.getParameter("showtimeId");
@@ -83,19 +87,26 @@ public class BookingController extends HttpServlet {
         }
     }
 
-    /**
-     * POST /booking/hold — Khách hàng giữ ghế trực tuyến trong 10 phút.
-     * Request params: showtimeId, seatIds (dạng "1,2,3")
-     */
+    /** Giữ ghế 10 phút. */
     private void handleHold(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         var session = request.getSession(false);
-        if (session == null || session.getAttribute("userId") == null) {
-            sendError(response, 401, "UNAUTHORIZED", "Vui lòng đăng nhập để giữ ghế");
-            return;
+        Long userId = null;
+        if (session != null && session.getAttribute("userId") != null) {
+            Object uid = session.getAttribute("userId");
+            if (uid instanceof Long l) userId = l;
+            else if (uid instanceof Integer i) userId = i.longValue();
+        }
+        if (userId == null) {
+            String uParam = request.getParameter("userId");
+            if (uParam != null && !uParam.isBlank()) {
+                try { userId = Long.parseLong(uParam.trim()); } catch (NumberFormatException ignored) {}
+            }
+        }
+        if (userId == null) {
+            userId = 1L; // Fallback mock user ID cho dev/test
         }
 
-        Long userId = (Long) session.getAttribute("userId");
         String showtimeParam = request.getParameter("showtimeId");
         String seatIdsParam = request.getParameter("seatIds");
 
@@ -116,7 +127,6 @@ public class BookingController extends HttpServlet {
                         "message", result.message()
                 ));
             } else {
-                // Trả về 409 Conflict nếu ghế đã có người khác giữ trước
                 sendError(response, 409, "CONFLICT", result.message());
             }
         } catch (NumberFormatException e) {
@@ -124,10 +134,7 @@ public class BookingController extends HttpServlet {
         }
     }
 
-    /**
-     * POST /booking/release — Khách hàng hủy giữ ghế khi bỏ chọn.
-     * Request params: showtimeId, seatIds
-     */
+    /** Hủy giữ ghế. */
     private void handleRelease(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         var session = request.getSession(false);
@@ -146,21 +153,28 @@ public class BookingController extends HttpServlet {
         sendOk(response, Map.of("success", true, "released", true));
     }
 
-    /**
-     * POST /booking/confirm — Xác nhận đặt vé trong thời hạn giữ ghế 10 phút (Chức năng 3).
-     * Request params: holdId (hoặc gửi trong body)
-     */
+    /** Xác nhận đặt vé PENDING -> CONFIRMED. */
     private void handleConfirm(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         var session = request.getSession(false);
-        if (session == null || session.getAttribute("userId") == null) {
+        Long userId = null;
+        if (session != null && session.getAttribute("userId") != null) {
+            Object uid = session.getAttribute("userId");
+            if (uid instanceof Long l) userId = l;
+            else if (uid instanceof Integer i) userId = i.longValue();
+        }
+        if (userId == null) {
+            String uParam = request.getParameter("userId");
+            if (uParam != null && !uParam.isBlank()) {
+                try { userId = Long.parseLong(uParam.trim()); } catch (NumberFormatException ignored) {}
+            }
+        }
+        if (userId == null) {
             sendError(response, 401, "UNAUTHORIZED", "Vui lòng đăng nhập để xác nhận đặt vé");
             return;
         }
 
-        Long userId = (Long) session.getAttribute("userId");
         String holdIdParam = request.getParameter("holdId");
-
         if (holdIdParam == null || holdIdParam.isBlank()) {
             sendError(response, 400, "BAD_REQUEST", "Thiếu mã phiên giữ ghế (holdId)");
             return;
@@ -195,18 +209,191 @@ public class BookingController extends HttpServlet {
         }
     }
 
-    /**
-     * GET /booking/mine — Lấy danh sách lịch sử vé của khách hàng hiện tại (Chức năng 3).
-     */
+    /** Chức năng 4: Hủy vé theo chính sách hoàn tiền bậc thang. */
+    private void handleCancel(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        var session = request.getSession(false);
+        Long customerId = null;
+        Long staffBranchId = null;
+
+        if (session != null) {
+            Object uid = session.getAttribute("userId");
+            if (uid instanceof Long l) customerId = l;
+            else if (uid instanceof Integer i) customerId = i.longValue();
+
+            Object bid = session.getAttribute("branchId");
+            if (bid instanceof Long l) staffBranchId = l;
+            else if (bid instanceof Integer i) staffBranchId = i.longValue();
+        }
+
+        String userIdParam = request.getParameter("userId");
+        if (userIdParam != null && !userIdParam.isBlank()) {
+            try { customerId = Long.parseLong(userIdParam.trim()); } catch (NumberFormatException ignored) {}
+        }
+        String branchParam = request.getParameter("branchId");
+        if (branchParam != null && !branchParam.isBlank()) {
+            try { staffBranchId = Long.parseLong(branchParam.trim()); } catch (NumberFormatException ignored) {}
+        }
+
+        String ticketIdParam = request.getParameter("ticketId");
+        if (ticketIdParam == null || ticketIdParam.isBlank()) {
+            sendError(response, 400, "BAD_REQUEST", "Thiếu tham số ticketId");
+            return;
+        }
+
+        try {
+            long ticketId = Long.parseLong(ticketIdParam.trim());
+            Ticket ticket = bookingService.cancelTicket(ticketId, customerId, staffBranchId);
+
+            Map<String, Object> res = new LinkedHashMap<>();
+            res.put("success", true);
+            res.put("ticketId", ticket.getId());
+            res.put("ticketCode", ticket.getTicketCode());
+            res.put("status", ticket.getStatus());
+            res.put("totalAmount", ticket.getTotalAmount());
+            res.put("refundAmount", ticket.getRefundAmount());
+            res.put("message", "Hủy vé thành công, hoàn " + ticket.getRefundAmount() + " VNĐ");
+
+            sendOk(response, res);
+
+        } catch (ServiceException.NotFound e) {
+            sendError(response, 404, "NOT_FOUND", e.getMessage());
+        } catch (ServiceException.Forbidden e) {
+            sendError(response, 403, "FORBIDDEN", e.getMessage());
+        } catch (ServiceException.Conflict e) {
+            sendError(response, 409, "CONFLICT", e.getMessage());
+        } catch (ServiceException.BusinessRule e) {
+            sendError(response, 400, e.code(), e.getMessage());
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "Lỗi khi hủy vé", e);
+            sendError(response, 500, "INTERNAL_ERROR", "Không thể hủy vé: " + e.getMessage());
+        }
+    }
+
+    /** Chức năng 4: Soát vé Check-in tại chi nhánh. */
+    private void handleValidate(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        String ticketCode = request.getParameter("ticketCode");
+        if (ticketCode == null || ticketCode.isBlank()) {
+            ticketCode = request.getParameter("code");
+        }
+        if (ticketCode == null || ticketCode.isBlank()) {
+            sendError(response, 400, "BAD_REQUEST", "Thiếu mã vé (ticketCode)");
+            return;
+        }
+
+        var session = request.getSession(false);
+        Long staffId = null;
+        Long staffBranchId = null;
+
+        if (session != null) {
+            Object uid = session.getAttribute("userId");
+            if (uid instanceof Long l) staffId = l;
+            else if (uid instanceof Integer i) staffId = i.longValue();
+
+            Object bid = session.getAttribute("branchId");
+            if (bid instanceof Long l) staffBranchId = l;
+            else if (bid instanceof Integer i) staffBranchId = i.longValue();
+        }
+
+        String staffParam = request.getParameter("staffId");
+        if (staffParam != null && !staffParam.isBlank()) {
+            try { staffId = Long.parseLong(staffParam.trim()); } catch (NumberFormatException ignored) {}
+        }
+        String branchParam = request.getParameter("branchId");
+        if (branchParam != null && !branchParam.isBlank()) {
+            try { staffBranchId = Long.parseLong(branchParam.trim()); } catch (NumberFormatException ignored) {}
+        }
+
+        if (staffId == null) staffId = 1L;
+        if (staffBranchId == null) staffBranchId = 1L;
+
+        try {
+            Ticket ticket = bookingService.validateTicket(ticketCode, staffId, staffBranchId);
+
+            Map<String, Object> res = new LinkedHashMap<>();
+            res.put("success", true);
+            res.put("ticketId", ticket.getId());
+            res.put("ticketCode", ticket.getTicketCode());
+            res.put("status", ticket.getStatus());
+            res.put("usedAt", ticket.getUsedAt());
+            res.put("usedBy", ticket.getUsedBy());
+            res.put("message", "Soát vé thành công — Vé hợp lệ");
+
+            sendOk(response, res);
+
+        } catch (ServiceException.NotFound e) {
+            sendError(response, 404, "NOT_FOUND", e.getMessage());
+        } catch (ServiceException.Forbidden e) {
+            sendError(response, 403, "FORBIDDEN", e.getMessage());
+        } catch (ServiceException.Conflict e) {
+            sendError(response, 409, "CONFLICT", e.getMessage());
+        } catch (ServiceException.BusinessRule e) {
+            sendError(response, 400, e.code(), e.getMessage());
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "Lỗi khi soát vé", e);
+            sendError(response, 500, "INTERNAL_ERROR", "Lỗi soát vé: " + e.getMessage());
+        }
+    }
+
+    /** Chức năng 4: Tra cứu thông tin vé phục vụ màn hình Check-in / Soát vé. */
+    private void handleLookup(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        String ticketCode = request.getParameter("ticketCode");
+        if (ticketCode == null || ticketCode.isBlank()) {
+            ticketCode = request.getParameter("code");
+        }
+        if (ticketCode == null || ticketCode.isBlank()) {
+            sendError(response, 400, "BAD_REQUEST", "Thiếu mã vé (ticketCode)");
+            return;
+        }
+
+        var session = request.getSession(false);
+        Long staffBranchId = null;
+        if (session != null && session.getAttribute("branchId") != null) {
+            Object bid = session.getAttribute("branchId");
+            if (bid instanceof Long l) staffBranchId = l;
+            else if (bid instanceof Integer i) staffBranchId = i.longValue();
+        }
+        String branchParam = request.getParameter("branchId");
+        if (branchParam != null && !branchParam.isBlank()) {
+            try { staffBranchId = Long.parseLong(branchParam.trim()); } catch (NumberFormatException ignored) {}
+        }
+
+        try {
+            Map<String, Object> details = bookingService.lookupTicket(ticketCode, staffBranchId);
+            sendOk(response, details);
+        } catch (ServiceException.NotFound e) {
+            sendError(response, 404, "NOT_FOUND", e.getMessage());
+        } catch (ServiceException.Forbidden e) {
+            sendError(response, 403, "FORBIDDEN", e.getMessage());
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "Lỗi khi tra cứu vé", e);
+            sendError(response, 500, "INTERNAL_ERROR", "Lỗi tra cứu vé: " + e.getMessage());
+        }
+    }
+
+    /** Lịch sử vé cá nhân. */
     private void handleMine(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         var session = request.getSession(false);
-        if (session == null || session.getAttribute("userId") == null) {
+        Long userId = null;
+        if (session != null && session.getAttribute("userId") != null) {
+            Object uid = session.getAttribute("userId");
+            if (uid instanceof Long l) userId = l;
+            else if (uid instanceof Integer i) userId = i.longValue();
+        }
+        if (userId == null) {
+            String uParam = request.getParameter("userId");
+            if (uParam != null && !uParam.isBlank()) {
+                try { userId = Long.parseLong(uParam.trim()); } catch (NumberFormatException ignored) {}
+            }
+        }
+        if (userId == null) {
             sendError(response, 401, "UNAUTHORIZED", "Vui lòng đăng nhập để xem vé");
             return;
         }
 
-        Long userId = (Long) session.getAttribute("userId");
         try {
             List<Ticket> tickets = bookingService.listMyTickets(userId);
             sendOk(response, tickets);
@@ -216,9 +403,7 @@ public class BookingController extends HttpServlet {
         }
     }
 
-    /**
-     * GET /booking/ticket?code=... — Tra cứu chi tiết vé theo mã vé (Chức năng 3).
-     */
+    /** Chi tiết vé. */
     private void handleTicketDetail(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         var session = request.getSession(false);

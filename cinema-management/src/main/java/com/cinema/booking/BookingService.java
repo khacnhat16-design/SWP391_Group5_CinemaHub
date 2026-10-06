@@ -7,8 +7,12 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -16,18 +20,21 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Service đặt vé — Phụ trách bởi Người 4 (Nhất).
+ * Service Đặt vé — Phụ trách bởi Người 4 (Nhất).
  * Chức năng 2: Giữ ghế 10 phút và chống tranh chấp đồng thời (Concurrency Control).
  * Chức năng 3: Snapshot giá vé, tạo vé PENDING, xác nhận đặt vé (CONFIRMED) và tra cứu vé cá nhân.
+ * Chức năng 4: Hủy vé theo chính sách hoàn tiền bậc thang (Tiered Refund Policy) và Soát vé Check-in.
  */
 public class BookingService {
     private static final Logger logger = Logger.getLogger(BookingService.class.getName());
+    public static final ZoneId BUSINESS_TZ = ZoneId.of("Asia/Ho_Chi_Minh");
 
     private final SeatHoldDAO seatHoldDao;
     private final TicketDAO ticketDao;
@@ -60,36 +67,29 @@ public class BookingService {
             total = seatIds.size() * 75_000L;
         }
 
-        Map<String, Object> res = new HashMap<>();
-        res.put("baseTotal", total);
-        res.put("tierDiscount", 0L);
-        res.put("voucherDiscount", 0L);
-        res.put("payable", total);
-        return res;
+        Map<String, Object> quote = new HashMap<>();
+        quote.put("baseTotal", total);
+        quote.put("tierDiscount", 0L);
+        quote.put("voucherDiscount", 0L);
+        quote.put("payable", total);
+        return quote;
     }
 
     /**
-     * Giữ ghế trực tuyến trong 10 phút (Chức năng 2) và tạo Vé PENDING kèm Snapshot giá (Chức năng 3).
-     *
-     * <p>Chống Race Condition:
-     * Sắp xếp seat_id tăng dần và dùng SELECT ... WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
-     * trong Transaction để tránh Deadlock và đảm bảo chỉ đúng 1 khách hàng giữ được ghế khi bấm cùng lúc.
+     * Chức năng 2: Giữ ghế 10 phút (Seat Hold Concurrency Control).
      */
     public HoldResult holdSeats(long showtimeId, List<Long> seatIds, Long userId) {
         if (seatIds == null || seatIds.isEmpty()) {
             return HoldResult.rejected("Vui lòng chọn ít nhất một ghế");
         }
 
-        // 1. Sắp xếp danh sách ghế tăng dần để chống Deadlock giữa 2 giao dịch đồng thời
         List<Long> orderedSeatIds = new ArrayList<>(new TreeSet<>(seatIds));
 
-        // 2. Mở Transaction giữ ghế và tạo vé
         try (Connection conn = DBContext.getConnection()) {
             conn.setAutoCommit(false);
             try {
                 List<SeatHoldDAO.SeatRow> lockedSeats = new ArrayList<>();
 
-                // Khóa và kiểm tra từng ghế trong DB
                 for (Long seatId : orderedSeatIds) {
                     SeatHoldDAO.SeatRow row = seatHoldDao.lockSeat(conn, showtimeId, seatId);
                     if (row == null) {
@@ -97,7 +97,6 @@ public class BookingService {
                         return HoldResult.rejected("Ghế không tồn tại hoặc không thuộc suất chiếu này");
                     }
 
-                    // Kiểm tra ghế có đang AVAILABLE hoặc hold cũ đã hết hạn (Lazy Expiry) không
                     boolean isExpiredHold = row.holdExpiresAt != null &&
                             LocalDateTime.now(ZoneOffset.UTC).isAfter(row.holdExpiresAt);
 
@@ -108,16 +107,13 @@ public class BookingService {
                     lockedSeats.add(row);
                 }
 
-                // 3. Tạo bản ghi seat_hold mới với thời hạn 10 phút
                 long holdId = seatHoldDao.insertHold(conn, showtimeId, userId);
                 LocalDateTime expiresAt = LocalDateTime.now(ZoneOffset.UTC).plusMinutes(SeatHoldDAO.HOLD_MINUTES);
 
-                // 4. Đánh dấu các ghế sang trạng thái HOLD
                 for (SeatHoldDAO.SeatRow row : lockedSeats) {
                     seatHoldDao.markSeatHeld(conn, showtimeId, row.seatId, holdId, expiresAt);
                 }
 
-                // 5. Chức năng 3: Snapshot giá từng ghế và tạo vé PENDING
                 long branchId = queryBranchId(conn, showtimeId);
                 long totalAmount = 0;
                 List<Ticket.TicketSeat> snapshotSeats = new ArrayList<>();
@@ -138,19 +134,21 @@ public class BookingService {
                 ticket.setStatus(Ticket.STATUS_PENDING);
                 ticket.setTotalAmount(totalAmount);
                 ticket.setHoldId(holdId);
+                ticket.setCreatedAt(LocalDateTime.now());
+                ticket.setSeats(snapshotSeats);
 
                 long ticketId = ticketDao.insert(conn, ticket);
+                ticket.setId(ticketId);
                 ticketDao.insertSeats(conn, ticketId, snapshotSeats);
 
                 conn.commit();
-                logger.info("Giữ thành công " + lockedSeats.size() + " ghế (holdId=" + holdId 
-                        + ", ticketId=" + ticketId + ") cho user " + userId);
+                logger.info("Giữ thành công " + orderedSeatIds.size() + " ghế (holdId=" + holdId + ")");
                 return HoldResult.accepted(String.valueOf(holdId));
 
             } catch (Exception ex) {
                 conn.rollback();
-                logger.log(Level.WARNING, "Lỗi khi giữ ghế và tạo vé trong transaction", ex);
-                return HoldResult.rejected("Không giữ được ghế — vui lòng thử lại");
+                logger.log(Level.SEVERE, "Lỗi transaction khi giữ ghế", ex);
+                return HoldResult.rejected("Lỗi hệ thống khi xử lý giữ ghế");
             }
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Lỗi kết nối cơ sở dữ liệu khi giữ ghế", e);
@@ -159,13 +157,7 @@ public class BookingService {
     }
 
     /**
-     * Xác nhận đặt vé trong thời hạn giữ ghế 10 phút (Chức năng 3).
-     *
-     * <p>Xử lý nguyên tử (Atomic Transaction):
-     * 1. Khóa và kiểm tra thời hạn giữ ghế (status='ACTIVE' và expires_at > now).
-     * 2. Chuyển trạng thái vé PENDING -> CONFIRMED (Guarded Update).
-     * 3. Chuyển trạng thái ghế trong showtime_seat từ HOLD -> SOLD.
-     * 4. Cập nhật trạng thái seat_hold sang CONFIRMED.
+     * Chức năng 3: Xác nhận đặt vé (PENDING -> CONFIRMED).
      */
     public Ticket confirmBooking(long holdId, Long actorUserId) throws Exception {
         sweepExpiredHolds();
@@ -173,7 +165,6 @@ public class BookingService {
         try (Connection conn = DBContext.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                // 1. Khóa bản ghi giữ ghế
                 SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
                 if (hold == null) {
                     throw new ServiceException.NotFound("Không tìm thấy thông tin giữ ghế");
@@ -188,7 +179,6 @@ public class BookingService {
                     throw new ServiceException.Conflict("Thời hạn giữ ghế 10 phút đã hết hạn, vui lòng chọn lại ghế");
                 }
 
-                // 2. Tìm bản ghi vé PENDING ứng với holdId
                 Ticket ticket = ticketDao.findByHoldIdLocked(conn, holdId)
                         .orElseThrow(() -> new ServiceException.NotFound("Không tìm thấy thông tin vé tương ứng"));
 
@@ -196,7 +186,6 @@ public class BookingService {
                     throw new ServiceException.Conflict("Vé đã được xử lý hoặc không ở trạng thái chờ xác nhận");
                 }
 
-                // 3. Cập nhật vé sang CONFIRMED (Bảo vệ Optimistic Locking chống xác nhận lặp)
                 boolean ticketUpdated = ticketDao.confirmGuarded(
                         conn, ticket.getId(), ticket.getTotalAmount(), ticket.getVoucherCode(), 0
                 );
@@ -204,7 +193,6 @@ public class BookingService {
                     throw new ServiceException.Conflict("Không thể xác nhận vé (trạng thái vé đã bị thay đổi)");
                 }
 
-                // 4. Chuyển trạng thái ghế từ HOLD sang SOLD
                 List<Long> seatIds = seatHoldDao.findSeatIdsOfHold(conn, holdId);
                 if (seatIds.isEmpty()) {
                     throw new ServiceException.Conflict("Phiên giữ ghế không còn ghế hợp lệ");
@@ -213,10 +201,8 @@ public class BookingService {
                     seatHoldDao.markSeatSold(conn, hold.showtimeId, seatId);
                 }
 
-                // 5. Cập nhật seat_hold sang CONFIRMED
                 seatHoldDao.updateHoldStatus(conn, holdId, "CONFIRMED", "ACTIVE");
 
-                // 6. Nạp thông tin ghế snapshot để trả về
                 List<Ticket.TicketSeat> seats = ticketDao.findSeats(conn, ticket.getId());
                 ticket.setSeats(seats);
                 ticket.setStatus(Ticket.STATUS_CONFIRMED);
@@ -229,6 +215,213 @@ public class BookingService {
             } catch (Exception ex) {
                 conn.rollback();
                 throw ex;
+            }
+        }
+    }
+
+    /**
+     * Chức năng 4: Hủy vé kèm chính sách hoàn tiền bậc thang (Tiered Refund Policy).
+     * >= 24h: hoàn 100%
+     * 2h - 24h: hoàn 50%
+     * < 2h: hoàn 0%
+     */
+    public Ticket cancelTicket(long ticketId, Long actorCustomerId, Long actorStaffBranchId) throws Exception {
+        sweepExpiredHolds();
+
+        try (Connection conn = DBContext.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                Ticket ticket = ticketDao.findByIdLocked(conn, ticketId)
+                        .orElseThrow(() -> new ServiceException.NotFound("Vé không tồn tại"));
+
+                if (actorStaffBranchId != null) {
+                    if (ticket.getBranchId() != actorStaffBranchId) {
+                        throw new ServiceException.Forbidden("Vi phạm phạm vi chi nhánh: vé thuộc chi nhánh khác");
+                    }
+                } else if (actorCustomerId != null) {
+                    if (ticket.getUserId() == null || !actorCustomerId.equals(ticket.getUserId())) {
+                        throw new ServiceException.Forbidden("Chỉ chủ vé mới được hủy vé");
+                    }
+                } else {
+                    throw new ServiceException.Forbidden("Không có quyền hủy vé");
+                }
+
+                if (Ticket.STATUS_PENDING.equals(ticket.getStatus())) {
+                    throw new ServiceException.BusinessRule("TICKET_NOT_CONFIRMED",
+                            "Vé chưa thanh toán — không thể hủy theo chính sách hoàn tiền");
+                }
+                if (Ticket.STATUS_USED.equals(ticket.getStatus())) {
+                    throw new ServiceException.BusinessRule("TICKET_USED",
+                            "Vé đã được soát — không thể hủy hoặc hoàn tiền");
+                }
+                if (Ticket.STATUS_CANCELLED.equals(ticket.getStatus())) {
+                    throw new ServiceException.Conflict("Vé đã bị hủy trước đó");
+                }
+
+                LocalDateTime showtimeStart = queryShowtimeStartTime(conn, ticket.getShowtimeId());
+                long refundRate = refundRatePercent(Instant.now(), showtimeStart);
+                long refundAmount = ticket.getTotalAmount() * refundRate / 100;
+
+                List<Ticket.TicketSeat> ticketSeats = ticketDao.findSeats(conn, ticketId);
+                if (ticketSeats.isEmpty()) {
+                    throw new ServiceException.Conflict("Vé không có ghế để giải phóng");
+                }
+
+                if (!ticketDao.cancelGuarded(conn, ticketId, refundAmount)) {
+                    throw new ServiceException.Conflict("Vé vừa được xử lý bởi một yêu cầu khác");
+                }
+
+                for (Ticket.TicketSeat seat : ticketSeats) {
+                    seatHoldDao.releaseSeat(conn, ticket.getShowtimeId(), seat.seatId());
+                }
+
+                conn.commit();
+                logger.info("Cancelled ticket " + ticketId + " refund " + refundAmount + " (" + refundRate + "%)");
+
+                ticket.setStatus(Ticket.STATUS_CANCELLED);
+                ticket.setRefundAmount(refundAmount);
+                ticket.setSeats(ticketSeats);
+                return ticket;
+
+            } catch (Exception ex) {
+                conn.rollback();
+                throw ex;
+            }
+        }
+    }
+
+    /**
+     * Chức năng 4: Soát vé (Check-in) một lần tại đúng chi nhánh.
+     * Concurrency guarded row lock: 2 nhân viên quét cùng lúc chỉ 1 người thành công.
+     */
+    public Ticket validateTicket(String ticketCode, long validatorStaffId, long validatorBranchId) throws Exception {
+        if (ticketCode == null || ticketCode.isBlank()) {
+            throw new ServiceException.Validation("Mã vé là bắt buộc");
+        }
+        if (validatorBranchId <= 0) {
+            throw new ServiceException.Forbidden("Tài khoản chưa được gán chi nhánh");
+        }
+        sweepExpiredHolds();
+
+        try (Connection conn = DBContext.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                Ticket ticket = ticketDao.findByCodeLocked(conn, ticketCode.trim().toUpperCase())
+                        .orElseThrow(() -> new ServiceException.NotFound("Mã vé không tồn tại"));
+
+                if (ticket.getBranchId() != validatorBranchId) {
+                    throw new ServiceException.Forbidden("Vé thuộc chi nhánh khác — không thể soát tại chi nhánh này");
+                }
+
+                switch (ticket.getStatus()) {
+                    case Ticket.STATUS_PENDING -> throw new ServiceException.BusinessRule(
+                            "TICKET_PENDING", "Vé chưa thanh toán — không thể soát vé");
+                    case Ticket.STATUS_CANCELLED -> throw new ServiceException.BusinessRule(
+                            "TICKET_CANCELLED", "Vé đã bị hủy — không thể soát vé");
+                    case Ticket.STATUS_USED -> throw new ServiceException.Conflict("Vé đã được sử dụng trước đó");
+                    default -> { /* CONFIRMED */ }
+                }
+
+                ShowtimeInfo showtime = queryShowtimeInfo(conn, ticket.getShowtimeId());
+                if (showtime != null) {
+                    if ("CANCELLED".equalsIgnoreCase(showtime.status)) {
+                        throw new ServiceException.BusinessRule("SHOWTIME_CANCELLED",
+                                "Suất chiếu đã bị hủy — không thể soát vé");
+                    }
+                    LocalDateTime now = LocalDateTime.now(BUSINESS_TZ);
+                    if (showtime.endTime != null && now.isAfter(showtime.endTime)) {
+                        throw new ServiceException.BusinessRule("SHOWTIME_ENDED",
+                                "Suất chiếu đã kết thúc — không thể soát vé");
+                    }
+                    if (showtime.startTime != null && isTooEarlyForCheckIn(now, showtime.startTime)) {
+                        throw new ServiceException.BusinessRule("TOO_EARLY",
+                                "Suất chiếu chưa bắt đầu — chỉ soát trước giờ chiếu tối đa 30 phút");
+                    }
+                }
+
+                if (!ticketDao.useGuarded(conn, ticket.getId(), validatorStaffId)) {
+                    throw new ServiceException.Conflict("Vé vừa được soát bởi một yêu cầu khác");
+                }
+
+                conn.commit();
+                logger.info("Ticket " + ticket.getTicketCode() + " validated by staff " + validatorStaffId);
+
+                ticket.setStatus(Ticket.STATUS_USED);
+                ticket.setUsedAt(LocalDateTime.now());
+                ticket.setUsedBy(validatorStaffId);
+                ticket.setSeats(ticketDao.findSeats(conn, ticket.getId()));
+                return ticket;
+
+            } catch (Exception ex) {
+                conn.rollback();
+                throw ex;
+            }
+        }
+    }
+
+    /**
+     * Chức năng 4: Tra cứu thông tin vé chi tiết phục vụ màn hình Check-in / Soát vé.
+     */
+    public Map<String, Object> lookupTicket(String ticketCode, Long validatorBranchId) throws Exception {
+        if (ticketCode == null || ticketCode.isBlank()) {
+            throw new ServiceException.Validation("Mã vé là bắt buộc");
+        }
+        String sql = """
+            SELECT TOP 1 t.id, t.ticket_code, COALESCE(u.full_name, N'Khách lẻ') AS customer_name,
+                   u.email AS customer_email, m.title AS movie_title,
+                   sc.name AS screen_name, s.start_time AS showtime_start, s.end_time AS showtime_end,
+                   b.name AS branch_name, t.branch_id, t.total_amount, t.refund_amount, t.status,
+                   t.created_at, t.confirmed_at, t.used_at, t.used_by
+            FROM dbo.ticket t
+            LEFT JOIN dbo.user_account u ON u.id = t.user_id
+            JOIN dbo.showtime s ON s.id = t.showtime_id
+            JOIN dbo.movie m ON m.id = s.movie_id
+            JOIN dbo.screen sc ON sc.id = s.screen_id
+            JOIN dbo.branch b ON b.id = t.branch_id
+            WHERE t.ticket_code = ?
+            """;
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, ticketCode.trim().toUpperCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new ServiceException.NotFound("Không tìm thấy thông tin vé với mã: " + ticketCode);
+                }
+                long branchId = rs.getLong("branch_id");
+                if (validatorBranchId != null && validatorBranchId > 0 && branchId != validatorBranchId) {
+                    throw new ServiceException.Forbidden("Vé thuộc chi nhánh khác — không thể tra cứu tại chi nhánh này");
+                }
+                Map<String, Object> map = new HashMap<>();
+                map.put("ticketId", rs.getLong("id"));
+                map.put("ticketCode", rs.getString("ticket_code"));
+                map.put("customerName", rs.getString("customer_name"));
+                map.put("customerEmail", rs.getString("customer_email"));
+                map.put("movieTitle", rs.getString("movie_title"));
+                map.put("screenName", rs.getString("screen_name"));
+                map.put("showtimeStart", rs.getTimestamp("showtime_start"));
+                map.put("showtimeEnd", rs.getTimestamp("showtime_end"));
+                map.put("branchName", rs.getString("branch_name"));
+                map.put("branchId", branchId);
+                map.put("totalAmount", rs.getLong("total_amount"));
+                map.put("refundAmount", rs.getObject("refund_amount"));
+                map.put("status", rs.getString("status"));
+                map.put("createdAt", rs.getTimestamp("created_at"));
+                map.put("confirmedAt", rs.getTimestamp("confirmed_at"));
+                map.put("usedAt", rs.getTimestamp("used_at"));
+                map.put("usedBy", rs.getObject("used_by"));
+
+                List<Ticket.TicketSeat> seats = ticketDao.findSeats(conn, rs.getLong("id"));
+                List<Map<String, Object>> seatList = new ArrayList<>();
+                for (Ticket.TicketSeat s : seats) {
+                    seatList.add(Map.of(
+                            "seatId", s.seatId(),
+                            "label", s.rowLabel() + s.colNo(),
+                            "seatType", s.seatType() != null ? s.seatType() : "STANDARD",
+                            "price", s.price()
+                    ));
+                }
+                map.put("seats", seatList);
+                return map;
             }
         }
     }
@@ -301,8 +494,7 @@ public class BookingService {
     }
 
     /**
-     * Quét và tự động giải phóng tất cả các ghế bị giữ quá 10 phút chưa thanh toán
-     * (Lazy & Periodic sweep).
+     * Quét và tự động giải phóng tất cả các ghế bị giữ quá 10 phút chưa thanh toán.
      */
     public int sweepExpiredHolds() {
         try (Connection conn = DBContext.getConnection()) {
@@ -321,7 +513,77 @@ public class BookingService {
         }
     }
 
-    /** Tính giá snapshot cho ghế dựa theo loại ghế. */
+    // ---- Policy Helpers for Tests & Business Rules ----
+
+    /**
+     * Tính tỷ lệ hoàn tiền theo bậc thang dựa trên múi giờ Việt Nam (+7).
+     * >= 24h: hoàn 100%
+     * 2h - 24h: hoàn 50%
+     * < 2h hoặc đã chiếu: hoàn 0%
+     */
+    public static long refundRatePercent(Instant now, LocalDateTime showtimeStart) {
+        if (showtimeStart == null) return 0;
+        LocalDateTime businessNow = LocalDateTime.ofInstant(now, BUSINESS_TZ);
+        Duration until = Duration.between(businessNow, showtimeStart);
+        if (until.isNegative()) return 0;
+        if (until.toHours() >= 24) return 100;
+        if (until.toHours() >= 2) return 50;
+        return 0;
+    }
+
+    /**
+     * Chỉ cho phép soát vé trước giờ chiếu tối đa 30 phút.
+     */
+    public static boolean isTooEarlyForCheckIn(LocalDateTime now, LocalDateTime showtimeStart) {
+        if (showtimeStart == null) return false;
+        return now.isBefore(showtimeStart.minusMinutes(30));
+    }
+
+    private LocalDateTime queryShowtimeStartTime(Connection conn, long showtimeId) {
+        String sql = "SELECT start_time FROM dbo.showtime WHERE id = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, showtimeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    Timestamp ts = rs.getTimestamp("start_time");
+                    if (ts != null) return ts.toLocalDateTime();
+                }
+            }
+        } catch (SQLException ignored) { }
+        return null;
+    }
+
+    private ShowtimeInfo queryShowtimeInfo(Connection conn, long showtimeId) {
+        String sql = "SELECT status, start_time, end_time FROM dbo.showtime WHERE id = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, showtimeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String status = rs.getString("status");
+                    Timestamp start = rs.getTimestamp("start_time");
+                    Timestamp end = rs.getTimestamp("end_time");
+                    return new ShowtimeInfo(
+                            status,
+                            start != null ? start.toLocalDateTime() : null,
+                            end != null ? end.toLocalDateTime() : null
+                    );
+                }
+            }
+        } catch (SQLException ignored) { }
+        return null;
+    }
+
+    public static class ShowtimeInfo {
+        public final String status;
+        public final LocalDateTime startTime;
+        public final LocalDateTime endTime;
+        public ShowtimeInfo(String status, LocalDateTime startTime, LocalDateTime endTime) {
+            this.status = status;
+            this.startTime = startTime;
+            this.endTime = endTime;
+        }
+    }
+
     private long calculateSeatPrice(String seatType) {
         if (seatType == null) return 75_000L;
         return switch (seatType.toUpperCase()) {
