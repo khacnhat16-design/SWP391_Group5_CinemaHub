@@ -27,10 +27,22 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Service Đặt vé — Phụ trách bởi Người 4 (Nhất).
- * Chức năng 2: Giữ ghế 10 phút và chống tranh chấp đồng thời (Concurrency Control).
- * Chức năng 3: Snapshot giá vé, tạo vé PENDING, xác nhận đặt vé (CONFIRMED) và tra cứu vé cá nhân.
- * Chức năng 4: Hủy vé theo chính sách hoàn tiền bậc thang (Tiered Refund Policy) và Soát vé Check-in.
+ * Service đặt vé trọng tâm đồng thời (Req 7.1-7.7, 8.1-8.6, 11.1-11.7, 12.1-12.6).
+ * Chức năng: Xử lý nghiệp vụ đặt vé, giữ chỗ, xác nhận vé, chính sách hoàn tiền và soát vé.
+ *
+ * <p>Concurrency (design.md BookingService):
+ * <ul>
+ *   <li>holdSeats: khóa showtime_seat theo seat_id TĂNG DẦN bằng
+ *       SELECT ... WITH (UPDLOCK, HOLDLOCK, ROWLOCK) trong transaction để hai Customer
+ *       giữ cùng ghế đồng thời thì đúng một người thắng (Req 8.1-8.3).</li>
+ *   <li>confirmBooking: khóa hold + vé, kiểm tra hiệu lực, ghi nhận thanh toán,
+ *       chuyển ghế SOLD — nguyên tử trong MỘT transaction (Req 8.2).</li>
+ *   <li>Lazy expiry: hold hết hạn coi như AVAILABLE khi đọc; sweep dọn hold
+ *       quá hạn (Req 7.4, 8.4).</li>
+ *   <li>cancelTicket: bậc thang >=24h hoàn 100%, 2–24h hoàn 50%, <2h không hoàn,
+ *       USED chặn (Req 11.1); hai hủy đồng thời thì đúng một người thắng (Req 11.6).</li>
+ *   <li>validateTicket: một lần soát tại đúng chi nhánh, showtime chưa kết thúc (Req 12).</li>
+ * </ul>
  */
 public class BookingService {
     private static final Logger logger = Logger.getLogger(BookingService.class.getName());
@@ -76,7 +88,7 @@ public class BookingService {
     }
 
     /**
-     * Chức năng 2: Giữ ghế 10 phút (Seat Hold Concurrency Control).
+     * Req 7.1-7.3, 8.1 — Giữ ghế 10 phút và chống tranh chấp đồng thời (Concurrency Control).
      */
     public HoldResult holdSeats(long showtimeId, List<Long> seatIds, Long userId) {
         if (seatIds == null || seatIds.isEmpty()) {
@@ -157,7 +169,7 @@ public class BookingService {
     }
 
     /**
-     * Chức năng 3: Xác nhận đặt vé (PENDING -> CONFIRMED).
+     * Req 7.5, 7.6, 8.2 — Xác nhận đặt vé trong thời hạn hold (PENDING -> CONFIRMED).
      */
     public Ticket confirmBooking(long holdId, Long actorUserId) throws Exception {
         sweepExpiredHolds();
@@ -220,7 +232,7 @@ public class BookingService {
     }
 
     /**
-     * Chức năng 4: Hủy vé kèm chính sách hoàn tiền bậc thang (Tiered Refund Policy).
+     * Req 11 — Hủy vé kèm chính sách hoàn tiền bậc thang (Tiered Refund Policy).
      * >= 24h: hoàn 100%
      * 2h - 24h: hoàn 50%
      * < 2h: hoàn 0%
@@ -291,7 +303,7 @@ public class BookingService {
     }
 
     /**
-     * Chức năng 4: Soát vé (Check-in) một lần tại đúng chi nhánh.
+     * Req 12 — Soát vé (Check-in) một lần tại đúng chi nhánh.
      * Concurrency guarded row lock: 2 nhân viên quét cùng lúc chỉ 1 người thành công.
      */
     public Ticket validateTicket(String ticketCode, long validatorStaffId, long validatorBranchId) throws Exception {
@@ -360,7 +372,7 @@ public class BookingService {
     }
 
     /**
-     * Chức năng 4: Tra cứu thông tin vé chi tiết phục vụ màn hình Check-in / Soát vé.
+     * Tra cứu thông tin vé chi tiết phục vụ màn hình Check-in / Soát vé.
      */
     public Map<String, Object> lookupTicket(String ticketCode, Long validatorBranchId) throws Exception {
         if (ticketCode == null || ticketCode.isBlank()) {
@@ -427,7 +439,7 @@ public class BookingService {
     }
 
     /**
-     * Tra cứu danh sách vé đã mua của khách hàng (Chức năng 3).
+     * Req 16.5 — Tra cứu danh sách vé đã mua của chính Customer (chặn IDOR).
      */
     public List<Ticket> listMyTickets(Long userId) throws SQLException {
         if (userId == null) return Collections.emptyList();
@@ -468,7 +480,7 @@ public class BookingService {
     }
 
     /**
-     * Giải phóng ghế khi khách hàng bỏ chọn hoặc chủ động hủy giữ (Chức năng 2).
+     * Giải phóng ghế khi khách hàng bỏ chọn hoặc chủ động hủy giữ.
      */
     public boolean releaseHold(long showtimeId, List<Long> seatIds, Long userId) {
         if (seatIds == null || seatIds.isEmpty())

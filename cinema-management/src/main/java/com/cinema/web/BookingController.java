@@ -20,10 +20,20 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Controller Đặt vé — Phụ trách bởi Người 4 (Nhất).
- * Chức năng 2: Giữ ghế 10 phút (/booking/hold) & Nhả ghế (/booking/release).
- * Chức năng 3: Báo giá (/booking/quote), xác nhận đặt vé (/booking/confirm) và tra cứu vé cá nhân (/booking/mine).
- * Chức năng 4: Hủy vé theo chính sách hoàn tiền bậc thang (/booking/cancel), Soát vé Check-in (/booking/validate), Tra cứu vé (/booking/lookup).
+ * REST API controller cho booking flow (Req 7, 8, 11, 12).
+ * Chức năng: Đặt vé xem phim (Booking Flow) — Giữ ghế, xác nhận vé, hủy vé và soát vé.
+ *
+ * <p>Endpoints:
+ * <ul>
+ *   <li>POST /booking/quote — Báo giá tạm tính trước khi giữ ghế.</li>
+ *   <li>POST /booking/hold — Customer giữ ghế 10 phút (Req 7.1).</li>
+ *   <li>POST /booking/release — Customer nhả giữ ghế khi hủy chọn.</li>
+ *   <li>POST /booking/confirm — Xác nhận booking trong hold (Req 7.5).</li>
+ *   <li>POST /booking/cancel — Hủy vé bậc thang (Customer chủ vé hoặc Staff đúng branch, Req 11).</li>
+ *   <li>POST /booking/validate — Branch Staff soát vé một lần (Req 12).</li>
+ *   <li>GET /booking/mine — Lịch sử vé của chính Customer (Req 16.5, chặn IDOR).</li>
+ *   <li>GET /booking/lookup — Tra cứu nhanh thông tin vé theo mã vé.</li>
+ * </ul>
  */
 @WebServlet(name = "BookingController", urlPatterns = { "/booking/*" })
 public class BookingController extends HttpServlet {
@@ -209,7 +219,7 @@ public class BookingController extends HttpServlet {
         }
     }
 
-    /** Chức năng 4: Hủy vé theo chính sách hoàn tiền bậc thang. */
+    /** Req 11 — Customer hủy vé của mình hoặc Staff hủy tại quầy đúng chi nhánh. */
     private void handleCancel(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         var session = request.getSession(false);
@@ -270,7 +280,7 @@ public class BookingController extends HttpServlet {
         }
     }
 
-    /** Chức năng 4: Soát vé Check-in tại chi nhánh. */
+    /** Req 12 — Branch Staff soát vé một lần tại đúng chi nhánh. */
     private void handleValidate(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         String ticketCode = request.getParameter("ticketCode");
@@ -336,7 +346,7 @@ public class BookingController extends HttpServlet {
         }
     }
 
-    /** Chức năng 4: Tra cứu thông tin vé phục vụ màn hình Check-in / Soát vé. */
+    /** Tra cứu nhanh một vé theo ticketCode (read-only). */
     private void handleLookup(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         String ticketCode = request.getParameter("ticketCode");

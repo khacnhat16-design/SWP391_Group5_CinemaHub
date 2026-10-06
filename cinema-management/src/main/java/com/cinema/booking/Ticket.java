@@ -5,9 +5,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Entity Vé — Phụ trách bởi Người 4 (Nhất).
- * Chức năng 3: Quản lý vòng đời vé, lưu Snapshot giá ghế và tra cứu lịch sử vé cá nhân.
- * Vòng đời trạng thái: PENDING -> CONFIRMED -> USED / CANCELLED.
+ * Entity vé (Req 7, 8, 11, 12).
+ * Chức năng: Quản lý vòng đời vé và lưu snapshot giá ghế (PENDING -> CONFIRMED -> USED / CANCELLED).
  */
 public class Ticket {
     public static final String STATUS_PENDING = "PENDING";
