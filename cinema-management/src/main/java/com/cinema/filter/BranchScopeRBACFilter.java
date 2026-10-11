@@ -1,10 +1,12 @@
 package com.cinema.filter;
 
-import com.cinema.audit.AuditService;
-import com.cinema.auth.AccessScope;
-import com.cinema.auth.Role;
+import com.cinema.service.audit.AuditService;
+import com.cinema.model.auth.AccessScope;
+import com.cinema.model.auth.Role;
 import com.cinema.common.ErrorEnvelope;
 import com.cinema.common.SerializationUtil;
+import com.cinema.infrastructure.database.DBContext;
+import com.cinema.model.branch.Branch;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -250,7 +252,7 @@ public final class BranchScopeRBACFilter implements Filter {
     private void auditUnauthorizedAccess(AccessScope scope, String path, String method) {
         try {
             String roleStr = scope.isGuest() ? "GUEST" : scope.role().toString();
-            try (var conn = dal.DBContext.getConnection()) {
+            try (var conn = com.cinema.infrastructure.database.DBContext.getConnection()) {
                 auditService.record(conn, null, "UNAUTHORIZED_ACCESS", "REQUEST",
                         null, null,
                         String.format("role=%s method=%s path=%s", roleStr, method, path),

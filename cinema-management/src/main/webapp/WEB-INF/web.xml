@@ -66,12 +66,12 @@
         <url-pattern>/*</url-pattern>
     </filter-mapping>
 
-    <!-- Kết nối DB cấu hình tập trung trong com.cinema.util.DBUtil (SQL Server SQLEXPRESS) -->
+    <!-- Database access is provided by com.cinema.infrastructure.database.DBContext. -->
 
     <!-- REST API controllers (design.md API contracts) -->
     <servlet>
         <servlet-name>sessionController</servlet-name>
-        <servlet-class>com.cinema.web.SessionController</servlet-class>
+        <servlet-class>com.cinema.controller.SessionController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>sessionController</servlet-name>
@@ -79,7 +79,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>profileController</servlet-name>
-        <servlet-class>com.cinema.web.ProfileController</servlet-class>
+        <servlet-class>com.cinema.controller.ProfileController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>profileController</servlet-name>
@@ -87,7 +87,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>authController</servlet-name>
-        <servlet-class>com.cinema.auth.AuthController</servlet-class>
+        <servlet-class>com.cinema.controller.auth.AuthController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>authController</servlet-name>
@@ -107,7 +107,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>branchController</servlet-name>
-        <servlet-class>com.cinema.web.BranchController</servlet-class>
+        <servlet-class>com.cinema.controller.BranchController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>branchController</servlet-name>
@@ -115,7 +115,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>movieController</servlet-name>
-        <servlet-class>com.cinema.web.MovieController</servlet-class>
+        <servlet-class>com.cinema.controller.MovieController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>movieController</servlet-name>
@@ -123,7 +123,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>showtimeAllocationController</servlet-name>
-        <servlet-class>com.cinema.web.ShowtimeAllocationController</servlet-class>
+        <servlet-class>com.cinema.controller.ShowtimeAllocationController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>showtimeAllocationController</servlet-name>
@@ -135,7 +135,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>screenController</servlet-name>
-        <servlet-class>com.cinema.web.ScreenController</servlet-class>
+        <servlet-class>com.cinema.controller.ScreenController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>screenController</servlet-name>
@@ -143,7 +143,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>showtimeController</servlet-name>
-        <servlet-class>com.cinema.web.ShowtimeController</servlet-class>
+        <servlet-class>com.cinema.controller.ShowtimeController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>showtimeController</servlet-name>
@@ -151,7 +151,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>discoveryServlet</servlet-name>
-        <servlet-class>com.cinema.web.DiscoveryServlet</servlet-class>
+        <servlet-class>com.cinema.controller.DiscoveryServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>discoveryServlet</servlet-name>
@@ -159,11 +159,11 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>bookingController</servlet-name>
-        <servlet-class>com.cinema.web.BookingController</servlet-class>
+        <servlet-class>com.cinema.controller.BookingController</servlet-class>
     </servlet>
     <servlet>
         <servlet-name>bookingEntry</servlet-name>
-        <servlet-class>com.cinema.web.BookingEntryServlet</servlet-class>
+        <servlet-class>com.cinema.controller.BookingEntryServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>bookingEntry</servlet-name>
@@ -175,7 +175,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>concessionController</servlet-name>
-        <servlet-class>com.cinema.web.ConcessionController</servlet-class>
+        <servlet-class>com.cinema.controller.ConcessionController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>concessionController</servlet-name>
@@ -183,7 +183,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>shiftController</servlet-name>
-        <servlet-class>com.cinema.web.ShiftController</servlet-class>
+        <servlet-class>com.cinema.controller.ShiftController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>shiftController</servlet-name>
@@ -191,7 +191,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>reportController</servlet-name>
-        <servlet-class>com.cinema.web.ReportController</servlet-class>
+        <servlet-class>com.cinema.controller.ReportController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>reportController</servlet-name>
@@ -199,7 +199,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>notificationController</servlet-name>
-        <servlet-class>com.cinema.web.NotificationController</servlet-class>
+        <servlet-class>com.cinema.controller.NotificationController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>notificationController</servlet-name>
@@ -207,7 +207,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>walletController</servlet-name>
-        <servlet-class>com.cinema.web.WalletController</servlet-class>
+        <servlet-class>com.cinema.controller.WalletController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>walletController</servlet-name>
@@ -215,7 +215,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>paymentController</servlet-name>
-        <servlet-class>com.cinema.web.PaymentController</servlet-class>
+        <servlet-class>com.cinema.controller.PaymentController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>paymentController</servlet-name>
@@ -223,7 +223,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>uploadServlet</servlet-name>
-        <servlet-class>com.cinema.web.UploadServlet</servlet-class>
+        <servlet-class>com.cinema.controller.UploadServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>uploadServlet</servlet-name>
@@ -231,7 +231,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>forgotPasswordServlet</servlet-name>
-        <servlet-class>com.cinema.web.ForgotPasswordServlet</servlet-class>
+        <servlet-class>com.cinema.controller.ForgotPasswordServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>forgotPasswordServlet</servlet-name>
@@ -243,7 +243,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>vnPayController</servlet-name>
-        <servlet-class>com.cinema.web.VnPayController</servlet-class>
+        <servlet-class>com.cinema.controller.VnPayController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>vnPayController</servlet-name>
@@ -251,7 +251,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>staffLoyaltyController</servlet-name>
-        <servlet-class>com.cinema.web.StaffLoyaltyController</servlet-class>
+        <servlet-class>com.cinema.controller.StaffLoyaltyController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>staffLoyaltyController</servlet-name>
@@ -259,7 +259,7 @@
     </servlet-mapping>
     <servlet>
         <servlet-name>pageController</servlet-name>
-        <servlet-class>com.cinema.web.PageController</servlet-class>
+        <servlet-class>com.cinema.controller.PageController</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>pageController</servlet-name>

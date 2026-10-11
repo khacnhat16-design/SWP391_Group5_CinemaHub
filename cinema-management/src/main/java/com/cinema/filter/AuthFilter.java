@@ -1,8 +1,9 @@
 package com.cinema.filter;
 
-import com.cinema.auth.AccessScope;
-import com.cinema.auth.Role;
-import com.cinema.auth.StaffBranchAssignmentDAO;
+import com.cinema.model.auth.AccessScope;
+import com.cinema.model.auth.Role;
+import com.cinema.dao.auth.StaffBranchAssignmentDAO;
+import com.cinema.model.branch.Branch;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
