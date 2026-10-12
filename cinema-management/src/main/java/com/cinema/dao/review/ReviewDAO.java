@@ -1,20 +1,42 @@
 package com.cinema.dao.review;
 
-import com.cinema.infrastructure.database.DBContext;
-import com.cinema.model.branch.Branch;
-import com.cinema.model.movie.Movie;
 import com.cinema.model.review.Review;
-import com.cinema.model.showtime.Showtime;
+
+import com.cinema.infrastructure.database.DBContext;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+/**
+ * DB lưu mốc thời gian theo UTC (SYSUTCDATETIME) còn giao diện hiển thị giờ
+ * Việt Nam. Phải đọc datetime thô (không đi qua Timestamp.toInstant vì hàm đó
+ * đã quy đổi theo zone của máy chạy) rồi quy đổi sang giờ địa phương.
+ */
+final class DisplayTime {
+    private static final ZoneId ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+
+    private DisplayTime() { }
+
+    /** Đọc cột DATETIME2 dạng UTC rồi quy đổi sang giờ Việt Nam. */
+    static LocalDateTime toLocal(ResultSet rs, String column) throws Exception {
+        LocalDateTime raw = rs.getObject(column, LocalDateTime.class);
+        if (raw == null) return null;
+        // Phải lấy offset tại đúng thời điểm cần hiển thị: Asia/Ho_Chi_Minh từng
+        // là UTC+8 (dữ liệu lịch sử của tzdb) nên offset tại EPOCH là +08:00.
+        Instant instant = raw.toInstant(ZoneOffset.UTC);
+        return instant.atZone(ZONE).toLocalDateTime();
+    }
+}
 
 /** DAO for dbo.review (RSC-2). */
 public class ReviewDAO {
@@ -190,9 +212,15 @@ public class ReviewDAO {
                 FROM dbo.review r
                 JOIN dbo.user_account u ON u.id = r.user_id
                 JOIN dbo.movie m ON m.id = r.movie_id
-                WHERE EXISTS (
-                    SELECT 1 FROM dbo.showtime s
-                    WHERE s.movie_id = r.movie_id AND s.branch_id = ?
+                WHERE (
+                    EXISTS (
+                        SELECT 1 FROM dbo.showtime s
+                        WHERE s.movie_id = r.movie_id AND s.branch_id = ? AND s.status <> 'CANCELLED'
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM dbo.showtime_allocation sa
+                        WHERE sa.movie_id = r.movie_id AND sa.branch_id = ? AND sa.allocated_quantity > 0
+                    )
                 )
                 ORDER BY r.created_at DESC, r.id DESC
                 OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
@@ -201,8 +229,9 @@ public class ReviewDAO {
         try (Connection c = DBContext.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, branchId);
-            ps.setInt(2, offset);
-            ps.setInt(3, limit);
+            ps.setLong(2, branchId);
+            ps.setInt(3, offset);
+            ps.setInt(4, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) out.add(mapWithMovie(rs));
             }
@@ -218,11 +247,19 @@ public class ReviewDAO {
                 JOIN dbo.user_account u ON u.id = r.user_id
                 JOIN dbo.movie m ON m.id = r.movie_id
                 WHERE r.movie_id = ?
-                  AND EXISTS (
-                      SELECT 1 FROM dbo.showtime s
-                      WHERE s.movie_id = r.movie_id
-                        AND s.branch_id = ?
-                        AND s.status <> 'CANCELLED'
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM dbo.showtime s
+                          WHERE s.movie_id = r.movie_id
+                            AND s.branch_id = ?
+                            AND s.status <> 'CANCELLED'
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM dbo.showtime_allocation sa
+                          WHERE sa.movie_id = r.movie_id
+                            AND sa.branch_id = ?
+                            AND sa.allocated_quantity > 0
+                      )
                   )
                 ORDER BY r.created_at DESC, r.id DESC
                 OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
@@ -232,8 +269,9 @@ public class ReviewDAO {
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, movieId);
             ps.setLong(2, branchId);
-            ps.setInt(3, offset);
-            ps.setInt(4, limit);
+            ps.setLong(3, branchId);
+            ps.setInt(4, offset);
+            ps.setInt(5, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) out.add(mapWithMovie(rs));
             }
@@ -248,11 +286,19 @@ public class ReviewDAO {
                        COUNT(r.id) AS review_count
                 FROM dbo.movie m
                 LEFT JOIN dbo.review r ON r.movie_id = m.id
-                WHERE EXISTS (
-                    SELECT 1 FROM dbo.showtime s
-                    WHERE s.movie_id = m.id
-                      AND s.branch_id = ?
-                      AND s.status <> 'CANCELLED'
+                WHERE (
+                    EXISTS (
+                        SELECT 1 FROM dbo.showtime s
+                        WHERE s.movie_id = m.id
+                          AND s.branch_id = ?
+                          AND s.status <> 'CANCELLED'
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM dbo.showtime_allocation sa
+                        WHERE sa.movie_id = m.id
+                          AND sa.branch_id = ?
+                          AND sa.allocated_quantity > 0
+                    )
                 )
                 GROUP BY m.id, m.title
                 ORDER BY m.title, m.id
@@ -261,6 +307,7 @@ public class ReviewDAO {
         try (Connection c = DBContext.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, branchId);
+            ps.setLong(2, branchId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     Map<String, Object> item = new LinkedHashMap<>();
@@ -280,17 +327,26 @@ public class ReviewDAO {
                 SELECT COUNT(*)
                 FROM dbo.review r
                 WHERE r.movie_id = ?
-                  AND EXISTS (
-                      SELECT 1 FROM dbo.showtime s
-                      WHERE s.movie_id = r.movie_id
-                        AND s.branch_id = ?
-                        AND s.status <> 'CANCELLED'
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM dbo.showtime s
+                          WHERE s.movie_id = r.movie_id
+                            AND s.branch_id = ?
+                            AND s.status <> 'CANCELLED'
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM dbo.showtime_allocation sa
+                          WHERE sa.movie_id = r.movie_id
+                            AND sa.branch_id = ?
+                            AND sa.allocated_quantity > 0
+                      )
                   )
                 """;
         try (Connection c = DBContext.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, movieId);
             ps.setLong(2, branchId);
+            ps.setLong(3, branchId);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getLong(1) : 0L;
             }
@@ -301,14 +357,21 @@ public class ReviewDAO {
         String sql = """
                 SELECT COUNT(DISTINCT r.id)
                 FROM dbo.review r
-                WHERE EXISTS (
-                    SELECT 1 FROM dbo.showtime s
-                    WHERE s.movie_id = r.movie_id AND s.branch_id = ?
+                WHERE (
+                    EXISTS (
+                        SELECT 1 FROM dbo.showtime s
+                        WHERE s.movie_id = r.movie_id AND s.branch_id = ? AND s.status <> 'CANCELLED'
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM dbo.showtime_allocation sa
+                        WHERE sa.movie_id = r.movie_id AND sa.branch_id = ? AND sa.allocated_quantity > 0
+                    )
                 )
                 """;
         try (Connection c = DBContext.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, branchId);
+            ps.setLong(2, branchId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) return rs.getLong(1);
             }
@@ -320,14 +383,21 @@ public class ReviewDAO {
         String sql = """
                 SELECT CAST(AVG(CAST(r.rating AS DECIMAL(3,2))) AS DECIMAL(3,1))
                 FROM dbo.review r
-                WHERE EXISTS (
-                    SELECT 1 FROM dbo.showtime s
-                    WHERE s.movie_id = r.movie_id AND s.branch_id = ?
+                WHERE (
+                    EXISTS (
+                        SELECT 1 FROM dbo.showtime s
+                        WHERE s.movie_id = r.movie_id AND s.branch_id = ? AND s.status <> 'CANCELLED'
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM dbo.showtime_allocation sa
+                        WHERE sa.movie_id = r.movie_id AND sa.branch_id = ? AND sa.allocated_quantity > 0
+                    )
                 )
                 """;
         try (Connection c = DBContext.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, branchId);
+            ps.setLong(2, branchId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     double v = rs.getDouble(1);
@@ -349,15 +419,22 @@ public class ReviewDAO {
                        CAST(AVG(CAST(r.rating AS DECIMAL(3,2))) AS DECIMAL(3,1)) AS avg_rating,
                        COUNT(DISTINCT r.id) AS cnt
                 FROM dbo.review r
-                WHERE EXISTS (
-                    SELECT 1 FROM dbo.showtime s
-                    WHERE s.movie_id = r.movie_id AND s.branch_id = ?
+                WHERE (
+                    EXISTS (
+                        SELECT 1 FROM dbo.showtime s
+                        WHERE s.movie_id = r.movie_id AND s.branch_id = ? AND s.status <> 'CANCELLED'
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM dbo.showtime_allocation sa
+                        WHERE sa.movie_id = r.movie_id AND sa.branch_id = ? AND sa.allocated_quantity > 0
+                    )
                 )
                 GROUP BY r.movie_id
                 """;
         try (Connection c = DBContext.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, branchId);
+            ps.setLong(2, branchId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     long mid = rs.getLong("movie_id");
@@ -397,10 +474,10 @@ public class ReviewDAO {
         r.setUserFullName(rs.getString("full_name"));
         r.setRating(rs.getInt("rating"));
         r.setComment(rs.getString("comment"));
-        Timestamp ca = rs.getTimestamp("created_at");
-        Timestamp ua = rs.getTimestamp("updated_at");
-        if (ca != null) r.setCreatedAt(ca.toLocalDateTime());
-        if (ua != null) r.setUpdatedAt(ua.toLocalDateTime());
+        LocalDateTime ca = DisplayTime.toLocal(rs, "created_at");
+        LocalDateTime ua = DisplayTime.toLocal(rs, "updated_at");
+        r.setCreatedAt(ca);
+        r.setUpdatedAt(ua);
         return r;
     }
 
