@@ -407,7 +407,178 @@
             }).catch(notifyError);
         }
     });
-
+    router.register('movie', {
+        list: function () {
+            list.render({
+                title: 'Phim',
+                subtitle: 'Danh mục phim trong hệ thống và trạng thái phát hành.',
+                addUrl: ctx + '/console?module=movie&action=create',
+                addLabel: 'Thêm phim',
+                searchPlaceholder: 'Tìm theo tên phim…',
+                pageSize: 20,
+                filters: [
+                    { name: 'status', label: 'Trạng thái', options: [
+                        { value: 'DRAFT', label: 'Bản nháp' },
+                        { value: 'PUBLISHED', label: 'Đang phát hành' },
+                        { value: 'ARCHIVED', label: 'Đã lưu trữ' }
+                    ]},
+                    { name: 'rating', label: 'Giới hạn tuổi', options: [
+                        { value: 'P', label: 'P - Mọi lứa tuổi' },
+                        { value: 'C13', label: 'C13 - Trên 13 tuổi' },
+                        { value: 'C16', label: 'C16 - Trên 16 tuổi' },
+                        { value: 'C18', label: 'C18 - Trên 18 tuổi' }
+                    ]}
+                ],
+                sortable: true,
+                sortOptions: [
+                    { value: 'title', label: 'Tên A→Z' },
+                    { value: 'releaseDate', label: 'Ngày phát hành' }
+                ],
+                // Refactored: enrich du lieu voi pricing rule count cho moi phim
+                // de hien thi cot "Da co gia?".
+                fetcher: function (qs) {
+                    return Promise.all([
+                        hub.api('/movie/search?' + qs.toString()),
+                        hub.api('/pricing/rules')
+                    ]).then(function (results) {
+                        var movieResult = results[0];
+                        var movies = Array.isArray(movieResult) ? movieResult
+                            : (movieResult && Array.isArray(movieResult.items)
+                                ? movieResult.items : null);
+                        if (!movies) {
+                            throw new Error('Phản hồi danh sách phim không đúng định dạng.');
+                        }
+                        var rules = results[1] || [];
+                        // Dem rule per movieId (rule co movieId set)
+                        var countByMovie = {};
+                        rules.forEach(function (r) {
+                            if (r.movieId) {
+                                countByMovie[r.movieId] = (countByMovie[r.movieId] || 0) + 1;
+                            }
+                        });
+                        movies.forEach(function (m) {
+                            m._priceRuleCount = countByMovie[m.id] || 0;
+                        });
+                        if (Array.isArray(movieResult)) return movies;
+                        return Object.assign({}, movieResult, { items: movies });
+                    });
+                },
+                emptyTitle: 'Chưa có phim',
+                emptyMessage: 'Danh mục phim đang trống. Hãy thêm phim đầu tiên.',
+                columns: [
+                    { label: 'Poster', render: function (m) {
+                        if (!m.posterUrl) return document.createTextNode('—');
+                        var img = document.createElement('img');
+                        img.src = m.posterUrl;
+                        img.alt = m.title || '';
+                        // Lazy + referrerpolicy giúp Cloudinary không bị hotlink-protected;
+                        // onerror fallback tự ẩn cell khi URL chết — không để gãy layout.
+                        img.loading = 'lazy';
+                        img.referrerPolicy = 'no-referrer';
+                        img.crossOrigin = 'anonymous';
+                        img.style.cssText = 'width:48px;height:64px;object-fit:cover;border-radius:6px;display:block;background:#f3f4f6';
+                        img.addEventListener('error', function () {
+                            img.replaceWith(document.createTextNode('—'));
+                        });
+                        return img;
+                    }, width: '70px' },
+                    { label: 'Tên phim', key: 'title' },
+                    { label: 'Thể loại', key: 'genre' },
+                    { label: 'Thời lượng', render: function (m) { return m.durationMin ? (m.durationMin + ' phút') : '—'; } },
+                    { label: 'Giới hạn tuổi', key: 'rating' },
+                    { label: 'Đánh giá', render: function (m) {
+                        // Backend MovieController enrich sẵn averageRating + reviewCount.
+                        // Hiển thị "★ X.X / 5  (N)" — nếu chưa có review thì "—".
+                        var avg = (m.averageRating != null) ? Number(m.averageRating) : 0;
+                        var count = (m.reviewCount != null) ? Number(m.reviewCount) : 0;
+                        if (!count || isNaN(count) || count <= 0) {
+                            return document.createTextNode('—');
+                        }
+                        var span = document.createElement('span');
+                        span.className = 'ws-movie-rating';
+                        var full = Math.floor(avg);
+                        var half = (avg - full) >= 0.5 ? 1 : 0;
+                        var empty = 5 - full - half;
+                        var stars = '★'.repeat(Math.max(full, 0))
+                            + (half ? '½' : '')
+                            + '☆'.repeat(Math.max(empty, 0));
+                        span.appendChild(document.createTextNode(stars + ' '));
+                        var strong = document.createElement('strong');
+                        strong.textContent = avg.toFixed(1) + '/5';
+                        span.appendChild(strong);
+                        var small = document.createElement('small');
+                        small.className = 'ws-muted';
+                        small.style.marginLeft = '6px';
+                        small.textContent = '(' + count + ')';
+                        span.appendChild(small);
+                        return span;
+                    } },
+                    { label: 'Giá vé', render: function (m) {
+                        // Badge "Co" (green) neu co rule, "Chua" (yellow) neu chua co.
+                        var has = (m._priceRuleCount || 0) > 0;
+                        var span = document.createElement('span');
+                        span.className = has ? 'ws-badge ws-badge-success' : 'ws-badge ws-badge-warning';
+                        span.textContent = has ? ('Có (' + m._priceRuleCount + ')') : 'Chưa';
+                        return span;
+                    } },
+                    { label: 'Trạng thái', render: function (m) { return statusBadge(m.status); } }
+                ],
+                actions: function (row) {
+                    var arr = [{ label: 'Sửa', class: 'secondary', href: ctx + '/console?module=movie&action=edit&id=' + row.id }];
+                    if (row.status === 'DRAFT') {
+                        arr.push({ label: 'Phát hành', class: 'primary', onClick: function () {
+                            confirmAction('Phát hành phim này?', function () {
+                                hub.api('/movie/' + row.id, { method: 'PUT', body: { action: 'publish' } })
+                                    .then(function () {
+                                        hub.notify('Đã phát hành phim.', 'ok');
+                                        router.go('movie');
+                                    })
+                                    .catch(notifyError);
+                            });
+                        }});
+                    } else if (row.status === 'PUBLISHED') {
+                        arr.push({ label: 'Lưu trữ', class: 'danger', onClick: function () {
+                            confirmAction('Lưu trữ phim này?', function () {
+                                hub.api('/movie/' + row.id, { method: 'PUT', body: { action: 'archive' } })
+                                    .then(function () {
+                                        hub.notify('Đã lưu trữ phim.', 'ok');
+                                        router.go('movie');
+                                    })
+                                    .catch(notifyError);
+                            });
+                        }});
+                    } else if (row.status === 'ARCHIVED') {
+                        arr.push({ label: 'Mở lại', class: 'primary', onClick: function () {
+                            confirmAction('Mở lại phim và đưa phim về trạng thái đang phát hành?', function () {
+                                hub.api('/movie/' + row.id, { method: 'PUT', body: { action: 'restore' } })
+                                    .then(function () {
+                                        hub.notify('Đã mở lại phim.', 'ok');
+                                        router.go('movie');
+                                    })
+                                    .catch(notifyError);
+                            });
+                        }});
+                    }
+                    return arr;
+                }
+            });
+        },
+        create: function () {
+            Promise.all([hub.api('/movie/genres'), hub.api('/branch/')]).then(function (data) {
+                renderMovieForm(null, data[0], data[1]);
+            }).catch(notifyError);
+        },
+        edit: function (id) {
+            Promise.all([
+                hub.api('/movie/' + id),
+                hub.api('/movie/genres'),
+                hub.api('/branch/'),
+                hub.api('/pricing/rules')
+            ])
+                .then(function (data) { renderMovieForm(data[0], data[1], data[2], data[3]); })
+                .catch(notifyError);
+        }
+    });
   // ============================================================
     // Showtime Allocation — Admin phân bổ suất chiếu cho từng branch,
     // Manager xem & tạo suất chiếu để đáp ứng quota.
@@ -618,245 +789,9 @@
                     }).catch(notifyError);
                 }
 
-<<<<<<< HEAD
-    function renderAllocationForm(allocation, movies, branches) {
-        var editing = !!allocation;
-        var fields = editing ? [
-            { name: 'allocatedQuantity', label: 'Số suất phân bổ', type: 'number',
-              min: 0, required: true, value: allocation.allocatedQuantity },
-            { name: 'note', label: 'Ghi chú', type: 'textarea', required: false,
-              value: allocation.note || '', rows: 3 }
-        ] : [
-            { name: 'movieId', label: 'Phim', type: 'select', required: true,
-              options: movies.map(function (movie) {
-                  return { value: String(movie.id), label: movie.title };
-              }) },
-            { name: 'branchId', label: 'Chi nhánh', type: 'select', required: true,
-              options: branches.map(function (branch) {
-                  return { value: String(branch.id), label: branch.name };
-              }) },
-            { name: 'allocatedQuantity', label: 'Số suất phân bổ', type: 'number',
-              min: 0, required: true, value: 1 },
-            { name: 'note', label: 'Ghi chú', type: 'textarea', required: false, rows: 3 }
-        ];
-
-        form.renderFormPage({
-            breadcrumb: ['Quản lý', { label: 'Phân bổ suất chiếu',
-                href: ctx + '/console?module=showtime-allocation' },
-                editing ? 'Cập nhật' : 'Tạo mới'],
-            title: editing ? 'Cập nhật phân bổ' : 'Tạo phân bổ suất chiếu',
-            subtitle: editing ? (allocation.movieTitle || 'Allocation #' + allocation.id)
-                : 'Gán số suất chiếu cho một phim tại một chi nhánh.',
-            submitLabel: editing ? 'Lưu thay đổi' : 'Tạo phân bổ',
-            sections: [{ title: 'Thông tin phân bổ', fields: fields }],
-            onSubmit: function (data) {
-                return hub.api(editing ? '/api/showtime-allocations/' + allocation.id
-                    : '/api/showtime-allocations', {
-                    method: editing ? 'PUT' : 'POST', body: data
-                }).then(function () {
-                    hub.notify(editing ? 'Đã cập nhật phân bổ.' : 'Đã tạo phân bổ.', 'ok');
-                    router.go('showtime-allocation');
-                }).catch(notifyError);
-            },
-            onCancel: function () { router.go('showtime-allocation'); }
-        });
-    }
-
-    router.register('showtime-allocation', {
-        list: function () {
-            var root = document.getElementById('viewRoot');
-            if (!root) return;
-            Promise.all([hub.api('/branch'), hub.api('/movie')]).then(function (results) {
-                var branches = Array.isArray(results[0]) ? results[0] : [];
-                var movies = Array.isArray(results[1]) ? results[1] : [];
-                var role = (document.querySelector('meta[name="user-role"]') || {}).content;
-                var isAdmin = role === 'ADMIN';
-                root.replaceChildren();
-                root.appendChild(hub.el('div', { class: 'ws-page-header' }, [
-                    hub.el('div', {}, [
-                        hub.el('h1', {}, ['Phân bổ suất chiếu']),
-                        hub.el('p', { class: 'ws-tone-muted' }, [
-                            'Theo dõi số suất phân bổ và số suất thực tế theo phim, chi nhánh.'
-                        ])
-                    ])
-                ]));
-
-                var filters = hub.el('section', { class: 'ws-card' });
-                var filterRow = hub.el('div', { class: 'ws-form-row' });
-                var status = hub.el('select', { class: 'ws-input' });
-                [['', 'Tất cả trạng thái'], ['PENDING', 'Chờ xếp lịch'],
-                    ['IN_PROGRESS', 'Đang thực hiện'], ['COMPLETED', 'Đã đủ'],
-                    ['OVER_ALLOCATED', 'Vượt phân bổ']].forEach(function (option) {
-                    status.appendChild(hub.el('option', { value: option[0] }, [option[1]]));
-                });
-                var branch = hub.el('select', { class: 'ws-input' });
-                branch.appendChild(hub.el('option', { value: '' }, ['Tất cả chi nhánh']));
-                branches.forEach(function (item) {
-                    branch.appendChild(hub.el('option', { value: String(item.id) }, [item.name]));
-                });
-                var movie = hub.el('select', { class: 'ws-input' });
-                movie.appendChild(hub.el('option', { value: '' }, ['Tất cả phim']));
-                movies.forEach(function (item) {
-                    movie.appendChild(hub.el('option', { value: String(item.id) }, [item.title]));
-                });
-                var params = new URLSearchParams(window.location.search);
-                if (params.has('branchId')) branch.value = params.get('branchId');
-                if (params.has('movieId')) movie.value = params.get('movieId');
-                if (!isAdmin) branch.disabled = true;
-                [['Trạng thái', status], ['Chi nhánh', branch], ['Phim', movie]]
-                    .forEach(function (filter) {
-                        filterRow.appendChild(hub.el('div', { class: 'ws-form-col' }, [
-                            hub.el('label', {}, [filter[0]]), filter[1]
-                        ]));
-                    });
-                filters.appendChild(filterRow);
-                if (isAdmin) {
-                    var add = hub.el('button', { class: 'ws-btn primary', type: 'button' },
-                        ['Tạo phân bổ']);
-                    add.addEventListener('click', function () {
-                        renderAllocationForm(null, movies, branches);
-                    });
-                    filters.appendChild(add);
-                }
-                root.appendChild(filters);
-
-                var card = hub.el('section', { class: 'ws-card' }, [
-                    hub.el('h2', {}, ['Danh sách phân bổ'])
-                ]);
-                var listRoot = hub.el('div');
-                card.appendChild(listRoot);
-                root.appendChild(card);
-
-                function load() {
-                    var query = new URLSearchParams();
-                    if (status.value) query.set('status', status.value);
-                    if (branch.value) query.set('branchId', branch.value);
-                    if (movie.value) query.set('movieId', movie.value);
-                    var suffix = query.toString();
-                    hub.api('/api/showtime-allocations' + (suffix ? '?' + suffix : ''))
-                        .then(function (response) {
-                            var items = response && response.items ? response.items : [];
-                            listRoot.replaceChildren();
-                            if (!items.length) {
-                                listRoot.appendChild(hub.el('div', { class: 'ws-empty' }, [
-                                    hub.el('p', {}, ['Chưa có phân bổ nào.'])
-                                ]));
-                                return;
-                            }
-                            var table = hub.el('table', { class: 'ws-table' });
-                            table.appendChild(hub.el('thead', {}, [hub.el('tr', {}, [
-                                'Phim', 'Chi nhánh', 'Phân bổ', 'Đã tạo', 'Còn thiếu',
-                                'Trạng thái', 'Ngày phân bổ', 'Thao tác'
-                            ].map(function (label) { return hub.el('th', {}, [label]); }))]));
-                            var body = hub.el('tbody');
-                            items.forEach(function (item) {
-                                var remaining = Number(item.allocatedQuantity)
-                                    - Number(item.createdQuantity);
-                                var remainingTone = remaining < 0 ? 'ws-tone-danger'
-                                    : remaining > 0 ? 'ws-tone-warn' : 'ws-tone-ok';
-                                var actions = hub.el('div', { class: 'ws-action-group' });
-                                if (isAdmin) {
-                                    var edit = hub.el('button', {
-                                        class: 'ws-btn secondary small', type: 'button'
-                                    }, ['Sửa']);
-                                    edit.addEventListener('click', function () {
-                                        renderAllocationForm(item, movies, branches);
-                                    });
-                                    actions.appendChild(edit);
-                                    if (Number(item.createdQuantity) === 0) {
-                                        var remove = hub.el('button', {
-                                            class: 'ws-btn danger small', type: 'button'
-                                        }, ['Xóa']);
-                                        remove.addEventListener('click', function () {
-                                            confirmAction('Xóa phân bổ này?', function () {
-                                                hub.api('/api/showtime-allocations/' + item.id,
-                                                    { method: 'DELETE' }).then(load).catch(notifyError);
-                                            });
-                                        });
-                                        actions.appendChild(remove);
-                                    }
-                                }
-                                var history = hub.el('button', {
-                                    class: 'ws-btn secondary small', type: 'button'
-                                }, ['Lịch sử']);
-                                history.addEventListener('click', function () {
-                                    hub.api('/api/showtime-allocations/' + item.id + '/history')
-                                        .then(function (result) {
-                                            var entries = result && result.items ? result.items : [];
-                                            var lines = entries.map(function (entry) {
-                                                return [entry.eventType, entry.note, entry.createdAt]
-                                                    .filter(Boolean).join(' · ');
-                                            });
-                                            window.alert(lines.length ? lines.join('\n')
-                                                : 'Chưa có lịch sử thay đổi.');
-                                        }).catch(notifyError);
-                                });
-                                actions.appendChild(history);
-                                var values = [
-                                    item.movieTitle || '—', item.branchName || '—',
-                                    String(item.allocatedQuantity), String(item.createdQuantity),
-                                    hub.el('span', { class: remainingTone }, [String(remaining)]),
-                                    statusBadge(item.status),
-                                    item.allocatedAt ? hub.fmtDateTime(item.allocatedAt) : '—',
-                                    actions
-                                ];
-                                body.appendChild(hub.el('tr', {}, values.map(function (value) {
-                                    return hub.el('td', {}, [value]);
-                                })));
-                            });
-                            table.appendChild(body);
-                            listRoot.appendChild(table);
-                        }).catch(notifyError);
-                }
-
-                [status, branch, movie].forEach(function (control) {
-                    control.addEventListener('change', load);
-                });
-                load();
-            }).catch(notifyError);
-        }
-    });
-
-    // ================================================================
-    //  PRODUCT (F&B Catalog Admin)
-    // ================================================================
-    function renderProductForm(product) {
-        var isEdit = !!product;
-        form.renderFormPage({
-            breadcrumb: ['Quản lý', { label: 'Sản phẩm F&B', href: ctx + '/console?module=product' }, isEdit ? 'Chỉnh sửa' : 'Tạo mới'],
-            title: isEdit ? 'Chỉnh sửa sản phẩm' : 'Tạo sản phẩm mới',
-            subtitle: isEdit ? product.name : 'Thêm sản phẩm hoặc combo bắp nước.',
-            submitLabel: isEdit ? 'Lưu thay đổi' : 'Tạo sản phẩm',
-            sections: [{
-                title: 'Thông tin sản phẩm',
-                fields: [
-                    { name: 'name', label: 'Tên sản phẩm', required: true, value: product && product.name, fullWidth: true },
-                    { name: 'description', label: 'Mô tả', type: 'textarea', required: false, value: product && product.description, rows: 3, fullWidth: true },
-                    { name: 'price', label: 'Giá bán (VND)', type: 'number', required: true, min: 0, step: 1000, value: product && product.price },
-                    { name: 'unit', label: 'Đơn vị', value: (product && product.unit) || 'phần', placeholder: 'phần, ly, hộp…' },
-                    { name: 'type', label: 'Loại', type: 'select', required: true, value: (product && product.type) || 'POPCORN', options: [
-                        { value: 'POPCORN', label: 'Bắp rang' },
-                        { value: 'DRINK', label: 'Nước uống' },
-                        { value: 'COMBO', label: 'Combo' },
-                        { value: 'OTHER', label: 'Khác' }
-                    ]}
-                ]
-            }],
-            onSubmit: function (data) {
-                var url = isEdit ? '/concession/products/' + product.id : '/concession/products';
-                var method = isEdit ? 'PUT' : 'POST';
-                hub.api(url, { method: method, body: data })
-                    .then(function () { router.go('product'); })
-                    .catch(notifyError);
-            },
-            onCancel: function () { router.go('product'); }
-        });
-    }
-=======
                 [statusSelect, branchSelect, movieSelect].forEach(function (el) {
                     el.addEventListener('change', load);
                 });
->>>>>>> develop
 
                 function openDialog(opts) {
                     var previousFocus = document.activeElement;
@@ -1151,7 +1086,6 @@
             load();
         }
     });
-
     // ================================================================
     //  SCREEN (Admin + Manager)
     // ================================================================
