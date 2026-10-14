@@ -286,27 +286,6 @@
         });
     }
 
-    function showtimeScheduleReminderAction(item) {
-        const reminderType = item && item.type;
-        if (reminderType !== 'SHOWTIME_SCHEDULE_REMINDER'
-                && reminderType !== 'SHOWTIME_SCHEDULE_URGENT') return null;
-        const body = String(item.body || '');
-        const actionPattern =
-            /\s*·\s*\/console\?module=showtime-allocation&movieId=(\d+)&branchId=(\d+)\s*$/;
-        const match = actionPattern.exec(body);
-        if (!match) return null;
-        const query = new URLSearchParams({
-            module: 'showtime-allocation',
-            movieId: match[1],
-            branchId: match[2]
-        });
-        return {
-            href: ctx + '/console?' + query.toString(),
-            body: body.slice(0, match.index).trim(),
-            urgent: reminderType === 'SHOWTIME_SCHEDULE_URGENT'
-        };
-    }
-
     function uploadFile(file, fieldName) {
         const formData = new FormData();
         formData.append(fieldName || 'file', file);
@@ -357,7 +336,6 @@
         fmtMoney: fmtMoney,
         fmtDateTime: fmtDateTime,
         fmtNotificationDateTime: fmtNotificationDateTime,
-        showtimeScheduleReminderAction: showtimeScheduleReminderAction,
         notify: notify,
         statusBadge: statusBadge,
         table: table,
@@ -420,20 +398,14 @@
                     return;
                 }
                 list.slice(0, 6).forEach(function (item) {
-                    const action = showtimeScheduleReminderAction(item);
-                    const body = action ? action.body : item.body;
                     const row = el('button', {
                         class: 'notification-item ' + (item.read ? '' : 'unread'),
                         type: 'button'
                     }, [
                         el('strong', {}, [item.title || 'Thông báo']),
-                        action ? el('small', {
-                            class: 'notification-severity '
-                                + (action.urgent ? 'urgent' : 'normal')
-                        }, [action.urgent ? 'Khẩn cấp' : 'Cần xếp lịch']) : null,
-                        body ? el('span', {}, [body]) : null,
+                        item.body ? el('span', {}, [item.body]) : null,
                         el('small', {}, [fmtNotificationDateTime(item.createdAt)])
-                    ].filter(Boolean));
+                    ]);
                     row.addEventListener('click', function () {
                         const chain = (!item.read
                             ? api('/notification/' + item.id + '/read', { method: 'POST' })
@@ -443,28 +415,7 @@
                             row.classList.remove('unread');
                         }).catch(function (e) { notify(e.message || 'Không thể cập nhật thông báo.', 'err'); });
                     });
-                    const entry = el('div', { class: 'notification-entry' }, [row]);
-                    if (action) {
-                        const link = el('a', {
-                            class: 'notification-action',
-                            href: action.href
-                        }, ['Xếp lịch ngay']);
-                        link.addEventListener('click', function (event) {
-                            event.preventDefault();
-                            const markRead = !item.read
-                                ? api('/notification/' + item.id + '/read', { method: 'POST' })
-                                : Promise.resolve();
-                            markRead.then(function () {
-                                return refreshNotificationBadge();
-                            }).then(function () {
-                                window.location.assign(action.href);
-                            }).catch(function (e) {
-                                notify(e.message || 'Không thể mở phân bổ suất chiếu.', 'err');
-                            });
-                        });
-                        entry.appendChild(link);
-                    }
-                    popover.appendChild(entry);
+                    popover.appendChild(el('div', { class: 'notification-entry' }, [row]));
                 });
             }).catch(function (error) {
                 popover.replaceChildren(el('div', { class: 'notification-error' },

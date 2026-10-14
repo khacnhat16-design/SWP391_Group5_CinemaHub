@@ -224,17 +224,11 @@ public class MovieDAO {
         List<Long> scopedBranches = new ArrayList<>(branchIds);
         String placeholders = String.join(",", Collections.nCopies(scopedBranches.size(), "?"));
         sql.append("""
-                 AND (
-                     EXISTS (SELECT 1 FROM dbo.showtime s
+                 AND EXISTS (SELECT 1 FROM dbo.showtime s
                              WHERE s.movie_id = dbo.movie.id
                                AND s.status <> 'CANCELLED'
                                AND s.branch_id IN (%s))
-                     OR EXISTS (SELECT 1 FROM dbo.showtime_allocation sa
-                                WHERE sa.movie_id = dbo.movie.id
-                                  AND sa.branch_id IN (%s))
-                 )
-                """.formatted(placeholders, placeholders));
-        params.addAll(scopedBranches);
+                """.formatted(placeholders));
         params.addAll(scopedBranches);
     }
 
