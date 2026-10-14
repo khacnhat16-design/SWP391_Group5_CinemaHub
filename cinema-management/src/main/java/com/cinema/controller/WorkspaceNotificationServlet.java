@@ -20,10 +20,13 @@ import java.util.Map;
 /**
  * Notification endpoint cho bell header (workspace).
  *
- * <p>GET /api/notification/unread-count — count + recent items.
- * <p>POST /api/notification/mark-read/{id} — đánh dấu 1 notification đã đọc.
+ * <p>
+ * GET /api/notification/unread-count — count + recent items.
+ * <p>
+ * POST /api/notification/mark-read/{id} — đánh dấu 1 notification đã đọc.
  *
- * <p>Lưu ý: dùng sessionScope.userId để tránh mở rộng AccessScope API.
+ * <p>
+ * Lưu ý: dùng sessionScope.userId để tránh mở rộng AccessScope API.
  */
 public class WorkspaceNotificationServlet extends HttpServlet {
 
@@ -79,7 +82,8 @@ public class WorkspaceNotificationServlet extends HttpServlet {
 
     private void markRead(HttpServletRequest request, long notificationId) throws Exception {
         Long userId = currentUserId(request);
-        if (userId == null) throw new ServiceException.Unauthorized("Yêu cầu đăng nhập");
+        if (userId == null)
+            throw new ServiceException.Unauthorized("Yêu cầu đăng nhập");
         java.sql.Connection conn = com.cinema.infrastructure.database.DBContext.getConnection();
         try (java.sql.PreparedStatement ps = conn.prepareStatement(
                 "UPDATE dbo.notification SET is_read = 1 WHERE id = ? AND user_id = ?")) {
@@ -93,14 +97,20 @@ public class WorkspaceNotificationServlet extends HttpServlet {
 
     private Long currentUserId(HttpServletRequest request) {
         var session = request.getSession(false);
-        if (session == null) return null;
+        if (session == null)
+            return null;
         Object value = session.getAttribute("userId");
         return (value instanceof Long l) ? l : null;
     }
 
     private int parseIntOr(String raw, int fallback) {
-        if (raw == null || raw.isBlank()) return fallback;
-        try { return Integer.parseInt(raw.trim()); } catch (Exception e) { return fallback; }
+        if (raw == null || raw.isBlank())
+            return fallback;
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     private void sendOk(HttpServletResponse response, Object data) throws IOException {

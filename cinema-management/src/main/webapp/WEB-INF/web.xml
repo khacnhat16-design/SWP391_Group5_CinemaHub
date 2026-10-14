@@ -265,9 +265,17 @@
         <servlet-name>pageController</servlet-name>
         <url-pattern>/console/*</url-pattern>
     </servlet-mapping>
+    <servlet>
+        <servlet-name>inventoryController</servlet-name>
+        <servlet-class>com.cinema.controller.InventoryController</servlet-class>
+    </servlet>
     <servlet-mapping>
-        <servlet-name>pageController</servlet-name>
-        <url-pattern>/console/*</url-pattern>
+        <servlet-name>inventoryController</servlet-name>
+        <url-pattern>/inventory</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>inventoryController</servlet-name>
+        <url-pattern>/inventory/*</url-pattern>
     </servlet-mapping>
 
 </web-app>
