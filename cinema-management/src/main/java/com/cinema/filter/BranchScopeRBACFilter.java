@@ -98,8 +98,6 @@ public final class BranchScopeRBACFilter implements Filter {
             "/admin/wallet",
             // Payroll self-service and complaint endpoints; handlers enforce role and branch access.
             "/payroll", "/api/payroll-complaints",
-            // Showtime allocation (Admin: all; Manager: own branch only — enforced in controller).
-            "/api/showtime-allocations",
             // Voucher CRUD (Admin/Manager per scope; Staff can read holiday for context)
             "/voucher", "/holiday",
             // Work Scheduling

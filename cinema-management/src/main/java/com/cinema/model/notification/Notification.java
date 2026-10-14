@@ -10,9 +10,6 @@ public class Notification {
     public static final String TYPE_REFUND = "REFUND";
     /** Loại nhắc suất chiếu (Req 23.3). */
     public static final String TYPE_SHOWTIME_REMINDER = "SHOWTIME_REMINDER";
-    public static final String TYPE_SHOWTIME_SCHEDULE_REMINDER = "SHOWTIME_SCHEDULE_REMINDER";
-    public static final String TYPE_SHOWTIME_SCHEDULE_URGENT = "SHOWTIME_SCHEDULE_URGENT";
-    public static final String TYPE_SHOWTIME_ALLOCATION_UPDATED = "SHOWTIME_ALLOCATION_UPDATED";
     /** Loại tiếp thị — ngừng gửi khi tài khoản LOCKED (Req 23.6). */
     public static final String TYPE_MARKETING = "MARKETING";
 

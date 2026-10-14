@@ -8,6 +8,7 @@ import com.cinema.common.FormParameters;
 import com.cinema.common.SerializationUtil;
 import com.cinema.common.ServiceException;
 import com.cinema.filter.AuthFilter;
+<<<<<<< HEAD:cinema-management/src/main/java/com/cinema/controller/ShowtimeController.java
 import com.cinema.dao.movie.MovieDAO;
 import com.cinema.dao.pricing.PriceRuleDAO;
 import com.cinema.service.pricing.PricingService;
@@ -23,6 +24,15 @@ import com.cinema.model.screen.Screen;
 import com.cinema.model.screen.Seat;
 import com.cinema.service.notification.NotificationService;
 import com.cinema.service.showtime.ShowtimeAllocationService;
+=======
+import com.cinema.movie.MovieDAO;
+import com.cinema.pricing.PriceRuleDAO;
+import com.cinema.pricing.PricingService;
+import com.cinema.screen.ScreenDAO;
+import com.cinema.showtime.Showtime;
+import com.cinema.showtime.ShowtimeDAO;
+import com.cinema.showtime.ShowtimeService;
+>>>>>>> vu:cinema-management/src/main/java/com/cinema/web/ShowtimeController.java
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -54,6 +64,7 @@ public class ShowtimeController extends HttpServlet {
         this.showtimeService = new ShowtimeService(
                 new ShowtimeDAO(), screenDao, new MovieDAO(), new BranchDAO());
         this.pricingService = new PricingService(new PriceRuleDAO(), new ShowtimeDAO(),
+<<<<<<< HEAD:cinema-management/src/main/java/com/cinema/controller/ShowtimeController.java
                 new com.cinema.dao.pricing.HolidayDAO(),
                 new com.cinema.dao.pricing.PricingConfigDAO());
         this.showtimeService.setAllocationHook(
@@ -61,6 +72,10 @@ public class ShowtimeController extends HttpServlet {
                         new com.cinema.dao.showtime.ShowtimeAllocationDAO(),
                         new com.cinema.service.notification.NotificationService(
                                 new com.cinema.dao.notification.NotificationDAO())));
+=======
+                new com.cinema.pricing.HolidayDAO(),
+                new com.cinema.pricing.PricingConfigDAO());
+>>>>>>> vu:cinema-management/src/main/java/com/cinema/web/ShowtimeController.java
     }
 
     @Override
