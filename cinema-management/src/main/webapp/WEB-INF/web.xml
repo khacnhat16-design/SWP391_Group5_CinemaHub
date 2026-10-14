@@ -122,18 +122,6 @@
         <url-pattern>/movie/*</url-pattern>
     </servlet-mapping>
     <servlet>
-        <servlet-name>showtimeAllocationController</servlet-name>
-        <servlet-class>com.cinema.web.ShowtimeAllocationController</servlet-class>
-    </servlet>
-    <servlet-mapping>
-        <servlet-name>showtimeAllocationController</servlet-name>
-        <url-pattern>/api/showtime-allocations</url-pattern>
-    </servlet-mapping>
-    <servlet-mapping>
-        <servlet-name>showtimeAllocationController</servlet-name>
-        <url-pattern>/api/showtime-allocations/*</url-pattern>
-    </servlet-mapping>
-    <servlet>
         <servlet-name>screenController</servlet-name>
         <servlet-class>com.cinema.web.ScreenController</servlet-class>
     </servlet>
