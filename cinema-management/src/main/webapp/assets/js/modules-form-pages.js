@@ -1669,11 +1669,6 @@
                     var rowInput = formEl.querySelector('input[name="rowCount"]');
                     var colInput = formEl.querySelector('input[name="colCount"]');
                     if (!rowInput || !colInput) return;
-                    if (hidden.value) {
-                        try { initialSeats = JSON.parse(hidden.value); } catch (_) {
-                            throw new Error('Không đọc được sơ đồ ghế hiện tại.');
-                        }
-                    }
                     var nextRows = Math.max(1, Math.min(26, parseInt(rowInput.value, 10) || 1));
                     var nextCols = Math.max(1, Math.min(30, parseInt(colInput.value, 10) || 1));
                     if (nextRows > currentRows || nextCols > currentCols) {
