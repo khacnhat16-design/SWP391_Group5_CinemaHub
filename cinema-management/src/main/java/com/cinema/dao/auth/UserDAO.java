@@ -177,23 +177,6 @@ public class UserDAO {
         }
     }
     
-  /**
-     * Update user profile (name and phone). Enforces phone uniqueness excluding own account.
-     */
-    public void updateProfile(Long userId, String fullName, String phone) throws Exception {
-        // Loại trừ chính user đang update khỏi WHERE để cho phép giữ nguyên SĐT
-        // cũ mà không bị false-positive "đã tồn tại".
-        String checkSql = "SELECT 1 FROM dbo.user_account WHERE phone = ? AND id != ?";
-        try (Connection conn = DBContext.getConnection();
-             PreparedStatement ps = conn.prepareStatement(checkSql)) {
-            ps.setString(1, phone);
-            ps.setLong(2, userId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    throw new RuntimeException("Phone number already in use");
-                }
-            }
-        }
 
     public boolean verifyEmailToken(String token) throws Exception {
         String sql = """

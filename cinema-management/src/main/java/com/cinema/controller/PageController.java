@@ -24,7 +24,7 @@ public class PageController extends HttpServlet {
 
     /** Domain có trang danh mục tại /console/{domain}/list (whitelist chống path traversal). */
     private static final Set<String> LIST_PAGES = Set.of(
-            "branch", "movie", "screen", "booking", "notification");
+            "branch", "movie", "screen", "booking", "notification", "inventory");
 
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
