@@ -64,6 +64,7 @@ public final class BranchScopeRBACFilter implements Filter {
             "/booking",
             // Reviews / Support / Complaints (RSC-2..4) — Customer submits, Manager reads via own role.
             "/api/reviews", "/api/support-requests", "/api/complaints"
+            , "/api/refunds"
     );
 
     // Staff/Manager endpoint prefixes (controller-level will further enforce branch scope)
@@ -108,6 +109,7 @@ public final class BranchScopeRBACFilter implements Filter {
             "/shift-attendance",
             // Reviews — public read; Staff allowed too (controller lets any logged-in read).
             "/api/reviews"
+            , "/api/refunds"
     );
 
     // Admin-only endpoint prefixes (controller-level will re-check, this filter is just first line)

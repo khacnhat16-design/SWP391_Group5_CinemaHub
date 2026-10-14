@@ -10,7 +10,7 @@ public final class AccessScope {
     private static final Set<String> PUBLIC_PERMISSIONS = Set.of("SHOWTIME_BROWSE");
     private static final Set<String> CUSTOMER_PERMISSIONS = Set.of(
             "SHOWTIME_BROWSE", "BOOKING_CREATE", "BOOKING_VIEW_OWN", "BOOKING_CANCEL_OWN",
-            "CONCESSION_PREORDER", "WALLET_USE", "LOYALTY_VIEW");
+            "CONCESSION_PREORDER", "WALLET_USE", "LOYALTY_VIEW", "REFUND_REQUEST");
     private static final Set<String> STAFF_PERMISSIONS = Set.of(
             "SHOWTIME_BROWSE", "TICKET_SELL", "TICKET_VALIDATE", "CONCESSION_SELL",
             "CONCESSION_PICKUP", "SHIFT_OPEN", "SHIFT_CLOSE", "INVENTORY_VIEW",

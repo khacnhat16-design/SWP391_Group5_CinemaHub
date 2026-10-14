@@ -169,6 +169,8 @@ public final class CinemaApplication {
         context.addServletMappingDecoded("/discover", "discoveryServlet");
         Tomcat.addServlet(context, "bookingController", new BookingController());
         context.addServletMappingDecoded("/booking/*", "bookingController");
+        Tomcat.addServlet(context, "refundController", new RefundController());
+        context.addServletMappingDecoded("/api/refunds/*", "refundController");
         Tomcat.addServlet(context, "bookingEntry", new BookingEntryServlet());
         context.addServletMappingDecoded("/booking", "bookingEntry");
         Tomcat.addServlet(context, "movieController", new MovieController());
