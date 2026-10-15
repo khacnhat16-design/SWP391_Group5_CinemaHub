@@ -788,6 +788,7 @@
                 var parts = entry[0].split(':');
                 return { rowLabel: parts[0], colNo: Number(parts[1]), seatType: entry[1] };
             }));
+            hiddenLayout.dispatchEvent(new Event('change', { bubbles: true }));
             var counts = { STANDARD: 0, VIP: 0, COUPLE: 0 };
             layout.forEach(function (type) { counts[type] = (counts[type] || 0) + 1; });
             summary.textContent = 'Tổng ' + layout.size + ' ghế · Thường ' + counts.STANDARD
@@ -928,21 +929,152 @@
 
                 var currentRows = initialRowCount;
                 var currentCols = initialColCount;
-                var initialSeats = (screen && screen.seats) || [];
+                var initialSeats = screen && Array.isArray(screen.seats)
+                    ? screen.seats.map(function (seat) { return Object.assign({}, seat); })
+                    : [];
+                if (!screen) {
+                    for (var rowIndex = 0; rowIndex < initialRowCount; rowIndex++) {
+                        var rowLabel = String.fromCharCode(65 + rowIndex);
+                        for (var colNo = 1; colNo <= initialColCount; colNo++) {
+                            initialSeats.push({
+                                rowLabel: rowLabel,
+                                colNo: colNo,
+                                seatType: 'STANDARD',
+                                status: 'ACTIVE'
+                            });
+                        }
+                    }
+                }
+                var archivedSeats = initialSeats.filter(function (seat) {
+                    return seat.status === 'INACTIVE';
+                });
+                var archivedPositions = new Set(archivedSeats.map(function (seat) {
+                    return seat.rowLabel + ':' + seat.colNo;
+                }));
+                var archivedSeatSection = null;
+
+                function syncSeatState() {
+                    var desiredSeats;
+                    try {
+                        desiredSeats = JSON.parse(hidden.value || '[]');
+                    } catch (_) {
+                        throw new Error('Không đọc được sơ đồ ghế hiện tại.');
+                    }
+                    initialSeats = initialSeats.filter(function (seat) {
+                        if (seat.status === 'INACTIVE') return true;
+                        var rowIndex = seat.rowLabel.charCodeAt(0) - 65;
+                        return rowIndex < 0 || rowIndex >= currentRows
+                            || Number(seat.colNo) > currentCols;
+                    });
+                    desiredSeats.forEach(function (seat) {
+                        initialSeats.push({
+                            rowLabel: seat.rowLabel,
+                            colNo: Number(seat.colNo),
+                            seatType: seat.seatType,
+                            status: 'ACTIVE'
+                        });
+                    });
+                    updateArchivedSeatButtons();
+                }
+
+                function updateArchivedSeatButtons() {
+                    if (!archivedSeatSection) return;
+                    var desiredPositions = new Set();
+                    try {
+                        JSON.parse(hidden.value || '[]').forEach(function (seat) {
+                            desiredPositions.add(seat.rowLabel + ':' + seat.colNo);
+                        });
+                    } catch (_) {
+                        throw new Error('Không đọc được sơ đồ ghế hiện tại.');
+                    }
+                    archivedSeatSection.querySelectorAll('button[data-seat-position]').forEach(function (button) {
+                        var position = button.getAttribute('data-seat-position');
+                        var parts = position.split(':');
+                        var rowIndex = parts[0].charCodeAt(0) - 65;
+                        var inBounds = rowIndex >= 0 && rowIndex < currentRows
+                            && Number(parts[1]) <= currentCols;
+                        var restored = desiredPositions.has(position);
+                        button.disabled = restored || !inBounds;
+                        button.textContent = restored ? 'Đã chọn mở lại'
+                            : (inBounds ? 'Mở lại ghế ' + parts[0] + parts[1] : 'Ngoài kích thước phòng');
+                    });
+                }
 
                 function redrawSeatPicker() {
                     var rowInput = formEl.querySelector('input[name="rowCount"]');
                     var colInput = formEl.querySelector('input[name="colCount"]');
                     if (!rowInput || !colInput) return;
-                    if (hidden.value) {
-                        try { initialSeats = JSON.parse(hidden.value); } catch (_) {
-                            throw new Error('Không đọc được sơ đồ ghế hiện tại.');
+                    var nextRows = Math.max(1, Math.min(26, parseInt(rowInput.value, 10) || 1));
+                    var nextCols = Math.max(1, Math.min(30, parseInt(colInput.value, 10) || 1));
+                    if (nextRows > currentRows || nextCols > currentCols) {
+                        var positions = new Set(initialSeats.map(function (seat) {
+                            return seat.rowLabel + ':' + seat.colNo;
+                        }));
+                        for (var rowIndex = 0; rowIndex < nextRows; rowIndex++) {
+                            var rowLabel = String.fromCharCode(65 + rowIndex);
+                            for (var colNo = 1; colNo <= nextCols; colNo++) {
+                                var position = rowLabel + ':' + colNo;
+                                var addedByResize = rowIndex >= currentRows || colNo > currentCols;
+                                if (addedByResize && !positions.has(position)
+                                        && !archivedPositions.has(position)) {
+                                    initialSeats.push({
+                                        rowLabel: rowLabel,
+                                        colNo: colNo,
+                                        seatType: 'STANDARD',
+                                        status: 'ACTIVE'
+                                    });
+                                    positions.add(position);
+                                }
+                            }
                         }
                     }
-                    currentRows = Math.max(1, Math.min(26, parseInt(rowInput.value, 10) || 1));
-                    currentCols = Math.max(1, Math.min(30, parseInt(colInput.value, 10) || 1));
+                    currentRows = nextRows;
+                    currentCols = nextCols;
                     renderSeatLayoutPicker(seatHost, hidden, currentRows, currentCols, initialSeats);
+                    updateArchivedSeatButtons();
                 }
+
+                if (archivedSeats.length) {
+                    archivedSeatSection = document.createElement('div');
+                    archivedSeatSection.className = 'seat-archived-list';
+                    var archivedHeading = document.createElement('h3');
+                    archivedHeading.textContent = 'Ghế đang lưu trữ';
+                    archivedSeatSection.appendChild(archivedHeading);
+                    var archivedHint = document.createElement('p');
+                    archivedHint.textContent = 'Chọn ghế cần mở lại, sau đó lưu sơ đồ phòng.';
+                    archivedSeatSection.appendChild(archivedHint);
+                    archivedSeats.forEach(function (seat) {
+                        var position = seat.rowLabel + ':' + seat.colNo;
+                        var button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = 'ws-btn secondary small';
+                        button.setAttribute('data-seat-position', position);
+                        button.textContent = 'Mở lại ghế ' + seat.rowLabel + seat.colNo;
+                        button.addEventListener('click', function () {
+                            var desiredSeats;
+                            try {
+                                desiredSeats = JSON.parse(hidden.value || '[]');
+                            } catch (_) {
+                                throw new Error('Không đọc được sơ đồ ghế hiện tại.');
+                            }
+                            if (desiredSeats.some(function (item) {
+                                return item.rowLabel + ':' + item.colNo === position;
+                            })) return;
+                            desiredSeats.push({
+                                rowLabel: seat.rowLabel,
+                                colNo: seat.colNo,
+                                seatType: seat.seatType,
+                                status: 'ACTIVE'
+                            });
+                            hidden.value = JSON.stringify(desiredSeats);
+                            hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                            redrawSeatPicker();
+                        });
+                        archivedSeatSection.appendChild(button);
+                    });
+                    section.appendChild(archivedSeatSection);
+                }
+                hidden.addEventListener('change', syncSeatState);
 
                 setTimeout(redrawSeatPicker, 0);
                 var rowInput = formEl.querySelector('input[name="rowCount"]');
