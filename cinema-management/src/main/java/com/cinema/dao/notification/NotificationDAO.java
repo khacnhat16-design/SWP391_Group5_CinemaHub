@@ -129,6 +129,16 @@ public class NotificationDAO {
         }
     }
 
+    public int countUnread(Long userId) throws SQLException {
+        if (userId == null) return 0;
+        return countUnread(userId.longValue());
+    }
+
+    public List<Notification> findRecentForCurrent(Long userId, int limit) throws SQLException {
+        if (userId == null) return List.of();
+        return findByUser(userId, null, limit);
+    }
+
     /**
      * Vé CONFIRMED có suất chiếu bắt đầu trong khoảng nhắc (Req 23.3 — scheduler
      * 11.1

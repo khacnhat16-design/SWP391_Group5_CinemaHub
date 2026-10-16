@@ -5,7 +5,6 @@ import com.cinema.common.ErrorEnvelope;
 import com.cinema.common.SerializationUtil;
 import com.cinema.common.ServiceException;
 import com.cinema.filter.AuthFilter;
-import com.cinema.dao.legacy.NotificationDAO;
 import com.cinema.dao.notification.NotificationDAO;
 import com.cinema.infrastructure.database.DBContext;
 import com.cinema.model.notification.Notification;

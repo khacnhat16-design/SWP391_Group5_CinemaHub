@@ -1,40 +1,40 @@
-package com.cinema.web;
+package com.cinema.controller;
 
-import com.cinema.auth.AccessScope;
-import com.cinema.auth.Role;
-import com.cinema.branch.BranchDAO;
+import com.cinema.model.auth.AccessScope;
+import com.cinema.model.auth.Role;
+import com.cinema.dao.branch.BranchDAO;
 import com.cinema.common.ErrorEnvelope;
 import com.cinema.common.FormParameters;
 import com.cinema.common.SerializationUtil;
 import com.cinema.common.ServiceException;
 import com.cinema.filter.AuthFilter;
-import com.cinema.screen.Screen;
-import com.cinema.screen.ScreenDAO;
-import com.cinema.screen.ScreenService;
-import com.cinema.screen.Seat;
-import com.cinema.screen.SeatDAO;
+import com.cinema.model.screen.Screen;
+import com.cinema.dao.screen.ScreenDAO;
+import com.cinema.service.screen.ScreenService;
+import com.cinema.model.screen.Seat;
+import com.cinema.dao.screen.SeatDAO;
+import com.cinema.service.screen.ScreenService.SeatLayoutInput;
+import com.cinema.model.branch.Branch;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
-/** REST API for managing screens and their seat maps. */
+/**
+ * REST API controller cho phòng chiếu & sơ đồ ghế (Req 3.1-3.6).
+ *
+ * <p>Access model: Branch Manager quản lý screen của branch mình (Admin toàn chuỗi);
+ * Branch Staff/Customer/Guest không có quyền quản lý — chỉ Manager/Admin (Req 3.6).
+ */
 public class ScreenController extends HttpServlet {
-    private static final Logger LOGGER = Logger.getLogger(ScreenController.class.getName());
-    private ScreenDAO screenDao;
     private ScreenService screenService;
 
     @Override
     public void init() throws ServletException {
-        screenDao = new ScreenDAO();
-        screenService = new ScreenService(screenDao, new SeatDAO(), new BranchDAO());
+        this.screenService = new ScreenService(new ScreenDAO(), new SeatDAO(), new BranchDAO());
     }
 
     @Override
@@ -44,36 +44,38 @@ public class ScreenController extends HttpServlet {
             AccessScope scope = requireManager(request, response);
             if (scope == null) return;
 
-            String path = request.getPathInfo();
-            if (path == null || path.equals("/")) {
-                Long branchId = parseOptionalLong(request.getParameter("branchId"));
-                if (branchId != null) {
-                    requireBranchAccess(scope, branchId);
-                    sendOk(response, screenService.listForBranch(branchScope(scope, branchId), branchId));
-                } else if (scope.role() == Role.ADMIN) {
-                    sendOk(response, screenService.listAll());
-                } else if (scope.branchIds().size() == 1) {
-                    long assignedBranchId = scope.branchIds().iterator().next();
-                    sendOk(response, screenService.listForBranch(
-                            branchScope(scope, assignedBranchId), assignedBranchId));
-                } else if (scope.branchIds().isEmpty()) {
-                    sendOk(response, List.of());
-                } else {
-                    sendBadRequest(response, "Chọn chi nhánh được phân công để xem phòng chiếu");
-                }
-                return;
-            }
-
-            String[] parts = path.replaceAll("^/+|/+$", "").split("/");
-            if (parts.length == 2 && "seats".equals(parts[1])) {
-                long screenId = Long.parseLong(parts[0]);
-                Long actorBranchScope = branchScopeForScreen(scope, screenId, response);
-                if (actorBranchScope == null && scope.role() != Role.ADMIN) return;
-                List<Seat> seats = screenService.seatMap(actorBranchScope, screenId);
+            String pathInfo = request.getPathInfo();
+            if (pathInfo != null && pathInfo.matches("/\\d+/seats")) {
+                long screenId = Long.parseLong(pathInfo.substring(1, pathInfo.length() - "/seats".length()));
+                List<Seat> seats = screenService.seatMap(scopeBranch(scope), screenId);
                 sendOk(response, seats);
-                return;
+            } else {
+                String branchIdRaw = request.getParameter("branchId");
+                if (branchIdRaw == null && scope.role() != Role.ADMIN) {
+                    if (scope.branchIds().isEmpty()) {
+                        sendForbidden(response, "Tài khoản chưa được gán chi nhánh");
+                        return;
+                    }
+                    List<Screen> screens = new java.util.ArrayList<>();
+                    for (Long branchId : scope.branchIds()) {
+                        screens.addAll(screenService.listForBranch(branchId, branchId));
+                    }
+                    sendOk(response, screens);
+                    return;
+                }
+                if (branchIdRaw == null) {
+                    sendOk(response, screenService.listAll());
+                    return;
+                }
+                long branchId = Long.parseLong(branchIdRaw);
+                if (scope.role() != Role.ADMIN && !scope.includesBranch(branchId)) {
+                    sendForbidden(response, "Không có quyền truy cập phòng chiếu của chi nhánh này");
+                    return;
+                }
+                List<Screen> screens = screenService.listForBranch(
+                        scope.role() == Role.ADMIN ? null : branchId, branchId);
+                sendOk(response, screens);
             }
-            sendBadRequest(response, "Đường dẫn không hợp lệ — dùng /screen hoặc /screen/{id}/seats");
         } catch (NumberFormatException e) {
             sendBadRequest(response, "ID không hợp lệ");
         } catch (Exception e) {
@@ -87,15 +89,18 @@ public class ScreenController extends HttpServlet {
         try {
             AccessScope scope = requireManager(request, response);
             if (scope == null) return;
-            long branchId = Long.parseLong(requireParam(request, "branchId"));
-            requireBranchAccess(scope, branchId);
 
-            Screen created = screenService.createScreen(branchScope(scope, branchId), branchId,
-                    requireParam(request, "code"), requireParam(request, "name"),
-                    Integer.parseInt(requireParam(request, "rowCount")),
-                    Integer.parseInt(requireParam(request, "colCount")), null,
-                    readSeatLayout(request.getParameter("seatLayout")));
-            sendOk(response, created);
+            long branchId = Long.parseLong(requireParam(request, "branchId"));
+            String code = request.getParameter("code");
+            String name = request.getParameter("name");
+            int rowCount = parseIntParam(request, "rowCount");
+            int colCount = parseIntParam(request, "colCount");
+            String vipRows = request.getParameter("vipRows");
+            List<SeatLayoutInput> layout = parseSeatLayout(request.getParameter("seatLayout"));
+
+            Screen screen = screenService.createScreen(scopeBranch(scope), branchId,
+                    code, name, rowCount, colCount, vipRows, layout);
+            sendOk(response, screen);
         } catch (NumberFormatException e) {
             sendBadRequest(response, "Dữ liệu số không hợp lệ");
         } catch (Exception e) {
@@ -110,41 +115,35 @@ public class ScreenController extends HttpServlet {
             AccessScope scope = requireManager(request, response);
             if (scope == null) return;
 
-            String path = request.getPathInfo();
-            if (path == null || !path.matches("/\\d+")) {
-                sendBadRequest(response, "Đường dẫn không hợp lệ — dùng /screen/{id}");
+            // Trim "/" cuối nếu có để tránh NumberFormatException khi client gọi
+            // /screen/4/ (trailing slash) hoặc /screen/4/xxx (extra path).
+            String pathInfo = request.getPathInfo();
+            String idPart = (pathInfo == null) ? "" : pathInfo.replaceAll("^/+", "");
+            if (idPart.contains("/")) {
+                idPart = idPart.substring(0, idPart.indexOf('/'));
+            }
+            if (idPart.isEmpty()) {
+                sendBadRequest(response, "Thiếu ID phòng chiếu");
                 return;
             }
-            long screenId = Long.parseLong(path.substring(1));
-            Long actorBranchScope = branchScopeForScreen(scope, screenId, response);
-            if (actorBranchScope == null && scope.role() != Role.ADMIN) return;
+            long screenId = Long.parseLong(idPart);
             var parameters = FormParameters.readPut(request);
-            if ("deactivate".equals(parameters.get("action"))) {
-                sendOk(response, screenService.deactivate(actorBranchScope, screenId));
-                return;
-            }
+            String action = parameters.get("action");
 
-            Screen current = screenDao.findById(screenId)
-                    .orElseThrow(() -> new ServiceException.NotFound("Phòng chiếu không tồn tại"));
-            String code = requireParam(parameters.get("code"), "code").toUpperCase(Locale.ROOT);
-            if (code.length() > 20) {
-                throw new ServiceException.Validation("Mã phòng chiếu tối đa 20 ký tự");
+            if ("deactivate".equals(action)) {
+                sendOk(response, screenService.deactivate(scopeBranch(scope), screenId));
+            } else {
+                int rowCount = parseIntParam(parameters, "rowCount");
+                int colCount = parseIntParam(parameters, "colCount");
+                List<SeatLayoutInput> layout = parseSeatLayout(parameters.get("seatLayout"));
+                if (layout == null) {
+                    sendOk(response, screenService.updateSeatMap(scopeBranch(scope), screenId,
+                            rowCount, colCount, parameters.get("vipRows")));
+                    return;
+                }
+                sendOk(response, screenService.updateSeatMap(scopeBranch(scope), screenId,
+                        rowCount, colCount, layout));
             }
-            String name = requireParam(parameters.get("name"), "name");
-            var existing = screenDao.findByBranchAndCode(current.branchId(), code);
-            if (existing.isPresent() && !existing.get().id().equals(screenId)) {
-                throw new ServiceException.Conflict("Mã phòng chiếu đã tồn tại trong chi nhánh");
-            }
-
-            int rowCount = Integer.parseInt(requireParam(parameters.get("rowCount"), "rowCount"));
-            int colCount = Integer.parseInt(requireParam(parameters.get("colCount"), "colCount"));
-            List<ScreenService.SeatLayoutInput> layout = readSeatLayout(parameters.get("seatLayout"));
-            Screen updated = screenService.updateSeatMap(actorBranchScope, screenId,
-                    rowCount, colCount, layout);
-            updated.setCode(code);
-            updated.setName(name);
-            screenDao.update(updated);
-            sendOk(response, updated);
         } catch (NumberFormatException e) {
             sendBadRequest(response, "Dữ liệu số không hợp lệ");
         } catch (Exception e) {
@@ -152,6 +151,9 @@ public class ScreenController extends HttpServlet {
         }
     }
 
+    // ---- helpers (mirror MovieController/BranchController patterns) ----
+
+    /** Trả scope nếu là Branch Manager/Admin có quyền SCREEN_MANAGE; ngược lại gửi 403 và trả null. */
     private AccessScope requireManager(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
@@ -162,49 +164,50 @@ public class ScreenController extends HttpServlet {
         return scope;
     }
 
-    private void requireBranchAccess(AccessScope scope, long branchId) {
-        if (!scope.includesBranch(branchId)) {
-            throw new ServiceException.Forbidden("Không thể quản lý phòng chiếu của chi nhánh khác");
-        }
-    }
-
-    private Long branchScope(AccessScope scope, long branchId) {
-        return scope.role() == Role.ADMIN ? null : branchId;
-    }
-
-    private Long branchScopeForScreen(AccessScope scope, long screenId,
-                                      HttpServletResponse response) throws Exception {
-        Screen screen = screenDao.findById(screenId)
-                .orElseThrow(() -> new ServiceException.NotFound("Phòng chiếu không tồn tại"));
-        if (!scope.includesBranch(screen.branchId())) {
-            sendForbidden(response, "Không thể quản lý phòng chiếu của chi nhánh khác");
-            return null;
-        }
-        return branchScope(scope, screen.branchId());
+    /** Admin không bị ép scope (null); Manager ép đúng branch duy nhất trong scope. */
+    private Long scopeBranch(AccessScope scope) {
+        if (scope.role() == Role.ADMIN) return null;
+        return scope.branchIds().isEmpty() ? -1L : scope.branchIds().iterator().next();
     }
 
     private String requireParam(HttpServletRequest request, String name) {
-        return requireParam(request.getParameter(name), name);
-    }
-
-    private String requireParam(String value, String name) {
+        String value = request.getParameter(name);
         if (value == null || value.isBlank()) {
             throw new ServiceException.Validation("Thiếu tham số bắt buộc: " + name);
         }
         return value.trim();
     }
 
-    private Long parseOptionalLong(String raw) {
-        return raw == null || raw.isBlank() ? null : Long.parseLong(raw.trim());
+    private int parseIntParam(HttpServletRequest request, String name) {
+        String raw = request.getParameter(name);
+        if (raw == null || raw.isBlank()) {
+            throw new ServiceException.Validation("Thiếu tham số bắt buộc: " + name);
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new ServiceException.Validation(name + " phải là số nguyên");
+        }
     }
 
-    private List<ScreenService.SeatLayoutInput> readSeatLayout(String raw) throws Exception {
-        if (raw == null || raw.isBlank()) return null;
+    private int parseIntParam(java.util.Map<String, String> parameters, String name) {
+        String raw = parameters.get(name);
+        if (raw == null || raw.isBlank()) {
+            throw new ServiceException.Validation("Thiếu tham số bắt buộc: " + name);
+        }
         try {
-            ScreenService.SeatLayoutInput[] layout = SerializationUtil.fromJson(
-                    raw, ScreenService.SeatLayoutInput[].class);
-            return Arrays.asList(layout);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new ServiceException.Validation(name + " phải là số nguyên");
+        }
+    }
+
+    private List<SeatLayoutInput> parseSeatLayout(String json) throws Exception {
+        if (json == null || json.isBlank()) return null;
+        try {
+            SeatLayoutInput[] layout = SerializationUtil.fromJson(json, SeatLayoutInput[].class);
+            return java.util.Arrays.asList(layout);
+        } catch (Exception e) {
             throw new ServiceException.Validation("Dữ liệu sơ đồ ghế không hợp lệ");
         }
     }
@@ -233,12 +236,11 @@ public class ScreenController extends HttpServlet {
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write(SerializationUtil.toJson(
                     new ErrorEnvelope(service.code(), service.getMessage())));
-            return;
+        } else {
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write(SerializationUtil.toJson(
+                    new ErrorEnvelope("INTERNAL_ERROR", "Lỗi hệ thống")));
         }
-        LOGGER.log(Level.SEVERE, "Screen API request failed", e);
-        response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-        response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write(SerializationUtil.toJson(
-                new ErrorEnvelope("INTERNAL_ERROR", "Lỗi hệ thống")));
     }
 }

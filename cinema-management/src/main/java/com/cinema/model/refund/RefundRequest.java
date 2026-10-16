@@ -55,6 +55,7 @@ public class RefundRequest {
     public long showtimeId() { return showtimeId; }
     public void setShowtimeId(long value) { this.showtimeId = value; }
     public LocalDateTime showtimeStart() { return showtimeStart; }
+    public LocalDateTime getShowtimeStart() { return showtimeStart; }
     public void setShowtimeStart(LocalDateTime value) { this.showtimeStart = value; }
     public long ticketAmount() { return ticketAmount; }
     public void setTicketAmount(long value) { this.ticketAmount = value; }

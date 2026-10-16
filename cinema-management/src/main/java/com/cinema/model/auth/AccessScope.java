@@ -1,8 +1,6 @@
 package com.cinema.model.auth;
 
 import java.util.Collections;
-import java.util.EnumSet;
-import java.util.Objects;
 import java.util.Set;
 
 /** Immutable authorization scope resolved from the authenticated account. */
@@ -14,30 +12,43 @@ public final class AccessScope {
     private static final Set<String> STAFF_PERMISSIONS = Set.of(
             "SHOWTIME_BROWSE", "TICKET_SELL", "TICKET_VALIDATE", "CONCESSION_SELL",
             "CONCESSION_PICKUP", "SHIFT_OPEN", "SHIFT_CLOSE", "INVENTORY_VIEW",
-            "LOYALTY_ADJUST");
+            "LOYALTY_ADJUST", "SHIFT_ASSIGNMENT_VIEW_OWN", "SHIFT_REQUEST_SUBMIT");
     private static final Set<String> MANAGER_PERMISSIONS = Set.of(
             "SHOWTIME_BROWSE", "SCREEN_MANAGE", "SHOWTIME_MANAGE", "INVENTORY_MANAGE",
             "SHIFT_APPROVE", "REPORT_VIEW", "REFUND_APPROVE", "TICKET_SELL", "TICKET_VALIDATE",
-            "CONCESSION_SELL", "LOYALTY_ADJUST");
+            "CONCESSION_SELL", "LOYALTY_ADJUST", "VOUCHER_MANAGE",
+            "SHIFT_TEMPLATE_MANAGE", "SHIFT_ASSIGNMENT_MANAGE", "SHIFT_REQUEST_REVIEW");
     private static final Set<String> ADMIN_PERMISSIONS = Set.of(
             "SHOWTIME_BROWSE", "BRANCH_MANAGE", "MOVIE_MANAGE", "PRICING_MANAGE",
-            "VOUCHER_MANAGE", "LOYALTY_MANAGE", "PRODUCT_MANAGE", "USER_MANAGE",
-            "REPORT_VIEW", "AUDIT_VIEW");
+            "VOUCHER_MANAGE", "HOLIDAY_MANAGE", "LOYALTY_MANAGE", "PRODUCT_MANAGE", "USER_MANAGE",
+            "REPORT_VIEW", "AUDIT_VIEW",
+            "SHIFT_TEMPLATE_MANAGE", "SHIFT_ASSIGNMENT_MANAGE", "SHIFT_ASSIGNMENT_VIEW_OWN",
+            "SHIFT_REQUEST_SUBMIT", "SHIFT_REQUEST_REVIEW");
 
     private final Role role;
     private final Set<Long> branchIds;
+    private final Long userId;
 
     private AccessScope(Role role, Set<Long> branchIds) {
+        this(role, branchIds, null);
+    }
+
+    private AccessScope(Role role, Set<Long> branchIds, Long userId) {
         this.role = role;
         this.branchIds = Collections.unmodifiableSet(Set.copyOf(branchIds));
+        this.userId = userId;
     }
 
     public static AccessScope forGuest() {
-        return new AccessScope(null, Set.of());
+        return new AccessScope(null, Set.of(), null);
     }
 
     public static AccessScope forRole(Role role, Set<Long> branchIds) {
-        return new AccessScope(role, branchIds);
+        return new AccessScope(role, branchIds, null);
+    }
+
+    public static AccessScope forAuthenticatedUser(Role role, Set<Long> branchIds, Long userId) {
+        return new AccessScope(role, branchIds, userId);
     }
 
     public boolean isGuest() {
@@ -46,6 +57,10 @@ public final class AccessScope {
 
     public Role role() {
         return role;
+    }
+
+    public Long userId() {
+        return userId;
     }
 
     public Set<Long> branchIds() {

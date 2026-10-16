@@ -141,7 +141,7 @@ public final class CinemaApplication {
         context.addServletMappingDecoded("/assets/*", "staticAssets");
         // ExpiryScheduler được khởi động qua listener — đăng ký thủ công vì
         // embedded mode bỏ qua web.xml listeners.
-        context.addApplicationListener(com.cinema.listener.AppContextListener.class.getName());
+        // context.addApplicationListener("com.cinema.listener.AppContextListener");
         registerFilter(context, "exceptionMapping", ExceptionMappingFilter.class);
         registerFilter(context, "encoding", EncodingFilter.class);
         registerFilter(context, "auth", AuthFilter.class);

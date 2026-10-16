@@ -48,6 +48,7 @@ public class ShowtimeService {
     private final MovieDAO movieDao;
     private final BranchDAO branchDao;
     private final TransactionTemplate tx = new TransactionTemplate();
+    private volatile ShowtimeAllocationService allocationHook;
 
     public ShowtimeService(ShowtimeDAO showtimeDao, ScreenDAO screenDao,
                            MovieDAO movieDao, BranchDAO branchDao) {
@@ -55,6 +56,10 @@ public class ShowtimeService {
         this.screenDao = screenDao;
         this.movieDao = movieDao;
         this.branchDao = branchDao;
+    }
+
+    public void setAllocationHook(ShowtimeAllocationService allocationHook) {
+        this.allocationHook = allocationHook;
     }
 
     /**
