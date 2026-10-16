@@ -43,6 +43,10 @@ public class PageController extends HttpServlet {
         // để giữ URL quen thuộc cho các module quản lý (movie, screen, branch...).
         if (path.matches("/[^/]+/list")) {
             String domain = path.substring(1, path.length() - "/list".length());
+            if ("inventory".equals(domain)) {
+                response.sendRedirect(request.getContextPath() + "/console?module=inventory&tab=product");
+                return;
+            }
             if (LIST_PAGES.contains(domain)) {
                 request.getRequestDispatcher("/WEB-INF/views/" + domain + "/list.jsp")
                         .forward(request, response);

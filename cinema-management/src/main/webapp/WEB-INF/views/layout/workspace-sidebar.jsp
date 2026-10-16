@@ -12,6 +12,7 @@
 <c:set var="wsName" value="${empty sessionScope.username ? '' : sessionScope.username}"/>
 <c:set var="wsInitial" value="${fn:length(wsName) == 0 ? '?' : fn:toUpperCase(fn:substring(wsName, 0, 1))}"/>
 <c:set var="wsActive" value="${not empty param.module ? param.module : (empty requestScope.activeNav ? '' : requestScope.activeNav)}"/>
+<c:set var="wsTab" value="${not empty param.tab ? param.tab : (empty requestScope.activeTab ? 'product' : requestScope.activeTab)}"/>
 <c:set var="wsCtx" value="${pageContext.request.contextPath}"/>
 <c:set var="wsBranch" value="${not empty sessionScope.branchName ? sessionScope.branchName : requestScope.branchScopeName}"/>
 
@@ -80,10 +81,38 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/></svg>
                         Đồ ăn và thức uống
                     </a>
-                    <a class="ws-menu-link ${wsActive == 'inventory' ? 'active' : ''}" href="${wsCtx}/console/inventory/list">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-                        Kho hàng
-                    </a>
+                    <%-- Cụm Kho hàng có menu con (collapsible accordion) --%>
+                    <div class="ws-menu-accordion ${wsActive == 'inventory' ? 'open' : ''}">
+                        <button type="button" 
+                                class="ws-menu-accordion-toggle ${wsActive == 'inventory' ? 'active' : ''}" 
+                                aria-expanded="${wsActive == 'inventory' ? 'true' : 'false'}"
+                                onclick="toggleWsMenuAccordion(this, event)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                            </svg>
+                            <span class="ws-menu-title">Kho hàng</span>
+                            <svg class="ws-accordion-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                            </svg>
+                        </button>
+                        <div class="ws-menu-sub" role="region" aria-label="Menu con Kho hàng">
+                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and (wsTab == 'product' or empty param.tab) ? 'active' : ''}" 
+                               href="${wsCtx}/console?module=inventory&tab=product"
+                               data-tab="product">
+                                Kho thành phẩm
+                            </a>
+                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'material' ? 'active' : ''}" 
+                               href="${wsCtx}/console?module=inventory&tab=material"
+                               data-tab="material">
+                                Kho nguyên liệu
+                            </a>
+                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'recipe' ? 'active' : ''}" 
+                               href="${wsCtx}/console?module=inventory&tab=recipe"
+                               data-tab="recipe">
+                                Công thức chế biến
+                            </a>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="ws-menu-group">
@@ -155,10 +184,38 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/></svg>
                         Đồ ăn và thức uống
                     </a>
-                    <a class="ws-menu-link ${wsActive == 'inventory' ? 'active' : ''}" href="${wsCtx}/console/inventory/list">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-                        Kho hàng
-                    </a>
+                    <%-- Cụm Kho hàng có menu con (collapsible accordion) --%>
+                    <div class="ws-menu-accordion ${wsActive == 'inventory' ? 'open' : ''}">
+                        <button type="button" 
+                                class="ws-menu-accordion-toggle ${wsActive == 'inventory' ? 'active' : ''}" 
+                                aria-expanded="${wsActive == 'inventory' ? 'true' : 'false'}"
+                                onclick="toggleWsMenuAccordion(this, event)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                            </svg>
+                            <span class="ws-menu-title">Kho hàng</span>
+                            <svg class="ws-accordion-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                            </svg>
+                        </button>
+                        <div class="ws-menu-sub" role="region" aria-label="Menu con Kho hàng">
+                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and (wsTab == 'product' or empty param.tab) ? 'active' : ''}" 
+                               href="${wsCtx}/console?module=inventory&tab=product"
+                               data-tab="product">
+                                Kho thành phẩm
+                            </a>
+                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'material' ? 'active' : ''}" 
+                               href="${wsCtx}/console?module=inventory&tab=material"
+                               data-tab="material">
+                                Kho nguyên liệu
+                            </a>
+                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'recipe' ? 'active' : ''}" 
+                               href="${wsCtx}/console?module=inventory&tab=recipe"
+                               data-tab="recipe">
+                                Công thức chế biến
+                            </a>
+                        </div>
+                    </div>
                     <a class="ws-menu-link ${wsActive == 'shift' ? 'active' : ''}" href="${wsCtx}/console?module=shift">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                         Ca làm việc của nhân viên
@@ -335,3 +392,30 @@
     </div>
 </aside>
 <div class="ws-backdrop" id="wsBackdrop"></div>
+
+<script>
+    function toggleWsMenuAccordion(btn, evt) {
+        if (evt) {
+            evt.preventDefault();
+            evt.stopPropagation();
+        }
+        var accordion = btn.closest('.ws-menu-accordion');
+        if (!accordion) return;
+        var willOpen = !accordion.classList.contains('open');
+        accordion.classList.toggle('open', willOpen);
+        btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    }
+
+    // Khi người dùng bấm vào một menu con của Kho hàng:
+    // Nếu đang ở sẵn trong module=inventory, gọi router để chuyển view mượt mà
+    document.addEventListener('click', function (e) {
+        var subLink = e.target.closest('.ws-menu-sub-link');
+        if (!subLink) return;
+        var tab = subLink.getAttribute('data-tab');
+        if (tab && typeof window.CinemaHubSwitchInventoryTab === 'function' && window.location.search.indexOf('module=inventory') !== -1) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.CinemaHubSwitchInventoryTab(tab);
+        }
+    });
+</script>

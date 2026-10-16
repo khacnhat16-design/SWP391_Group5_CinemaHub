@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules-form-pages.js — Đăng ký form-pages cho các module có source (Promise-chain style).
  *
  * Mỗi module khai báo:
@@ -1285,4 +1285,3639 @@
             });
         }
     });
+
+    function branchListApiPath(roleMeta) {
+        return '/branch/';
+    }
+    // Helper hiển thị thông báo lỗi validate trực tiếp dưới từng trường dữ liệu
+    function setFieldError(fieldEl, message) {
+        if (!fieldEl) return;
+        clearFieldError(fieldEl);
+        fieldEl.style.borderColor = '#dc2626';
+        fieldEl.style.boxShadow = '0 0 0 1px #dc2626';
+        var err = hub.el('div', {
+            class: 'ws-field-error-msg',
+            style: 'color: #dc2626; font-size: 0.82rem; font-weight: 500; margin-top: 5px; display: block;'
+        }, [message]);
+        if (fieldEl.parentNode) {
+            fieldEl.parentNode.appendChild(err);
+        }
+        var onInput = function () {
+            clearFieldError(fieldEl);
+            fieldEl.removeEventListener('input', onInput);
+            fieldEl.removeEventListener('change', onInput);
+        };
+        fieldEl.addEventListener('input', onInput);
+        fieldEl.addEventListener('change', onInput);
+    }
+
+    function clearFieldError(fieldEl) {
+        if (!fieldEl) return;
+        fieldEl.style.borderColor = '';
+        fieldEl.style.boxShadow = '';
+        if (fieldEl.parentNode) {
+            var existing = fieldEl.parentNode.querySelector('.ws-field-error-msg');
+            if (existing) existing.remove();
+        }
+    }
+
+    // Không render tab bar 3 nút trên đầu trang nữa vì sidebar đã có các menu con riêng biệt
+    function createInventoryTabBar(activeTab, onSwitch) {
+        return null;
+    }
+
+    function formatInventoryReason(reason) {
+        if (!reason) return '—';
+        var r = String(reason).trim().toUpperCase();
+        var map = {
+            'NHAP_HANG_TU_NCC': 'Nhập hàng từ nhà cung cấp',
+            'NHAP_LAI_TU_NCC': 'Nhập đổi trả từ NCC',
+            'NHAP_KHO': 'Nhập hàng từ nhà cung cấp',
+            'RESTOCK': 'Nhập hàng từ nhà cung cấp',
+            'KIEM_KE_THUA': 'Kiểm kê thừa (Thực tế nhiều hơn)',
+            'KIEM_KE_THIEU': 'Kiểm kê thiếu (Hụt kho)',
+            'HU_HONG': 'Hư hỏng / Rách bao bì',
+            'HET_HAN': 'Hết hạn sử dụng',
+            'MAT_DO_KHACH': 'Thất thoát / Đổ vỡ',
+            'XUAT_CHE_BIEN': 'Xuất kho chế biến bắp nước',
+            'CHE_BIEN': 'Xuất kho chế biến bắp nước',
+            'PRODUCE': 'Xuất kho chế biến bắp nước',
+            'HOAN_TU_DON_HUY': 'Hoàn từ đơn hủy',
+            'DIEU_CHINH_KHAC': 'Điều chỉnh khác',
+            'OTHER': 'Lý do khác',
+            'ADJUST': 'Điều chỉnh kho'
+        };
+        return map[r] || reason;
+    }
+
+    // ================================================================
+    //  PHẦN 1: GIAI ĐOẠN 1 - KHO THÀNH PHẨM (BẮP NƯỚC BÁN LẺ)
+    // ================================================================
+
+    // 1. Modal xem chi tiết sản phẩm và lịch sử biến động kho
+    function showProductDetailModal(branchId, product) {
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            style: 'max-width: 720px; width: 100%; border-radius: 12px; overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; padding: 0; box-shadow: 0 20px 40px rgba(0,0,0,0.25);'
+        });
+
+        var closeBtn = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng',
+            style: 'color: #fff; background: rgba(255,255,255,0.18); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; font-size: 18px; cursor: pointer;'
+        }, ['×']);
+
+        var head = hub.el('div', {
+            style: 'background: #1d4ed8; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('h3', { style: 'margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;' }, ['Chi tiết tồn kho & Lịch sử biến động']),
+                hub.el('small', { style: 'font-size: 0.82rem; color: #dbeafe; display: block; margin-top: 2px;' }, ['Lịch sử biến động tồn kho sản phẩm'])
+            ]),
+            closeBtn
+        ]);
+
+        var body = hub.el('div', { style: 'padding: 20px; background: #fff; overflow-y: auto; flex: 1;' });
+
+        // Thông tin sản phẩm
+        var pId = product.productId || product.id;
+        var qty = product.qty != null ? product.qty : 0;
+        var unit = product.unit || '';
+        var updatedText = product.updatedAt || '—';
+        var statusBadgeClass = qty <= 0 ? 'ws-badge-red' : (qty < 10 ? 'ws-badge-orange' : 'ws-badge-green');
+        var statusText = qty <= 0 ? 'Hết hàng' : (qty < 10 ? ('Sắp hết (' + qty + ')') : 'Còn hàng');
+
+        var infoCard = hub.el('div', {
+            style: 'display: flex; gap: 16px; align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; margin-bottom: 20px;'
+        }, [
+            hub.el('div', {
+                style: 'width: 48px; height: 48px; border-radius: 10px; background: #eff6ff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #1d4ed8;'
+            }, ['SP']),
+            hub.el('div', { style: 'flex: 1;' }, [
+                hub.el('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
+                    hub.el('h4', { style: 'margin: 0; font-size: 1.05rem; font-weight: 700; color: #0f172a;' }, [product.name || ('Sản phẩm #' + pId)]),
+                    hub.el('span', { class: 'ws-badge ws-status-pill ' + statusBadgeClass }, [statusText])
+                ]),
+                hub.el('div', { style: 'margin-top: 6px; font-size: 0.86rem; color: #64748b; display: flex; flex-wrap: wrap; gap: 16px;' }, [
+                    hub.el('span', {}, ['Loại: ', hub.el('strong', { style: 'color: #334155;' }, [product.type || '—'])]),
+                    hub.el('span', {}, ['Tồn hiện tại: ', hub.el('strong', { style: 'color: #0f172a;' }, [qty + ' ' + unit])]),
+                    hub.el('span', {}, ['Cập nhật: ', hub.el('span', { style: 'color: #334155;' }, [updatedText])])
+                ])
+            ])
+        ]);
+        body.appendChild(infoCard);
+
+        // Bảng Lịch sử biến động
+        body.appendChild(hub.el('h5', { style: 'margin: 0 0 10px; font-size: 0.95rem; font-weight: 700; color: #1e293b;' }, ['Lịch sử biến động']));
+
+        var tableWrap = hub.el('div', { style: 'border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;' });
+        var historyLoading = hub.el('p', { style: 'padding: 24px; text-align: center; color: var(--ws-text-muted); margin: 0;' }, ['Đang tải lịch sử…']);
+        tableWrap.appendChild(historyLoading);
+        body.appendChild(tableWrap);
+
+        var paginationWrap = hub.el('div', { style: 'display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 12px;' });
+        body.appendChild(paginationWrap);
+
+        // Sticky Footer
+        var closeFoot = hub.el('button', {
+            class: 'ws-btn secondary',
+            type: 'button',
+            style: 'width: 100%; border-radius: 8px; font-weight: 600;'
+        }, ['Đóng']);
+        var footWrap = hub.el('div', {
+            style: 'padding: 14px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; flex-shrink: 0;'
+        }, [closeFoot]);
+
+        panel.appendChild(head);
+        panel.appendChild(body);
+        panel.appendChild(footWrap);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        function close() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        backdrop.addEventListener('click', close);
+        closeBtn.addEventListener('click', close);
+        closeFoot.addEventListener('click', close);
+
+        // Tải lịch sử biến động từ API
+        hub.api('/inventory?action=history&branchId=' + branchId + '&productId=' + pId)
+            .then(function (res) {
+                var rawList = (res && res.data) || res || [];
+                if (!Array.isArray(rawList) || rawList.length === 0) {
+                    tableWrap.replaceChildren(hub.el('p', { style: 'padding: 24px; text-align: center; color: var(--ws-text-muted); margin: 0;' }, ['Chưa có lịch sử biến động nào cho sản phẩm này.']));
+                    return;
+                }
+
+                var pageSize = 5;
+                var curPage = 0;
+                var totalPages = Math.ceil(rawList.length / pageSize);
+
+                function renderHistoryTable() {
+                    var table = hub.el('table', { class: 'ws-table', style: 'margin: 0; width: 100%;' });
+                    var thead = hub.el('thead', {}, [
+                        hub.el('tr', {}, [
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Ngày giờ']),
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Tăng/giảm']),
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Số lượng']),
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Lý do']),
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Người thực hiện'])
+                        ])
+                    ]);
+                    var tbody = hub.el('tbody');
+                    var start = curPage * pageSize;
+                    var pageItems = rawList.slice(start, start + pageSize);
+
+                    pageItems.forEach(function (h) {
+                        var isPlus = h.deltaQty > 0;
+                        var sign = isPlus ? '+' : '-';
+                        var signColor = isPlus ? '#16a34a' : '#dc2626';
+                        var absQty = Math.abs(h.deltaQty);
+
+                        tbody.appendChild(hub.el('tr', {}, [
+                            hub.el('td', { style: 'font-size: 0.82rem; color: #64748b; white-space: nowrap;' }, [h.createdAt || '—']),
+                            hub.el('td', {}, [
+                                hub.el('span', {
+                                    style: 'display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.85rem; color: #fff; background: ' + signColor + ';'
+                                }, [sign])
+                            ]),
+                            hub.el('td', { style: 'font-weight: 600; color: #0f172a;' }, [absQty + ' ' + unit]),
+                            hub.el('td', { style: 'font-size: 0.85rem;' }, [formatInventoryReason(h.reason)]),
+                            hub.el('td', { style: 'font-size: 0.85rem; font-weight: 600;' }, [h.actorName || ('ID: ' + h.actorId)])
+                        ]));
+                    });
+
+                    table.appendChild(thead);
+                    table.appendChild(tbody);
+                    tableWrap.replaceChildren(table);
+
+                    paginationWrap.replaceChildren();
+                    if (totalPages > 1) {
+                        var prevBtn = hub.el('button', {
+                            class: 'ws-pagination-btn',
+                            type: 'button',
+                            disabled: curPage === 0
+                        }, ['<']);
+                        prevBtn.addEventListener('click', function () {
+                            if (curPage > 0) { curPage--; renderHistoryTable(); }
+                        });
+                        paginationWrap.appendChild(prevBtn);
+
+                        for (var i = 0; i < totalPages; i++) {
+                            (function (pIndex) {
+                                var pBtn = hub.el('button', {
+                                    class: 'ws-pagination-btn' + (pIndex === curPage ? ' active' : ''),
+                                    type: 'button'
+                                }, [String(pIndex + 1)]);
+                                pBtn.addEventListener('click', function () {
+                                    curPage = pIndex;
+                                    renderHistoryTable();
+                                });
+                                paginationWrap.appendChild(pBtn);
+                            })(i);
+                        }
+
+                        var nextBtn = hub.el('button', {
+                            class: 'ws-pagination-btn',
+                            type: 'button',
+                            disabled: curPage >= totalPages - 1
+                        }, ['>']);
+                        nextBtn.addEventListener('click', function () {
+                            if (curPage < totalPages - 1) { curPage++; renderHistoryTable(); }
+                        });
+                        paginationWrap.appendChild(nextBtn);
+                    }
+                }
+
+                renderHistoryTable();
+            })
+            .catch(function (err) {
+                tableWrap.replaceChildren(hub.el('p', { style: 'padding: 24px; text-align: center; color: var(--ws-danger); margin: 0;' }, ['Không thể tải lịch sử: ' + (err.message || err)]));
+            });
+    }
+
+    var showDetailModal = showProductDetailModal;
+    var showInventoryHistoryModal = showProductDetailModal;
+
+    // 2. Modal nhập kho thành phẩm mới
+    function showProductRestockModal(branchId, stockItems, onSuccess) {
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            style: 'max-width: 480px; width: 100%; border-radius: 12px; overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; padding: 0; box-shadow: 0 20px 40px rgba(0,0,0,0.25);'
+        });
+
+        var closeBtn = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng',
+            style: 'color: #fff; background: rgba(255,255,255,0.18); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; font-size: 18px; cursor: pointer;'
+        }, ['×']);
+
+        var head = hub.el('div', {
+            style: 'background: #1d4ed8; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('h3', { style: 'margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;' }, ['Nhập kho thành phẩm']),
+                hub.el('small', { style: 'font-size: 0.82rem; color: #dbeafe; display: block; margin-top: 2px;' }, ['Tăng số lượng tồn kho theo chi nhánh'])
+            ]),
+            closeBtn
+        ]);
+
+        var body = hub.el('div', { style: 'padding: 20px; background: #fff; overflow-y: auto; flex: 1;' });
+        body.appendChild(hub.el('h4', { style: 'margin: 0 0 16px; font-size: 1.05rem; font-weight: 700; color: #0f172a;' }, ['Thông tin nhập kho']));
+
+        // Sản phẩm * (chỉ load sản phẩm ACTIVE)
+        var productGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+        productGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Sản phẩm ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var productSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+        productSelect.appendChild(hub.el('option', { value: '' }, ['Chọn sản phẩm…']));
+
+        (stockItems || []).filter(function (it) {
+            return !it.productStatus || it.productStatus.toUpperCase() === 'ACTIVE' || it.status === 'ACTIVE';
+        }).forEach(function (it) {
+            var pId = it.productId || it.id;
+            productSelect.appendChild(hub.el('option', { value: String(pId) }, [it.name + ' (' + (it.type || '') + ')']));
+        });
+        productGroup.appendChild(productSelect);
+        body.appendChild(productGroup);
+
+        // Số lượng nhập * (> 0)
+        var qtyGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+        qtyGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Số lượng nhập ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var qtyInput = hub.el('input', {
+            type: 'number',
+            min: '1',
+            placeholder: 'Nhập số lượng (> 0)',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem; background: #fff; color: #0f172a;'
+        });
+        qtyGroup.appendChild(qtyInput);
+        body.appendChild(qtyGroup);
+
+        // Lý do * (Bắt buộc)
+        var reasonGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+        reasonGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Lý do ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var reasonSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+        [
+            { value: '', label: 'Chọn lý do…' },
+            { value: 'NHAP_HANG', label: 'Nhập hàng từ NCC' },
+            { value: 'NHAP_LAI_TU_NCC', label: 'Nhập lại từ NCC' },
+            { value: 'KIEM_KE_THUA', label: 'Kiểm kê thừa' },
+            { value: 'HOAN_TU_DON_HUY', label: 'Hoàn từ đơn hủy' },
+            { value: 'DIEU_CHINH_KHAC', label: 'Điều chỉnh khác' }
+        ].forEach(function (opt) {
+            reasonSelect.appendChild(hub.el('option', { value: opt.value }, [opt.label]));
+        });
+        reasonGroup.appendChild(reasonSelect);
+        body.appendChild(reasonGroup);
+
+        // Ghi chú
+        var noteGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+        noteGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, ['Ghi chú']));
+        var noteInput = hub.el('input', {
+            type: 'text',
+            placeholder: 'Nhập ghi chú thêm (nếu có)…',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem; background: #fff; color: #0f172a;'
+        });
+        noteGroup.appendChild(noteInput);
+        body.appendChild(noteGroup);
+
+        // Sticky Footer
+        var cancelBtn = hub.el('button', {
+            type: 'button',
+            style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #e2e8f0; color: #334155; font-weight: 600; font-size: 0.95rem; cursor: pointer;'
+        }, ['Hủy']);
+
+        var confirmBtn = hub.el('button', {
+            type: 'button',
+            style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: none; background: #1d4ed8; color: #ffffff; font-weight: 600; font-size: 0.95rem; cursor: pointer;'
+        }, ['Xác nhận']);
+
+        var footer = hub.el('div', {
+            style: 'display: flex; gap: 12px; padding: 14px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; flex-shrink: 0;'
+        }, [cancelBtn, confirmBtn]);
+
+        panel.appendChild(head);
+        panel.appendChild(body);
+        panel.appendChild(footer);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        function closeModal() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        closeBtn.addEventListener('click', closeModal);
+        backdrop.addEventListener('click', closeModal);
+        cancelBtn.addEventListener('click', closeModal);
+
+        confirmBtn.addEventListener('click', function () {
+            clearFieldError(productSelect);
+            clearFieldError(qtyInput);
+            clearFieldError(reasonSelect);
+
+            var hasError = false;
+            var firstErrField = null;
+
+            var pId = productSelect.value;
+            if (!pId) {
+                setFieldError(productSelect, 'Vui lòng chọn sản phẩm.');
+                hasError = true;
+                if (!firstErrField) firstErrField = productSelect;
+            }
+
+            var qtyRaw = (qtyInput.value || '').trim();
+            var qtyVal = parseInt(qtyRaw, 10);
+            if (!qtyRaw) {
+                setFieldError(qtyInput, 'Vui lòng nhập số lượng.');
+                hasError = true;
+                if (!firstErrField) firstErrField = qtyInput;
+            } else if (isNaN(qtyVal) || qtyVal <= 0) {
+                setFieldError(qtyInput, 'Số lượng nhập phải lớn hơn 0.');
+                hasError = true;
+                if (!firstErrField) firstErrField = qtyInput;
+            }
+
+            var rVal = reasonSelect.value;
+            if (!rVal) {
+                setFieldError(reasonSelect, 'Vui lòng chọn lý do nhập kho.');
+                hasError = true;
+                if (!firstErrField) firstErrField = reasonSelect;
+            }
+
+            if (hasError) {
+                if (firstErrField) firstErrField.focus();
+                return;
+            }
+
+            var rLabel = reasonSelect.options[reasonSelect.selectedIndex].text;
+            var note = (noteInput.value || '').trim();
+            var fullReason = rLabel + (note ? (' - ' + note) : '');
+
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Đang lưu…';
+
+            hub.api('/inventory', {
+                method: 'POST',
+                body: {
+                    action: 'restock',
+                    branchId: branchId,
+                    productId: pId,
+                    quantity: qtyVal,
+                    reason: fullReason
+                }
+            }).then(function () {
+                closeModal();
+                hub.notify('Nhập kho thành công!', 'ok');
+                if (onSuccess) onSuccess();
+            }).catch(function (err) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Xác nhận';
+                notifyError(err);
+            });
+        });
+    }
+
+    var showRestockModal = showProductRestockModal;
+
+    // 3. Modal điều chỉnh tồn kho
+    function showProductAdjustModal(branchId, selectedProduct, stockItems, onSuccess) {
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            style: 'max-width: 460px; width: 100%; border-radius: 12px; overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; padding: 0; box-shadow: 0 20px 40px rgba(0,0,0,0.25);'
+        });
+
+        var closeBtn = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng',
+            style: 'color: #fff; background: rgba(255,255,255,0.18); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; font-size: 18px; cursor: pointer;'
+        }, ['×']);
+
+        var head = hub.el('div', {
+            style: 'background: #1d4ed8; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('h3', { style: 'margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;' }, ['Điều chỉnh tồn kho']),
+                hub.el('small', { style: 'font-size: 0.82rem; color: #dbeafe; display: block; margin-top: 2px;' }, ['Tăng/giảm số lượng tồn kho theo chi nhánh'])
+            ]),
+            closeBtn
+        ]);
+
+        var body = hub.el('div', { style: 'padding: 20px; background: #fff; overflow-y: auto; flex: 1;' });
+        body.appendChild(hub.el('h4', { style: 'margin: 0 0 16px; font-size: 1.05rem; font-weight: 700; color: #0f172a;' }, ['Điều chỉnh kho']));
+
+        // Sản phẩm *
+        var productGroup = hub.el('div', { style: 'margin-bottom: 12px;' });
+        productGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Sản phẩm ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var productSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+        productSelect.appendChild(hub.el('option', { value: '' }, ['Chọn sản phẩm…']));
+        (stockItems || []).forEach(function (it) {
+            var pId = it.productId || it.id;
+            var opt = hub.el('option', { value: String(pId) }, [it.name + ' (' + (it.qty || 0) + ' ' + (it.unit || '') + ')']);
+            productSelect.appendChild(opt);
+        });
+        if (selectedProduct && (selectedProduct.productId || selectedProduct.id)) {
+            productSelect.value = String(selectedProduct.productId || selectedProduct.id);
+        }
+        productGroup.appendChild(productSelect);
+        body.appendChild(productGroup);
+
+        // Tồn hiện tại
+        var currentQtyDisplay = hub.el('strong', { id: 'm4CurrentQtyText', style: 'font-size: 1.05rem; color: #0f172a;' }, ['0']);
+        var currentQtyWrap = hub.el('div', { style: 'margin-bottom: 16px; font-size: 0.9rem; color: #475569;' }, [
+            'Tồn hiện tại: ', currentQtyDisplay
+        ]);
+        body.appendChild(currentQtyWrap);
+
+        function updateCurrentQty() {
+            var selectedId = productSelect.value;
+            var found = (stockItems || []).find(function (it) { return String(it.productId || it.id) === selectedId; });
+            var q = found ? (found.qty || 0) : 0;
+            currentQtyDisplay.textContent = String(q);
+        }
+        productSelect.addEventListener('change', updateCurrentQty);
+        updateCurrentQty();
+
+        // Loại điều chỉnh *
+        var typeGroup = hub.el('div', { style: 'margin-bottom: 16px;' });
+        typeGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 8px;' }, [
+            'Loại điều chỉnh ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var radioPlus = hub.el('input', { type: 'radio', name: 'm4AdjustType', value: 'PLUS', checked: true, style: 'accent-color: #16a34a; width: 17px; height: 17px; cursor: pointer;' });
+        var radioMinus = hub.el('input', { type: 'radio', name: 'm4AdjustType', value: 'MINUS', style: 'accent-color: #dc2626; width: 17px; height: 17px; cursor: pointer;' });
+        var typeOptions = hub.el('div', { style: 'display: flex; gap: 24px; align-items: center;' }, [
+            hub.el('label', { style: 'display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; color: #16a34a; font-size: 0.95rem;' }, [
+                radioPlus, 'Tăng'
+            ]),
+            hub.el('label', { style: 'display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; color: #dc2626; font-size: 0.95rem;' }, [
+                radioMinus, 'Giảm'
+            ])
+        ]);
+        typeGroup.appendChild(typeOptions);
+        body.appendChild(typeGroup);
+
+        // Số lượng *
+        var qtyGroup = hub.el('div', { style: 'margin-bottom: 16px;' });
+        qtyGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Số lượng ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var qtyInput = hub.el('input', {
+            type: 'number',
+            min: '1',
+            placeholder: 'Nhập số lượng (> 0)',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem; background: #fff; color: #0f172a;'
+        });
+        qtyGroup.appendChild(qtyInput);
+        body.appendChild(qtyGroup);
+
+        // Lý do *
+        var reasonGroup = hub.el('div', { style: 'margin-bottom: 16px;' });
+        reasonGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Lý do ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var reasonSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+
+        var reasonsDecrease = [
+            { value: '', label: 'Chọn lý do…' },
+            { value: 'HU_HONG', label: 'Hư hỏng / Rách vỡ' },
+            { value: 'HET_HAN', label: 'Hết hạn sử dụng' },
+            { value: 'MAT_DO_KHACH', label: 'Thất thoát / Mất do khách' },
+            { value: 'KIEM_KE_THIEU', label: 'Kiểm kê thiếu' },
+            { value: 'KHAC', label: 'Khác' }
+        ];
+
+        var reasonsIncrease = [
+            { value: '', label: 'Chọn lý do…' },
+            { value: 'KIEM_KE_THUA', label: 'Kiểm kê thừa' },
+            { value: 'DIEU_CHINH_KHAC', label: 'Điều chỉnh khác' },
+            { value: 'KHAC', label: 'Khác' }
+        ];
+
+        function updateReasonOptions() {
+            var isMinus = radioMinus.checked;
+            var opts = isMinus ? reasonsDecrease : reasonsIncrease;
+            reasonSelect.replaceChildren();
+            opts.forEach(function (opt) {
+                reasonSelect.appendChild(hub.el('option', { value: opt.value }, [opt.label]));
+            });
+        }
+        radioPlus.addEventListener('change', updateReasonOptions);
+        radioMinus.addEventListener('change', updateReasonOptions);
+        updateReasonOptions();
+
+        reasonGroup.appendChild(reasonSelect);
+        body.appendChild(reasonGroup);
+
+        // Ghi chú
+        var noteGroup = hub.el('div', { style: 'margin-bottom: 6px;' });
+        noteGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, ['Ghi chú']));
+        var noteInput = hub.el('input', {
+            type: 'text',
+            placeholder: 'Nhập ghi chú (nếu có)…',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem; background: #fff; color: #0f172a;'
+        });
+        noteGroup.appendChild(noteInput);
+        body.appendChild(noteGroup);
+
+        // Sticky Footer
+        var cancelBtn = hub.el('button', {
+            type: 'button',
+            style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #e2e8f0; color: #334155; font-weight: 600; font-size: 0.95rem; cursor: pointer;'
+        }, ['Hủy']);
+
+        var confirmBtn = hub.el('button', {
+            type: 'button',
+            style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: none; background: #1d4ed8; color: #ffffff; font-weight: 600; font-size: 0.95rem; cursor: pointer;'
+        }, ['Xác nhận']);
+
+        var footer = hub.el('div', {
+            style: 'display: flex; gap: 12px; padding: 14px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; flex-shrink: 0;'
+        }, [cancelBtn, confirmBtn]);
+
+        panel.appendChild(head);
+        panel.appendChild(body);
+        panel.appendChild(footer);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        function closeModal() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        closeBtn.addEventListener('click', closeModal);
+        backdrop.addEventListener('click', closeModal);
+        cancelBtn.addEventListener('click', closeModal);
+
+        confirmBtn.addEventListener('click', function () {
+            clearFieldError(productSelect);
+            clearFieldError(qtyInput);
+            clearFieldError(reasonSelect);
+
+            var hasError = false;
+            var firstErrField = null;
+
+            var pId = productSelect.value;
+            if (!pId) {
+                setFieldError(productSelect, 'Vui lòng chọn sản phẩm.');
+                hasError = true;
+                if (!firstErrField) firstErrField = productSelect;
+            }
+
+            var qtyRaw = (qtyInput.value || '').trim();
+            var qtyVal = parseInt(qtyRaw, 10);
+            var isMinus = radioMinus.checked;
+            var currentQty = parseInt(currentQtyDisplay.textContent, 10) || 0;
+
+            if (!qtyRaw) {
+                setFieldError(qtyInput, 'Vui lòng nhập số lượng.');
+                hasError = true;
+                if (!firstErrField) firstErrField = qtyInput;
+            } else if (isNaN(qtyVal) || qtyVal <= 0) {
+                setFieldError(qtyInput, 'Vui lòng nhập số lượng hợp lệ (> 0).');
+                hasError = true;
+                if (!firstErrField) firstErrField = qtyInput;
+            } else if (isMinus && qtyVal > currentQty) {
+                setFieldError(qtyInput, 'Số lượng giảm (' + qtyVal + ') không được vượt quá tồn kho hiện tại (' + currentQty + ')!');
+                hasError = true;
+                if (!firstErrField) firstErrField = qtyInput;
+            }
+
+            var reasonVal = reasonSelect.value;
+            if (!reasonVal) {
+                setFieldError(reasonSelect, 'Vui lòng chọn lý do.');
+                hasError = true;
+                if (!firstErrField) firstErrField = reasonSelect;
+            }
+
+            if (hasError) {
+                if (firstErrField) firstErrField.focus();
+                return;
+            }
+
+            var reasonLabel = reasonSelect.options[reasonSelect.selectedIndex].text;
+            var noteVal = (noteInput.value || '').trim();
+            var finalReason = reasonLabel + (noteVal ? (' - ' + noteVal) : '');
+            var deltaQty = isMinus ? -qtyVal : qtyVal;
+
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Đang lưu…';
+
+            hub.api('/inventory', {
+                method: 'POST',
+                body: {
+                    action: 'adjust',
+                    branchId: branchId,
+                    productId: pId,
+                    quantity: deltaQty,
+                    reason: finalReason
+                }
+            }).then(function () {
+                closeModal();
+                hub.notify('Điều chỉnh kho thành công!', 'ok');
+                if (onSuccess) onSuccess();
+            }).catch(function (err) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Xác nhận';
+                notifyError(err);
+            });
+        });
+    }
+
+    var showAdjustModal = showProductAdjustModal;
+    var showInventoryAdjustModal = showProductAdjustModal;
+
+    // 4. Màn hình danh sách tồn kho thành phẩm
+    function renderProductInventoryPage(viewRoot, branchId, branches, isStaff, onSwitchTab) {
+        hub.setWorkspaceHeader('Kho Thành Phẩm');
+        var currentBranchId = branchId || (branches && branches[0] ? branches[0].id : null);
+        var currentItems = [];
+        var toolbarRight = [];
+
+        function refreshProductList() {
+            var branchSelect = document.querySelector('select[name="branchId"]');
+            if (branchSelect) {
+                branchSelect.dispatchEvent(new Event('change'));
+            } else {
+                renderProductInventoryPage(viewRoot, currentBranchId, branches, isStaff, onSwitchTab);
+            }
+        }
+
+        if (!isStaff) {
+            var btnAdjust = hub.el('button', {
+                class: 'ws-btn secondary',
+                type: 'button',
+                style: 'display: inline-flex; align-items: center; gap: 6px; font-weight: 600;'
+            }, ['Điều chỉnh kho']);
+            btnAdjust.addEventListener('click', function () {
+                if (!currentBranchId) { hub.notify('Vui lòng chọn chi nhánh trước.', 'warn'); return; }
+                showProductAdjustModal(currentBranchId, null, currentItems, function () {
+                    refreshProductList();
+                });
+            });
+
+            var btnRestock = hub.el('button', {
+                class: 'ws-btn primary',
+                type: 'button',
+                style: 'display: inline-flex; align-items: center; gap: 6px; font-weight: 600;'
+            }, ['+ Nhập kho mới']);
+            btnRestock.addEventListener('click', function () {
+                if (!currentBranchId) { hub.notify('Vui lòng chọn chi nhánh trước.', 'warn'); return; }
+                showProductRestockModal(currentBranchId, currentItems, function () {
+                    refreshProductList();
+                });
+            });
+
+            toolbarRight = [btnAdjust, btnRestock];
+        }
+
+        list.render({
+            title: 'Kho Thành Phẩm',
+            subtitle: 'Quản lý tồn kho bắp nước, combo bán tại quầy và theo dõi lịch sử biến động.',
+            toolbarRight: toolbarRight,
+            searchable: true,
+            searchPlaceholder: 'Tìm kiếm sản phẩm…',
+            searchParam: 'search',
+            pageSize: 50,
+            filters: [
+                {
+                    name: 'branchId',
+                    label: 'Chi nhánh',
+                    placeholder: 'Chọn chi nhánh…',
+                    initialValue: currentBranchId ? String(currentBranchId) : '',
+                    options: (branches || []).map(function (b) { return { value: String(b.id), label: b.name }; })
+                },
+                {
+                    name: 'type',
+                    label: 'Loại',
+                    placeholder: 'Tất cả loại',
+                    options: [
+                        { value: 'POPCORN', label: 'Bắp rang (POPCORN)' },
+                        { value: 'DRINK', label: 'Nước uống (DRINK)' },
+                        { value: 'COMBO', label: 'Combo (COMBO)' },
+                        { value: 'OTHER', label: 'Khác (OTHER)' }
+                    ]
+                },
+                {
+                    name: 'status',
+                    label: 'Trạng thái',
+                    placeholder: 'Tất cả trạng thái',
+                    options: [
+                        { value: 'IN_STOCK', label: 'Còn hàng' },
+                        { value: 'LOW_STOCK', label: 'Sắp hết' },
+                        { value: 'OUT_OF_STOCK', label: 'Hết hàng' }
+                    ]
+                }
+            ],
+            fetcher: function (qs) {
+                var activeBranch = qs.get('branchId') || currentBranchId;
+                if (activeBranch) currentBranchId = activeBranch;
+                if (!activeBranch) {
+                    return Promise.resolve({ items: [], total: 0 });
+                }
+
+                return hub.api('/inventory?branchId=' + activeBranch).then(function (resList) {
+                    var items = resList || [];
+                    currentItems = items;
+
+                    var search = (qs.get('search') || qs.get('q') || '').trim().toLowerCase();
+                    if (search) {
+                        var searchNorm = search.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                        items = items.filter(function (it) {
+                            var nameLower = (it.name || '').toLowerCase();
+                            var nameNorm = nameLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                            return nameLower.indexOf(search) !== -1 || nameNorm.indexOf(searchNorm) !== -1;
+                        });
+                    }
+
+                    var typeFilter = qs.get('type');
+                    if (typeFilter) {
+                        items = items.filter(function (it) {
+                            return (it.type || '').toUpperCase() === typeFilter.toUpperCase();
+                        });
+                    }
+
+                    var statusFilter = qs.get('status');
+                    if (statusFilter) {
+                        items = items.filter(function (it) {
+                            var q = it.qty != null ? it.qty : 0;
+                            if (statusFilter === 'OUT_OF_STOCK') return q <= 0;
+                            if (statusFilter === 'LOW_STOCK') return q > 0 && q < 10;
+                            if (statusFilter === 'IN_STOCK') return q >= 10;
+                            return true;
+                        });
+                    }
+
+                    return { items: items, total: items.length };
+                });
+            },
+            emptyTitle: 'Chưa có tồn kho',
+            emptyMessage: 'Không tìm thấy sản phẩm nào trong kho theo điều kiện lọc.',
+            columns: [
+                {
+                    label: 'Tên sản phẩm',
+                    render: function (s) {
+                        var elName = hub.el('strong', {
+                            style: 'cursor: pointer; color: #1d4ed8; text-decoration: underline;'
+                        }, [s.name]);
+                        elName.addEventListener('click', function () {
+                            showProductDetailModal(currentBranchId, s);
+                        });
+                        return elName;
+                    }
+                },
+                {
+                    label: 'Loại',
+                    key: 'type'
+                },
+                {
+                    label: 'Tồn kho',
+                    render: function (s) {
+                        return (s.qty || 0) + ' ' + (s.unit || '');
+                    }
+                },
+                {
+                    label: 'Trạng thái',
+                    render: function (s) {
+                        var q = s.qty != null ? s.qty : 0;
+                        if (q <= 0) {
+                            return hub.el('span', { class: 'ws-badge ws-status-pill ws-badge-red' }, ['Hết hàng']);
+                        } else if (q < 10) {
+                            return hub.el('span', { class: 'ws-badge ws-status-pill ws-badge-orange' }, ['Sắp hết (' + q + ')']);
+                        } else {
+                            return hub.el('span', { class: 'ws-badge ws-status-pill ws-badge-green' }, ['Còn hàng']);
+                        }
+                    }
+                },
+                {
+                    label: 'Cập nhật',
+                    render: function (s) {
+                        return s.updatedAt || '—';
+                    }
+                }
+            ],
+            actions: function (row) {
+                return [
+                    {
+                        label: 'Lịch sử',
+                        class: 'secondary',
+                        onClick: function () {
+                            showProductDetailModal(currentBranchId, row);
+                        }
+                    }
+                ];
+            }
+        });
+
+        var m5Card = hub.el('div', {
+            class: 'ws-card',
+            id: 'm5LowStockCard',
+            style: 'margin-top: 24px; padding: 20px; border-radius: 10px; border: 1px solid #fed7aa; background: #fffdfa;'
+        });
+
+        function updateM5LowStockReport(stockList) {
+            var lowItems = (stockList || []).filter(function (it) {
+                var q = it.qty != null ? it.qty : 0;
+                return q < 10;
+            });
+
+            var m5Head = hub.el('div', {
+                style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;'
+            }, [
+                hub.el('div', {}, [
+                    hub.el('h3', { style: 'margin: 0; font-size: 1.05rem; font-weight: 700; color: #9a3412;' }, ['Cảnh báo sản phẩm sắp hết hàng']),
+                    hub.el('small', { style: 'color: #78716c; font-size: 0.84rem;' }, ['Danh sách các mặt hàng có tồn kho dưới 10 phần hoặc đã hết hàng.'])
+                ]),
+                hub.el('button', {
+                    class: 'ws-btn primary',
+                    type: 'button',
+                    style: 'background: #ea580c; border-color: #ea580c; font-weight: 600; font-size: 0.88rem;'
+                }, ['Xuất báo cáo Excel'])
+            ]);
+
+            m5Head.querySelector('button').addEventListener('click', function () {
+                if (!lowItems.length) { hub.notify('Hiện không có sản phẩm nào sắp hết hoặc hết hàng.', 'info'); return; }
+                var headers = ['Tên sản phẩm', 'Loại', 'Tồn kho', 'Đơn vị', 'Trạng thái', 'Cập nhật'];
+                var rows = lowItems.map(function (it) {
+                    var q = it.qty != null ? it.qty : 0;
+                    var st = q <= 0 ? 'Hết hàng' : 'Sắp hết';
+                    return [it.name || '', it.type || '', q, it.unit || '', st, it.updatedAt || ''];
+                });
+                exportCsv('BaoCaoTonThap_ChiNhanh_' + (currentBranchId || 'all') + '.csv', headers, rows);
+            });
+
+            m5Card.replaceChildren(m5Head);
+
+            if (!lowItems.length) {
+                m5Card.appendChild(hub.el('div', { style: 'padding: 16px; text-align: center; color: #16a34a; font-weight: 600; font-size: 0.9rem;' }, [
+                    'Tất cả sản phẩm tại chi nhánh đang ở mức tồn an toàn (tồn kho >= 10).'
+                ]));
+                return;
+            }
+
+            var m5Table = hub.el('table', { class: 'ws-table', style: 'margin: 0; width: 100%; font-size: 0.88rem;' });
+            var thead = hub.el('thead', {}, [
+                hub.el('tr', {}, [
+                    hub.el('th', {}, ['Tên sản phẩm']),
+                    hub.el('th', {}, ['Loại']),
+                    hub.el('th', { style: 'text-align: right;' }, ['Tồn kho']),
+                    hub.el('th', { style: 'text-align: center;' }, ['Trạng thái']),
+                    hub.el('th', { style: 'text-align: right;' }, ['Cập nhật'])
+                ])
+            ]);
+            var tbody = hub.el('tbody');
+            lowItems.forEach(function (it) {
+                var q = it.qty != null ? it.qty : 0;
+                var stBadge = q <= 0
+                    ? hub.el('span', { class: 'ws-badge ws-badge-red' }, ['Hết hàng'])
+                    : hub.el('span', { class: 'ws-badge ws-badge-orange' }, ['Sắp hết (' + q + ')']);
+                tbody.appendChild(hub.el('tr', {}, [
+                    hub.el('td', { style: 'font-weight: 700; color: #0f172a;' }, [it.name]),
+                    hub.el('td', {}, [it.type || '—']),
+                    hub.el('td', { style: 'text-align: right; font-weight: 800; color: ' + (q <= 0 ? '#dc2626' : '#ea580c') + ';' }, [q + ' ' + (it.unit || '')]),
+                    hub.el('td', { style: 'text-align: center;' }, [stBadge]),
+                    hub.el('td', { style: 'text-align: right; color: #64748b;' }, [it.updatedAt || '—'])
+                ]));
+            });
+            m5Table.appendChild(thead);
+            m5Table.appendChild(tbody);
+            m5Card.appendChild(m5Table);
+        }
+
+        var pageEl = (viewRoot || document.getElementById('viewRoot')).querySelector('.ws-page');
+        if (pageEl) {
+            pageEl.appendChild(m5Card);
+        }
+
+        // Tự động tải M5 khi load xong
+        hub.api('/inventory?branchId=' + currentBranchId).then(function (resList) {
+            updateM5LowStockReport(resList || []);
+        }).catch(function () {});
+    }
+
+    // ================================================================
+    //  PHẦN 2: GIAI ĐOẠN 2 - KHO NGUYÊN LIỆU (NGUYÊN LIỆU THÔ CHẾ BIẾN)
+    // ================================================================
+
+    // 1. Modal xem chi tiết nguyên liệu và lịch sử biến động
+    function showMaterialDetailModal(branchId, material, rawMaterials, onReload, isStaff) {
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            style: 'max-width: 760px; width: 100%; border-radius: 12px; overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; padding: 0; box-shadow: 0 20px 40px rgba(0,0,0,0.25);'
+        });
+
+        var closeBtn = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng',
+            style: 'color: #fff; background: rgba(255,255,255,0.18); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; font-size: 18px; cursor: pointer;'
+        }, ['×']);
+
+        var head = hub.el('div', {
+            style: 'background: #0284c7; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('h3', { style: 'margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;' }, ['Chi tiết nguyên liệu & Lịch sử biến động']),
+                hub.el('small', { style: 'font-size: 0.82rem; color: #e0f2fe; display: block; margin-top: 2px;' }, ['Lịch sử xuất nhập & điều chỉnh nguyên liệu'])
+            ]),
+            closeBtn
+        ]);
+
+        var body = hub.el('div', { style: 'padding: 16px 20px; background: #fff; overflow-y: auto; flex: 1;' });
+
+        var mId = material.materialId || material.id;
+        var qty = material.qty != null ? material.qty : 0;
+        var minStock = material.minStock != null ? material.minStock : 0;
+        var unit = material.unit || '';
+        var statusClass = qty <= 0 ? 'ws-badge-red' : (qty <= minStock ? 'ws-badge-orange' : 'ws-badge-green');
+        var statusLabel = qty <= 0 ? 'Hết hàng' : (qty <= minStock ? ('Sắp hết (' + qty + ')') : 'Còn hàng');
+
+        var infoCard = hub.el('div', {
+            style: 'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; margin-bottom: 20px;'
+        }, [
+            hub.el('div', { style: 'display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;' }, [
+                hub.el('div', { style: 'display: flex; align-items: center; gap: 12px;' }, [
+                    hub.el('div', { style: 'width: 44px; height: 44px; border-radius: 8px; background: #e0f2fe; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #0369a1;' }, ['NL']),
+                    hub.el('div', {}, [
+                        hub.el('h4', { style: 'margin: 0; font-size: 1.1rem; font-weight: 700; color: #0f172a;' }, [material.name || ('Nguyên liệu #' + mId)]),
+                        hub.el('div', { style: 'font-size: 0.85rem; color: #64748b; font-weight: 600; margin-top: 2px;' }, ['Mã: ' + (material.code || '—') + ' | Nhóm: ' + (material.category || '—')])
+                    ])
+                ]),
+                hub.el('span', { class: 'ws-badge ws-status-pill ' + statusClass, style: 'font-size: 0.85rem;' }, [statusLabel])
+            ]),
+            hub.el('div', { style: 'display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; font-size: 0.86rem; border-top: 1px dashed #cbd5e1; padding-top: 12px;' }, [
+                hub.el('div', {}, ['Đơn vị tính: ', hub.el('strong', { style: 'color: #334155;' }, [unit || '—'])]),
+                hub.el('div', {}, ['Tồn hiện tại: ', hub.el('strong', { style: 'color: #0284c7; font-size: 0.95rem;' }, [qty + ' ' + unit])]),
+                hub.el('div', {}, ['Mức tồn tối thiểu: ', hub.el('strong', { style: 'color: #ea580c;' }, [minStock + ' ' + unit])]),
+                hub.el('div', {}, ['Nhà cung cấp chính: ', hub.el('strong', { style: 'color: #334155;' }, [material.supplier || '—'])]),
+                hub.el('div', {}, ['Đơn giá nhập: ', hub.el('strong', { style: 'color: #334155;' }, [formatMoneyVnd(material.costPrice)])]),
+                hub.el('div', {}, ['Trạng thái: ', hub.el('span', { class: 'ws-badge ws-badge-green', style: 'padding: 2px 6px; font-size: 0.78rem;' }, [material.status || 'ACTIVE'])])
+            ])
+        ]);
+        body.appendChild(infoCard);
+
+        // Box Công thức sử dụng (M-R2)
+        var recipeBox = hub.el('div', {
+            style: 'background: #fdfaf6; border: 1px solid #fed7aa; border-radius: 10px; padding: 14px 18px; margin-bottom: 20px;'
+        });
+        recipeBox.appendChild(hub.el('h5', { style: 'margin: 0 0 4px; font-size: 0.94rem; font-weight: 700; color: #9a3412;' }, ['Dùng trong các món:']));
+        recipeBox.appendChild(hub.el('small', { style: 'display: block; margin-bottom: 10px; color: #78716c; font-size: 0.8rem;' }, ['Danh sách các sản phẩm thành phẩm có sử dụng nguyên liệu này']));
+        var recipeLoading = hub.el('p', { style: 'margin: 0; color: #78716c; font-size: 0.86rem;' }, ['Đang tra cứu công thức sử dụng…']);
+        recipeBox.appendChild(recipeLoading);
+        body.appendChild(recipeBox);
+
+        hub.api('/inventory?action=recipes&branchId=' + branchId).then(function (res) {
+            var allRecipes = Array.isArray(res) ? res : (res && Array.isArray(res.items) ? res.items : []);
+            var usedIn = allRecipes.filter(function (r) {
+                return String(r.materialId || r.material_id) === String(mId);
+            });
+            recipeLoading.remove();
+            if (!usedIn.length) {
+                recipeBox.appendChild(hub.el('p', { style: 'margin: 0; color: #78716c; font-size: 0.86rem;' }, [
+                    'Nguyên liệu này hiện chưa được cấu hình trong công thức sản phẩm nào.'
+                ]));
+                return;
+            }
+            var ul = hub.el('ul', { style: 'margin: 0; padding-left: 20px; font-size: 0.88rem; color: #334155; line-height: 1.6;' });
+            usedIn.forEach(function (u) {
+                var pName = u.productName || u.product_name || ('Sản phẩm #' + (u.productId || u.product_id));
+                var q = u.quantityRequired != null ? u.quantityRequired : (u.quantity_required != null ? u.quantity_required : u.dosage);
+                var uUnit = u.unit || unit || '';
+                var loss = u.lossRate || u.loss_rate || 0;
+                ul.appendChild(hub.el('li', {}, [
+                    hub.el('strong', { style: 'color: #1d4ed8;' }, [pName]),
+                    ' — ',
+                    hub.el('span', { style: 'font-weight: 600; color: #d97706;' }, [q + ' ' + uUnit + ' / phần']),
+                    (loss > 0 ? (' (Hao hụt: ' + loss + '%)') : '')
+                ]));
+            });
+            recipeBox.appendChild(ul);
+        }).catch(function () {
+            recipeLoading.textContent = 'Không thể tải thông tin công thức sử dụng.';
+        });
+
+        // Box Lịch sử biến động (Audit Trail)
+        var auditFilterSelect = hub.el('select', { class: 'ws-select', style: 'height: 32px; font-size: 0.82rem; padding: 4px 8px;' }, [
+            hub.el('option', { value: 'ALL' }, ['Tất cả thời gian']),
+            hub.el('option', { value: 'TODAY' }, ['Hôm nay']),
+            hub.el('option', { value: '7DAYS' }, ['7 ngày qua'])
+        ]);
+        var btnExportAudit = hub.el('button', {
+            class: 'ws-btn secondary',
+            type: 'button',
+            style: 'height: 32px; font-size: 0.82rem; padding: 4px 10px; font-weight: 600;'
+        }, ['Xuất lịch sử']);
+
+        var histHead = hub.el('div', {
+            style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;'
+        }, [
+            hub.el('h5', { style: 'margin: 0; font-size: 0.98rem; font-weight: 700; color: #1e293b;' }, ['Lịch sử biến động kho']),
+            hub.el('div', { style: 'display: flex; gap: 8px; align-items: center;' }, [
+                auditFilterSelect,
+                btnExportAudit
+            ])
+        ]);
+        body.appendChild(histHead);
+
+        var tableWrap = hub.el('div', { style: 'border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;' });
+        var historyLoading = hub.el('p', { style: 'padding: 24px; text-align: center; color: var(--ws-text-muted); margin: 0;' }, ['Đang tải lịch sử…']);
+        tableWrap.appendChild(historyLoading);
+        body.appendChild(tableWrap);
+
+        var paginationWrap = hub.el('div', { style: 'display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 12px;' });
+        body.appendChild(paginationWrap);
+
+        var footBtns = [];
+        if (!isStaff && rawMaterials) {
+            var btnRestock = hub.el('button', {
+                class: 'ws-btn primary',
+                type: 'button',
+                style: 'flex: 1; border-radius: 8px; background: #16a34a; border-color: #16a34a; font-weight: 600;'
+            }, ['Nhập thêm']);
+            btnRestock.addEventListener('click', function () {
+                close();
+                showMaterialRestockModal(branchId, rawMaterials, onReload, material);
+            });
+
+            var btnAdjust = hub.el('button', {
+                class: 'ws-btn secondary',
+                type: 'button',
+                style: 'flex: 1; border-radius: 8px; font-weight: 600;'
+            }, ['Điều chỉnh']);
+            btnAdjust.addEventListener('click', function () {
+                close();
+                showMaterialAdjustModal(branchId, material, rawMaterials, onReload);
+            });
+
+            footBtns.push(btnRestock);
+            footBtns.push(btnAdjust);
+        }
+
+        var closeFoot = hub.el('button', {
+            class: 'ws-btn secondary',
+            type: 'button',
+            style: (!isStaff && rawMaterials ? 'flex: 0.8;' : 'width: 100%;') + ' border-radius: 8px; font-weight: 600;'
+        }, ['Đóng']);
+        footBtns.push(closeFoot);
+
+        var footWrap = hub.el('div', {
+            style: 'padding: 14px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; gap: 10px; flex-shrink: 0;'
+        }, footBtns);
+
+        panel.appendChild(head);
+        panel.appendChild(body);
+        panel.appendChild(footWrap);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        function close() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        backdrop.addEventListener('click', close);
+        closeBtn.addEventListener('click', close);
+        closeFoot.addEventListener('click', close);
+
+        hub.api('/inventory?type=material&action=history&branchId=' + branchId + '&materialId=' + mId)
+            .then(function (res) {
+                var rawList = (res && res.data) || res || [];
+                if (!Array.isArray(rawList) || rawList.length === 0) {
+                    tableWrap.replaceChildren(hub.el('p', { style: 'padding: 24px; text-align: center; color: var(--ws-text-muted); margin: 0;' }, ['Chưa có lịch sử biến động nào cho nguyên liệu này.']));
+                    return;
+                }
+
+                var filteredList = rawList.slice();
+                var pageSize = 5;
+                var curPage = 0;
+                var totalPages = Math.ceil(filteredList.length / pageSize) || 1;
+
+                function applyAuditFilter() {
+                    var filterVal = auditFilterSelect.value;
+                    if (filterVal === 'TODAY') {
+                        var todayStr = new Date().toISOString().slice(0, 10);
+                        filteredList = rawList.filter(function (h) {
+                            return (h.createdAt || '').slice(0, 10) === todayStr;
+                        });
+                    } else if (filterVal === '7DAYS') {
+                        var sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                        filteredList = rawList.filter(function (h) {
+                            if (!h.createdAt) return false;
+                            var d = new Date(h.createdAt);
+                            return d >= sevenDaysAgo;
+                        });
+                    } else {
+                        filteredList = rawList.slice();
+                    }
+                    curPage = 0;
+                    totalPages = Math.ceil(filteredList.length / pageSize) || 1;
+                    renderHistoryTable();
+                }
+
+                auditFilterSelect.addEventListener('change', applyAuditFilter);
+
+                btnExportAudit.addEventListener('click', function () {
+                    if (!filteredList.length) {
+                        hub.notify('Không có dữ liệu lịch sử để xuất.', 'info');
+                        return;
+                    }
+                    var headers = ['Ngày giờ', 'Loại biến động', 'Số lượng', 'ĐVT', 'Lý do', 'Người thực hiện', 'Ghi chú'];
+                    var rows = filteredList.map(function (h) {
+                        var isPlus = h.deltaQty > 0;
+                        var sign = isPlus ? '+' : '-';
+                        return [
+                            h.createdAt || '',
+                            isPlus ? 'Nhập / Tăng kho' : 'Xuất / Giảm kho',
+                            Math.abs(h.deltaQty),
+                            unit,
+                            formatInventoryReason(h.reason),
+                            h.actorName || ('ID: ' + h.actorId),
+                            h.note || ''
+                        ];
+                    });
+                    exportCsv('Lich_su_nguyen_lieu_' + (material.code || mId) + '_' + new Date().toISOString().slice(0, 10) + '.csv', headers, rows);
+                });
+
+                function renderHistoryTable() {
+                    if (!filteredList.length) {
+                        tableWrap.replaceChildren(hub.el('p', { style: 'padding: 24px; text-align: center; color: var(--ws-text-muted); margin: 0;' }, ['Không tìm thấy lịch sử phù hợp với khoảng thời gian đã chọn.']));
+                        paginationWrap.replaceChildren();
+                        return;
+                    }
+
+                    var table = hub.el('table', { class: 'ws-table', style: 'margin: 0; width: 100%;' });
+                    var thead = hub.el('thead', {}, [
+                        hub.el('tr', {}, [
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Ngày giờ']),
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Loại']),
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Số lượng']),
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Lý do']),
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Người thực hiện']),
+                            hub.el('th', { style: 'font-size: 0.82rem;' }, ['Ghi chú'])
+                        ])
+                    ]);
+                    var tbody = hub.el('tbody');
+                    var start = curPage * pageSize;
+                    var pageItems = filteredList.slice(start, start + pageSize);
+
+                    pageItems.forEach(function (h) {
+                        var isPlus = h.deltaQty > 0;
+                        var sign = isPlus ? '+' : '-';
+                        var signBg = isPlus ? '#16a34a' : '#dc2626';
+                        var absQty = Math.abs(h.deltaQty);
+                        var typeLabel = isPlus ? '+ Nhập' : '- Xuất';
+
+                        tbody.appendChild(hub.el('tr', {}, [
+                            hub.el('td', { style: 'font-size: 0.82rem; color: #64748b; white-space: nowrap;' }, [h.createdAt || '—']),
+                            hub.el('td', {}, [
+                                hub.el('span', {
+                                    style: 'display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.82rem; color: #fff; background: ' + signBg + ';'
+                                }, [typeLabel])
+                            ]),
+                            hub.el('td', { style: 'font-weight: 600; color: #0f172a;' }, [absQty + ' ' + unit]),
+                            hub.el('td', { style: 'font-size: 0.85rem; font-weight: 500; color: #1e293b;' }, [formatInventoryReason(h.reason)]),
+                            hub.el('td', { style: 'font-size: 0.85rem; font-weight: 600;' }, [h.actorName || ('ID: ' + h.actorId)]),
+                            hub.el('td', { style: 'font-size: 0.82rem; color: #64748b;' }, [h.note || '—'])
+                        ]));
+                    });
+
+                    table.appendChild(thead);
+                    table.appendChild(tbody);
+                    tableWrap.replaceChildren(table);
+
+                    paginationWrap.replaceChildren();
+                    if (totalPages > 1) {
+                        var prevBtn = hub.el('button', {
+                            class: 'ws-pagination-btn',
+                            type: 'button',
+                            disabled: curPage === 0
+                        }, ['<']);
+                        prevBtn.addEventListener('click', function () {
+                            if (curPage > 0) { curPage--; renderHistoryTable(); }
+                        });
+                        paginationWrap.appendChild(prevBtn);
+
+                        for (var i = 0; i < totalPages; i++) {
+                            (function (pIndex) {
+                                var pBtn = hub.el('button', {
+                                    class: 'ws-pagination-btn' + (pIndex === curPage ? ' active' : ''),
+                                    type: 'button'
+                                }, [String(pIndex + 1)]);
+                                pBtn.addEventListener('click', function () {
+                                    curPage = pIndex;
+                                    renderHistoryTable();
+                                });
+                                paginationWrap.appendChild(pBtn);
+                            })(i);
+                        }
+
+                        var nextBtn = hub.el('button', {
+                            class: 'ws-pagination-btn',
+                            type: 'button',
+                            disabled: curPage >= totalPages - 1
+                        }, ['>']);
+                        nextBtn.addEventListener('click', function () {
+                            if (curPage < totalPages - 1) { curPage++; renderHistoryTable(); }
+                        });
+                        paginationWrap.appendChild(nextBtn);
+                    }
+                }
+
+                renderHistoryTable();
+            })
+            .catch(function (err) {
+                tableWrap.replaceChildren(hub.el('p', { style: 'padding: 24px; text-align: center; color: var(--ws-danger); margin: 0;' }, ['Không thể tải lịch sử: ' + (err.message || err)]));
+            });
+    }
+
+    // 2. Modal nhập nguyên liệu
+    function showMaterialRestockModal(branchId, arg2, arg3, arg4, arg5) {
+        var branchName = '';
+        var materials = [];
+        var onSuccess = null;
+        var initialMaterial = null;
+
+        if (Array.isArray(arg2)) {
+            materials = arg2;
+            onSuccess = arg3;
+            initialMaterial = arg4;
+        } else {
+            branchName = arg2 || '';
+            materials = arg3 || [];
+            onSuccess = arg4;
+            initialMaterial = arg5;
+        }
+
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            style: 'max-width: 520px; width: 100%; border-radius: 12px; overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; padding: 0; box-shadow: 0 20px 40px rgba(0,0,0,0.25);'
+        });
+
+        var closeBtn = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng',
+            style: 'color: #fff; background: rgba(255,255,255,0.18); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; font-size: 18px; cursor: pointer;'
+        }, ['×']);
+
+        var head = hub.el('div', {
+            style: 'background: #16a34a; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('h3', { style: 'margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;' }, ['Nhập nguyên liệu']),
+                hub.el('small', { style: 'font-size: 0.82rem; color: #dcfce7; display: block; margin-top: 2px;' }, ['Tăng số lượng tồn kho nguyên liệu chi nhánh'])
+            ]),
+            closeBtn
+        ]);
+
+        var body = hub.el('div', { style: 'padding: 18px 20px; background: #fff; overflow-y: auto; flex: 1;' });
+
+        // Chi nhánh
+        var branchField = hub.el('div', { style: 'margin-bottom: 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; font-size: 0.88rem; color: #475569;' }, [
+            'Chi nhánh: ', hub.el('strong', { style: 'color: #0f172a;' }, [branchName || ('Chi nhánh #' + branchId)])
+        ]);
+        body.appendChild(branchField);
+
+        // Nguyên liệu * (chỉ load ACTIVE)
+        var matGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+        matGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Nguyên liệu ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var matSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+        matSelect.appendChild(hub.el('option', { value: '' }, ['Chọn nguyên liệu…']));
+
+        (materials || []).filter(function (it) {
+            return !it.status || it.status.toUpperCase() === 'ACTIVE';
+        }).forEach(function (it) {
+            var mId = it.materialId || it.id;
+            matSelect.appendChild(hub.el('option', { value: String(mId) }, ['[' + (it.code || 'RM') + '] ' + it.name + ' (' + (it.qty != null ? it.qty : 0) + ' ' + (it.unit || '') + ')']));
+        });
+        matGroup.appendChild(matSelect);
+        body.appendChild(matGroup);
+
+        // Số lượng nhập * (> 0, cho phép số lẻ)
+        var qtyGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+        qtyGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Số lượng nhập ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var qtyInput = hub.el('input', {
+            type: 'number',
+            step: 'any',
+            min: '0.01',
+            placeholder: 'Nhập số lượng (vd: 50.5)',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem; background: #fff; color: #0f172a;'
+        });
+        qtyGroup.appendChild(qtyInput);
+        body.appendChild(qtyGroup);
+
+        // Đơn giá nhập & Nhà cung cấp
+        var row2 = hub.el('div', { style: 'display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;' });
+        var costInput = hub.el('input', {
+            type: 'number',
+            placeholder: 'Đơn giá (đ/ĐVT)…',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem;'
+        });
+        var supplierInput = hub.el('input', {
+            type: 'text',
+            placeholder: 'Nhà cung cấp…',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem;'
+        });
+        row2.appendChild(hub.el('div', {}, [
+            hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, ['Đơn giá nhập']),
+            costInput
+        ]));
+        row2.appendChild(hub.el('div', {}, [
+            hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, ['Nhà cung cấp']),
+            supplierInput
+        ]));
+        body.appendChild(row2);
+
+        // Lý do * & Số PO
+        var row3 = hub.el('div', { style: 'display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 12px; margin-bottom: 14px;' });
+        var reasonSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+        [
+            { value: 'NHAP_HANG_TU_NCC', label: 'Nhập hàng từ nhà cung cấp' },
+            { value: 'NHAP_LAI_TU_NCC', label: 'Nhập đổi trả từ nhà cung cấp' },
+            { value: 'HOAN_TU_DON_HUY', label: 'Hoàn lại từ đơn hủy' },
+            { value: 'DIEU_CHINH_KHAC', label: 'Lý do khác' }
+        ].forEach(function (opt) {
+            reasonSelect.appendChild(hub.el('option', { value: opt.value }, [opt.label]));
+        });
+
+        var poInput = hub.el('input', {
+            type: 'text',
+            placeholder: 'Số PO / Hóa đơn…',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem;'
+        });
+
+        row3.appendChild(hub.el('div', {}, [
+            hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+                'Lý do ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+            ]),
+            reasonSelect
+        ]));
+        row3.appendChild(hub.el('div', {}, [
+            hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, ['Số hóa đơn / PO']),
+            poInput
+        ]));
+        body.appendChild(row3);
+
+        // Ghi chú
+        var noteGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+        var noteLabel = hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, ['Ghi chú']);
+        var noteInput = hub.el('input', {
+            type: 'text',
+            placeholder: 'Nhập ghi chú (bắt buộc nếu chọn Điều chỉnh khác)…',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem; background: #fff; color: #0f172a;'
+        });
+        noteGroup.appendChild(noteLabel);
+        noteGroup.appendChild(noteInput);
+        body.appendChild(noteGroup);
+
+        // Realtime Preview
+        var previewBox = hub.el('div', {
+            style: 'background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; font-size: 0.9rem; color: #166534;'
+        }, ['Sau khi nhập: Tồn mới = —']);
+        body.appendChild(previewBox);
+
+        function updatePreview() {
+            var selectedId = matSelect.value;
+            var found = (materials || []).find(function (it) { return String(it.materialId || it.id) === selectedId; });
+            var cur = found ? (found.qty || 0) : 0;
+            var unit = found ? (found.unit || '') : '';
+            var addQty = parseFloat(qtyInput.value) || 0;
+            if (!selectedId) {
+                previewBox.textContent = 'Sau khi nhập: Tồn mới = —';
+            } else {
+                var newQty = Math.round((cur + addQty) * 100) / 100;
+                previewBox.innerHTML = '<strong>Xác nhận sau khi nhập:</strong><br>' +
+                    '• Tồn mới: ' + cur + ' + ' + addQty + ' = <strong>' + newQty + ' ' + unit + '</strong><br>' +
+                    '• Ghi log: +' + addQty + ' ' + unit + ' vào lịch sử biến động';
+            }
+        }
+
+        matSelect.addEventListener('change', function () {
+            var selectedId = matSelect.value;
+            var found = (materials || []).find(function (it) { return String(it.materialId || it.id) === selectedId; });
+            if (found) {
+                costInput.value = (found.costPrice != null && found.costPrice > 0) ? found.costPrice : '';
+                supplierInput.value = found.supplier || '';
+            } else {
+                costInput.value = '';
+                supplierInput.value = '';
+            }
+            updatePreview();
+        });
+        qtyInput.addEventListener('input', updatePreview);
+
+        if (initialMaterial && (initialMaterial.materialId || initialMaterial.id)) {
+            var initId = String(initialMaterial.materialId || initialMaterial.id);
+            matSelect.value = initId;
+            var foundInit = (materials || []).find(function (it) { return String(it.materialId || it.id) === initId; }) || initialMaterial;
+            costInput.value = (foundInit.costPrice != null && foundInit.costPrice > 0) ? foundInit.costPrice : '';
+            supplierInput.value = foundInit.supplier || '';
+            updatePreview();
+        }
+
+        // Sticky Footer
+        var cancelBtn = hub.el('button', {
+            type: 'button',
+            style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #e2e8f0; color: #334155; font-weight: 600; font-size: 0.95rem; cursor: pointer;'
+        }, ['Hủy']);
+
+        var confirmBtn = hub.el('button', {
+            type: 'button',
+            style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: none; background: #16a34a; color: #ffffff; font-weight: 600; font-size: 0.95rem; cursor: pointer;'
+        }, ['Xác nhận nhập']);
+
+        var footer = hub.el('div', {
+            style: 'display: flex; gap: 12px; padding: 14px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; flex-shrink: 0;'
+        }, [cancelBtn, confirmBtn]);
+
+        panel.appendChild(head);
+        panel.appendChild(body);
+        panel.appendChild(footer);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        function closeModal() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        closeBtn.addEventListener('click', closeModal);
+        backdrop.addEventListener('click', closeModal);
+        cancelBtn.addEventListener('click', closeModal);
+
+        confirmBtn.addEventListener('click', function () {
+            clearFieldError(matSelect);
+            clearFieldError(qtyInput);
+            clearFieldError(noteInput);
+
+            var hasError = false;
+            var firstErrField = null;
+
+            var mId = matSelect.value;
+            if (!mId) {
+                setFieldError(matSelect, 'Vui lòng chọn nguyên liệu.');
+                hasError = true;
+                if (!firstErrField) firstErrField = matSelect;
+            }
+
+            var qtyRaw = (qtyInput.value || '').trim();
+            var qtyVal = parseFloat(qtyRaw);
+            if (!qtyRaw) {
+                setFieldError(qtyInput, 'Vui lòng nhập số lượng.');
+                hasError = true;
+                if (!firstErrField) firstErrField = qtyInput;
+            } else if (isNaN(qtyVal) || qtyVal <= 0) {
+                setFieldError(qtyInput, 'Số lượng nhập phải lớn hơn 0.');
+                hasError = true;
+                if (!firstErrField) firstErrField = qtyInput;
+            }
+
+            var reasonVal = reasonSelect.value;
+            var noteVal = (noteInput.value || '').trim();
+            if (reasonVal === 'DIEU_CHINH_KHAC' && !noteVal) {
+                setFieldError(noteInput, 'Vui lòng nhập ghi chú khi chọn lý do "Điều chỉnh khác".');
+                hasError = true;
+                if (!firstErrField) firstErrField = noteInput;
+            }
+
+            if (hasError) {
+                if (firstErrField) firstErrField.focus();
+                return;
+            }
+
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Đang lưu…';
+
+            var payload = {
+                type: 'material',
+                action: 'restock',
+                branchId: branchId,
+                materialId: mId,
+                quantity: qtyVal,
+                reason: reasonVal,
+                costPrice: costInput.value ? costInput.value.trim() : '',
+                supplier: supplierInput.value ? supplierInput.value.trim() : '',
+                poNumber: poInput.value ? poInput.value.trim() : '',
+                note: noteVal
+            };
+
+            hub.api('/inventory', {
+                method: 'POST',
+                body: payload
+            }).then(function () {
+                closeModal();
+                hub.notify('Nhập nguyên liệu thành công!', 'ok');
+                if (onSuccess) onSuccess();
+            }).catch(function (err) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Xác nhận nhập';
+                notifyError(err);
+            });
+        });
+    }
+
+    // 3. Modal điều chỉnh nguyên liệu
+    function showMaterialAdjustModal(branchId, selectedMaterial, materials, onSuccess) {
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            style: 'max-width: 500px; width: 100%; border-radius: 12px; overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; padding: 0; box-shadow: 0 20px 40px rgba(0,0,0,0.25);'
+        });
+
+        var closeBtn = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng',
+            style: 'color: #fff; background: rgba(255,255,255,0.18); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; font-size: 18px; cursor: pointer;'
+        }, ['×']);
+
+        var head = hub.el('div', {
+            style: 'background: #475569; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('h3', { style: 'margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;' }, ['Điều chỉnh nguyên liệu']),
+                hub.el('small', { style: 'font-size: 0.82rem; color: #cbd5e1; display: block; margin-top: 2px;' }, ['Kiểm kê, hao hụt hoặc cân bằng số tồn'])
+            ]),
+            closeBtn
+        ]);
+
+        var body = hub.el('div', { style: 'padding: 18px 20px; background: #fff; overflow-y: auto; flex: 1;' });
+
+        // Nguyên liệu *
+        var matGroup = hub.el('div', { style: 'margin-bottom: 12px;' });
+        matGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Nguyên liệu ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var matSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+        matSelect.appendChild(hub.el('option', { value: '' }, ['Chọn nguyên liệu…']));
+        (materials || []).forEach(function (it) {
+            var mId = it.materialId || it.id;
+            matSelect.appendChild(hub.el('option', { value: String(mId) }, ['[' + (it.code || 'RM') + '] ' + it.name + ' (' + (it.qty != null ? it.qty : 0) + ' ' + (it.unit || '') + ')']));
+        });
+        if (selectedMaterial && (selectedMaterial.materialId || selectedMaterial.id)) {
+            matSelect.value = String(selectedMaterial.materialId || selectedMaterial.id);
+        }
+        matGroup.appendChild(matSelect);
+        body.appendChild(matGroup);
+
+        // Tồn hiện tại
+        var currentQtyDisplay = hub.el('strong', { style: 'font-size: 1.05rem; color: #0f172a;' }, ['0']);
+        var currentQtyWrap = hub.el('div', { style: 'margin-bottom: 16px; font-size: 0.9rem; color: #475569;' }, [
+            'Tồn hiện tại: ', currentQtyDisplay
+        ]);
+        body.appendChild(currentQtyWrap);
+
+        var currentItem = null;
+        function updateCurrentQty() {
+            var selectedId = matSelect.value;
+            currentItem = (materials || []).find(function (it) { return String(it.materialId || it.id) === selectedId; }) || null;
+            var q = currentItem ? (currentItem.qty != null ? currentItem.qty : 0) : 0;
+            var u = currentItem ? (currentItem.unit || '') : '';
+            currentQtyDisplay.textContent = q + ' ' + u;
+            updateRealtimeCheck();
+        }
+        matSelect.addEventListener('change', function () {
+            updateCurrentQty();
+            updateReasonList();
+        });
+
+        // Loại điều chỉnh: 3 lựa chọn (GIẢM / TĂNG / SỬA THẲNG)
+        var typeGroup = hub.el('div', { style: 'margin-bottom: 16px;' });
+        typeGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 8px;' }, [
+            'Loại điều chỉnh ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var radioMinus = hub.el('input', { type: 'radio', name: 'mr5Type', value: 'MINUS', checked: true, style: 'accent-color: #dc2626; width: 17px; height: 17px; cursor: pointer;' });
+        var radioPlus = hub.el('input', { type: 'radio', name: 'mr5Type', value: 'PLUS', style: 'accent-color: #16a34a; width: 17px; height: 17px; cursor: pointer;' });
+        var radioSet = hub.el('input', { type: 'radio', name: 'mr5Type', value: 'SET', style: 'accent-color: #0284c7; width: 17px; height: 17px; cursor: pointer;' });
+
+        var typeOptions = hub.el('div', { style: 'display: flex; gap: 20px; align-items: center;' }, [
+            hub.el('label', { style: 'display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; color: #dc2626; font-size: 0.95rem;' }, [
+                radioMinus, 'GIẢM'
+            ]),
+            hub.el('label', { style: 'display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; color: #16a34a; font-size: 0.95rem;' }, [
+                radioPlus, 'TĂNG'
+            ]),
+            hub.el('label', { style: 'display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; color: #0284c7; font-size: 0.95rem;' }, [
+                radioSet, 'SỬA THẲNG'
+            ])
+        ]);
+        typeGroup.appendChild(typeOptions);
+        body.appendChild(typeGroup);
+
+        // Input Số lượng
+        var qtyGroup = hub.el('div', { style: 'margin-bottom: 16px;' });
+        var qtyLabel = hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Số lượng giảm ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]);
+        var qtyInput = hub.el('input', {
+            type: 'number',
+            step: 'any',
+            min: '0.01',
+            placeholder: 'Nhập số lượng giảm (vd: 5.5)…',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem; background: #fff; color: #0f172a;'
+        });
+        qtyGroup.appendChild(qtyLabel);
+        qtyGroup.appendChild(qtyInput);
+        body.appendChild(qtyGroup);
+
+        // Lý do *
+        var reasonGroup = hub.el('div', { style: 'margin-bottom: 16px;' });
+        reasonGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Lý do ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+        ]));
+        var reasonSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+        reasonGroup.appendChild(reasonSelect);
+        body.appendChild(reasonGroup);
+
+        var reasonsDecrease = [
+            { value: '', label: 'Chọn lý do…' },
+            { value: 'HU_HONG', label: 'Hư hỏng / Rách bao bì' },
+            { value: 'HET_HAN', label: 'Hết hạn sử dụng' },
+            { value: 'MAT_DO_KHACH', label: 'Thất thoát / Đổ vỡ' },
+            { value: 'KIEM_KE_THIEU', label: 'Kiểm kê thiếu (Hụt kho)' },
+            { value: 'OTHER', label: 'Lý do khác' }
+        ];
+
+        var reasonsIncrease = [
+            { value: '', label: 'Chọn lý do…' },
+            { value: 'KIEM_KE_THUA', label: 'Kiểm kê thừa (Thực tế nhiều hơn)' },
+            { value: 'DIEU_CHINH_KHAC', label: 'Tìm lại hàng thất lạc / để sót' },
+            { value: 'OTHER', label: 'Lý do khác' }
+        ];
+
+        function updateReasonList() {
+            var isMinus = radioMinus.checked;
+            var isPlus = radioPlus.checked;
+            var isSet = radioSet.checked;
+            var opts = reasonsDecrease;
+            if (isPlus) {
+                opts = reasonsIncrease;
+            } else if (isSet) {
+                var curQ = currentItem ? (currentItem.qty != null ? currentItem.qty : 0) : 0;
+                var setVal = parseFloat(qtyInput.value) || 0;
+                opts = setVal >= curQ ? reasonsIncrease : reasonsDecrease;
+            }
+
+            reasonSelect.replaceChildren();
+            opts.forEach(function (opt) {
+                reasonSelect.appendChild(hub.el('option', { value: opt.value }, [opt.label]));
+            });
+        }
+
+        // Ghi chú
+        var noteGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+        var noteLabel = hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+            'Ghi chú ', hub.el('span', { id: 'mr5NoteReq', style: 'color: #ef4444; display: none;' }, ['(bắt buộc >= 10 ký tự)'])
+        ]);
+        var noteInput = hub.el('input', {
+            type: 'text',
+            placeholder: 'Nhập ghi chú thêm…',
+            style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--ws-line); border-radius: 8px; font-size: 0.9rem; background: #fff; color: #0f172a;'
+        });
+        noteGroup.appendChild(noteLabel);
+        noteGroup.appendChild(noteInput);
+        body.appendChild(noteGroup);
+
+        // Cảnh báo realtime (Dưới min stock)
+        var warningBox = hub.el('div', {
+            style: 'display: none; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; margin-bottom: 18px; font-size: 0.88rem; color: #b45309;'
+        }, ['[Cảnh báo] Tồn kho sau điều chỉnh dưới mức tối thiểu!']);
+        body.appendChild(warningBox);
+
+        function updateRealtimeCheck() {
+            var curQ = currentItem ? (currentItem.qty != null ? currentItem.qty : 0) : 0;
+            var minQ = currentItem ? (currentItem.minStock != null ? currentItem.minStock : 0) : 0;
+            var unit = currentItem ? (currentItem.unit || '') : '';
+            var val = parseFloat(qtyInput.value) || 0;
+
+            var newQty = curQ;
+            if (radioMinus.checked) {
+                newQty = curQ - val;
+            } else if (radioPlus.checked) {
+                newQty = curQ + val;
+            } else if (radioSet.checked) {
+                newQty = val;
+            }
+
+            if (currentItem && newQty < minQ) {
+                warningBox.style.display = 'block';
+                warningBox.innerHTML = '<strong>Cảnh báo:</strong> Tồn sau điều chỉnh (' + (Math.round(newQty * 100) / 100) + ' ' + unit + ') dưới mức tối thiểu (' + minQ + ' ' + unit + ')';
+            } else {
+                warningBox.style.display = 'none';
+            }
+        }
+
+        function onTypeChange() {
+            if (radioMinus.checked) {
+                qtyLabel.innerHTML = 'Số lượng giảm <span style="color: #ef4444;">*</span>';
+                qtyInput.placeholder = 'Nhập số lượng giảm (vd: 5.5)…';
+            } else if (radioPlus.checked) {
+                qtyLabel.innerHTML = 'Số lượng tăng <span style="color: #ef4444;">*</span>';
+                qtyInput.placeholder = 'Nhập số lượng tăng (vd: 10.0)…';
+            } else {
+                qtyLabel.innerHTML = 'Tồn kho mới (Set value) <span style="color: #ef4444;">*</span>';
+                qtyInput.placeholder = 'Nhập số tồn kho thực tế mới (vd: 120)…';
+            }
+            updateReasonList();
+            updateRealtimeCheck();
+        }
+
+        radioMinus.addEventListener('change', onTypeChange);
+        radioPlus.addEventListener('change', onTypeChange);
+        radioSet.addEventListener('change', onTypeChange);
+        qtyInput.addEventListener('input', function () {
+            if (radioSet.checked) updateReasonList();
+            updateRealtimeCheck();
+        });
+
+        reasonSelect.addEventListener('change', function () {
+            var reqSpan = document.getElementById('mr5NoteReq');
+            if (reqSpan) reqSpan.style.display = reasonSelect.value === 'OTHER' ? 'inline' : 'none';
+        });
+
+        updateCurrentQty();
+        onTypeChange();
+
+        // Sticky Footer
+        var cancelBtn = hub.el('button', {
+            type: 'button',
+            style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #e2e8f0; color: #334155; font-weight: 600; font-size: 0.95rem; cursor: pointer;'
+        }, ['Hủy']);
+
+        var confirmBtn = hub.el('button', {
+            type: 'button',
+            style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: none; background: #1d4ed8; color: #ffffff; font-weight: 600; font-size: 0.95rem; cursor: pointer;'
+        }, ['Xác nhận điều chỉnh']);
+
+        var footer = hub.el('div', {
+            style: 'display: flex; gap: 12px; padding: 14px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; flex-shrink: 0;'
+        }, [cancelBtn, confirmBtn]);
+
+        panel.appendChild(head);
+        panel.appendChild(body);
+        panel.appendChild(footer);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        function closeModal() {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        }
+        closeBtn.addEventListener('click', closeModal);
+        backdrop.addEventListener('click', closeModal);
+        cancelBtn.addEventListener('click', closeModal);
+
+        confirmBtn.addEventListener('click', function () {
+            clearFieldError(matSelect);
+            clearFieldError(qtyInput);
+            clearFieldError(reasonSelect);
+            clearFieldError(noteInput);
+
+            var hasError = false;
+            var firstErrField = null;
+
+            var mId = matSelect.value;
+            if (!mId) {
+                setFieldError(matSelect, 'Vui lòng chọn nguyên liệu.');
+                hasError = true;
+                if (!firstErrField) firstErrField = matSelect;
+            }
+
+            var curQ = currentItem ? (currentItem.qty != null ? currentItem.qty : 0) : 0;
+            var qtyRaw = (qtyInput.value || '').trim();
+            var val = parseFloat(qtyRaw);
+            var deltaQty = 0;
+
+            if (!qtyRaw) {
+                setFieldError(qtyInput, 'Vui lòng nhập số lượng.');
+                hasError = true;
+                if (!firstErrField) firstErrField = qtyInput;
+            } else if (isNaN(val) || val < 0) {
+                setFieldError(qtyInput, 'Vui lòng nhập số lượng hợp lệ (>= 0).');
+                hasError = true;
+                if (!firstErrField) firstErrField = qtyInput;
+            } else if (radioMinus.checked) {
+                if (val <= 0) {
+                    setFieldError(qtyInput, 'Số lượng giảm phải lớn hơn 0.');
+                    hasError = true;
+                    if (!firstErrField) firstErrField = qtyInput;
+                } else if (val > curQ) {
+                    setFieldError(qtyInput, 'Số lượng giảm (' + val + ') không được vượt quá tồn hiện tại (' + curQ + ')!');
+                    hasError = true;
+                    if (!firstErrField) firstErrField = qtyInput;
+                } else {
+                    deltaQty = -val;
+                }
+            } else if (radioPlus.checked) {
+                if (val <= 0) {
+                    setFieldError(qtyInput, 'Số lượng tăng phải lớn hơn 0.');
+                    hasError = true;
+                    if (!firstErrField) firstErrField = qtyInput;
+                } else {
+                    deltaQty = val;
+                }
+            } else if (radioSet.checked) {
+                deltaQty = Math.round((val - curQ) * 100) / 100;
+                if (deltaQty === 0) {
+                    setFieldError(qtyInput, 'Số tồn mới bằng tồn hiện tại, không có chênh lệch để điều chỉnh.');
+                    hasError = true;
+                    if (!firstErrField) firstErrField = qtyInput;
+                }
+            }
+
+            var reasonVal = reasonSelect.value;
+            if (!reasonVal) {
+                setFieldError(reasonSelect, 'Vui lòng chọn lý do điều chỉnh.');
+                hasError = true;
+                if (!firstErrField) firstErrField = reasonSelect;
+            }
+
+            var noteVal = (noteInput.value || '').trim();
+            if (reasonVal === 'OTHER' && noteVal.length < 10) {
+                setFieldError(noteInput, 'Khi chọn lý do Khác (OTHER), ghi chú bắt buộc phải có ít nhất 10 ký tự.');
+                hasError = true;
+                if (!firstErrField) firstErrField = noteInput;
+            }
+
+            if (hasError) {
+                if (firstErrField) firstErrField.focus();
+                return;
+            }
+
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Đang lưu…';
+
+            hub.api('/inventory', {
+                method: 'POST',
+                body: {
+                    type: 'material',
+                    action: 'adjust',
+                    branchId: branchId,
+                    materialId: mId,
+                    quantity: deltaQty,
+                    reason: reasonVal,
+                    note: noteVal
+                }
+            }).then(function () {
+                closeModal();
+                hub.notify('Điều chỉnh tồn kho nguyên liệu thành công!', 'ok');
+                if (onSuccess) onSuccess();
+            }).catch(function (err) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Xác nhận điều chỉnh';
+                notifyError(err);
+            });
+        });
+    }
+
+    // 4. Màn hình danh sách tồn kho nguyên liệu
+    function renderMaterialInventoryPage(targetRoot, branchId, branches, isStaff, onSwitchTab) {
+        if (!targetRoot) return;
+
+        hub.setWorkspaceHeader('Kho Nguyên Liệu');
+
+        var page = hub.el('div', { class: 'ws-page' });
+
+        // Header
+        var header = hub.el('div', { class: 'ws-page-header', style: 'margin-bottom: 20px;' }, [
+            hub.el('h1', { class: 'ws-page-title' }, ['Kho Nguyên Liệu']),
+            hub.el('p', { class: 'ws-page-subtitle' }, ['Quản lý tồn kho nguyên liệu phục vụ chế biến bắp nước tại chi nhánh.'])
+        ]);
+        page.appendChild(header);
+
+        // Vùng 4 Summary Cards
+        var cardsContainer = hub.el('div', {
+            style: 'display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;'
+        });
+
+        var cardTotal = hub.el('div', {
+            class: 'ws-card',
+            style: 'padding: 16px 20px; border-radius: 10px; cursor: pointer; border: 2px solid #e2e8f0; transition: all 0.2s;'
+        }, [
+            hub.el('div', { style: 'font-size: 0.82rem; font-weight: 700; color: #64748b; letter-spacing: 0.5px;' }, ['TỔNG NGUYÊN LIỆU']),
+            hub.el('div', { id: 'mrTotalCount', style: 'font-size: 2rem; font-weight: 800; color: #0f172a; margin-top: 4px;' }, ['0'])
+        ]);
+
+        var cardInStock = hub.el('div', {
+            class: 'ws-card',
+            style: 'padding: 16px 20px; border-radius: 10px; cursor: pointer; border: 2px solid #bbf7d0; background: #f0fdf4; transition: all 0.2s;'
+        }, [
+            hub.el('div', { style: 'font-size: 0.82rem; font-weight: 700; color: #16a34a; letter-spacing: 0.5px;' }, ['CÒN HÀNG']),
+            hub.el('div', { id: 'mrInStockCount', style: 'font-size: 2rem; font-weight: 800; color: #16a34a; margin-top: 4px;' }, ['0'])
+        ]);
+
+        var cardLowStock = hub.el('div', {
+            class: 'ws-card',
+            style: 'padding: 16px 20px; border-radius: 10px; cursor: pointer; border: 2px solid #fed7aa; background: #fff7ed; transition: all 0.2s;'
+        }, [
+            hub.el('div', { style: 'font-size: 0.82rem; font-weight: 700; color: #ea580c; letter-spacing: 0.5px;' }, ['SẮP HẾT']),
+            hub.el('div', { id: 'mrLowStockCount', style: 'font-size: 2rem; font-weight: 800; color: #ea580c; margin-top: 4px;' }, ['0'])
+        ]);
+
+        var cardOutOfStock = hub.el('div', {
+            class: 'ws-card',
+            style: 'padding: 16px 20px; border-radius: 10px; cursor: pointer; border: 2px solid #fecaca; background: #fef2f2; transition: all 0.2s;'
+        }, [
+            hub.el('div', { style: 'font-size: 0.82rem; font-weight: 700; color: #dc2626; letter-spacing: 0.5px;' }, ['HẾT HÀNG']),
+            hub.el('div', { id: 'mrOutOfStockCount', style: 'font-size: 2rem; font-weight: 800; color: #dc2626; margin-top: 4px;' }, ['0'])
+        ]);
+
+        cardsContainer.appendChild(cardTotal);
+        cardsContainer.appendChild(cardInStock);
+        cardsContainer.appendChild(cardLowStock);
+        cardsContainer.appendChild(cardOutOfStock);
+        page.appendChild(cardsContainer);
+
+        // Toolbar
+        var toolbar = hub.el('div', { class: 'ws-list-toolbar', style: 'margin-bottom: 16px;' });
+        var tbLeft = hub.el('div', { class: 'ws-list-toolbar-left', style: 'display: flex; gap: 10px; align-items: center; flex-wrap: wrap;' });
+
+        // Dropdown Chi nhánh
+        var branchSelect = hub.el('select', { class: 'ws-select', 'aria-label': 'Chi nhánh' });
+        (branches || []).forEach(function (b) {
+            var opt = hub.el('option', { value: String(b.id) }, [b.name]);
+            if (String(b.id) === String(branchId)) opt.selected = true;
+            branchSelect.appendChild(opt);
+        });
+        tbLeft.appendChild(branchSelect);
+
+        // Input Tìm kiếm
+        var searchWrap = hub.el('div', { class: 'ws-search' });
+        searchWrap.appendChild(hub.el('span', { 'aria-hidden': 'true', innerHTML: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>' }));
+        var searchInput = hub.el('input', {
+            type: 'search',
+            placeholder: 'Tìm nguyên liệu (mã hoặc tên)…',
+            'aria-label': 'Tìm nguyên liệu'
+        });
+        searchWrap.appendChild(searchInput);
+        tbLeft.appendChild(searchWrap);
+
+        // Dropdown Nhóm
+        var groupSelect = hub.el('select', { class: 'ws-select', 'aria-label': 'Nhóm' });
+        [
+            { value: '', label: 'Tất cả nhóm' },
+            { value: 'BẮP', label: 'BẮP' },
+            { value: 'ĐỒ UỐNG', label: 'ĐỒ UỐNG' },
+            { value: 'BAO BÌ', label: 'BAO BÌ' },
+            { value: 'GIA VỊ', label: 'GIA VỊ' }
+        ].forEach(function (g) {
+            groupSelect.appendChild(hub.el('option', { value: g.value }, [g.label]));
+        });
+        tbLeft.appendChild(groupSelect);
+
+        // Dropdown Trạng thái
+        var statusSelect = hub.el('select', { class: 'ws-select', 'aria-label': 'Trạng thái' });
+        [
+            { value: '', label: 'Tất cả trạng thái' },
+            { value: 'IN_STOCK', label: 'Còn hàng' },
+            { value: 'LOW_STOCK', label: 'Sắp hết' },
+            { value: 'OUT_OF_STOCK', label: 'Hết hàng' }
+        ].forEach(function (s) {
+            statusSelect.appendChild(hub.el('option', { value: s.value }, [s.label]));
+        });
+        tbLeft.appendChild(statusSelect);
+
+        // Dropdown Sắp xếp
+        var sortSelect = hub.el('select', { class: 'ws-select', 'aria-label': 'Sắp xếp' });
+        [
+            { value: '', label: 'Tất cả sắp xếp' },
+            { value: 'QTY_ASC', label: 'Tồn tăng' },
+            { value: 'QTY_DESC', label: 'Tồn giảm' },
+            { value: 'NAME_ASC', label: 'Tên A-Z' }
+        ].forEach(function (opt) {
+            sortSelect.appendChild(hub.el('option', { value: opt.value }, [opt.label]));
+        });
+        tbLeft.appendChild(sortSelect);
+        toolbar.appendChild(tbLeft);
+
+        // Thanh thao tác phía trên (Top Toolbar)
+        var tbRight = hub.el('div', { class: 'ws-list-toolbar-right', style: 'display: flex; gap: 8px; align-items: center; flex-wrap: wrap;' });
+
+        if (!isStaff) {
+            var btnTopRestock = hub.el('button', {
+                class: 'ws-btn primary',
+                type: 'button',
+                style: 'background: #16a34a; border-color: #16a34a; font-weight: 600;'
+            }, ['+ Nhập Nguyên Liệu']);
+            btnTopRestock.addEventListener('click', function () {
+                var curBranchObj = (branches || []).find(function (b) { return String(b.id) === String(branchSelect.value); });
+                var curBranchId = curBranchObj ? curBranchObj.id : branchId;
+                var curBranchName = curBranchObj ? curBranchObj.name : '';
+                showMaterialRestockModal(curBranchId, curBranchName, rawMaterials, loadData);
+            });
+
+            var btnTopProduce = hub.el('button', {
+                class: 'ws-btn primary',
+                type: 'button',
+                style: 'background: #d97706; border-color: #d97706; font-weight: 600;'
+            }, ['Xuất Nguyên Liệu']);
+            btnTopProduce.addEventListener('click', function () {
+                var curBranchObj = (branches || []).find(function (b) { return String(b.id) === String(branchSelect.value); });
+                var curBranchId = curBranchObj ? curBranchObj.id : branchId;
+                var curBranchName = curBranchObj ? curBranchObj.name : '';
+                showProduceModal(curBranchId, curBranchName, loadData);
+            });
+
+            var btnTopAdjust = hub.el('button', {
+                class: 'ws-btn secondary',
+                type: 'button',
+                style: 'font-weight: 600;'
+            }, ['Điều chỉnh']);
+            btnTopAdjust.addEventListener('click', function () {
+                var curBranchObj = (branches || []).find(function (b) { return String(b.id) === String(branchSelect.value); });
+                var curBranchId = curBranchObj ? curBranchObj.id : branchId;
+                showMaterialAdjustModal(curBranchId, null, rawMaterials, loadData);
+            });
+
+            tbRight.appendChild(btnTopRestock);
+            tbRight.appendChild(btnTopProduce);
+            tbRight.appendChild(btnTopAdjust);
+        }
+
+        var btnExportExcel = hub.el('button', {
+            class: 'ws-btn secondary',
+            type: 'button',
+            style: 'font-weight: 600;'
+        }, ['Xuất Excel']);
+        btnExportExcel.addEventListener('click', function () {
+            if (!rawMaterials.length) {
+                hub.notify('Không có dữ liệu nguyên liệu để xuất.', 'info');
+                return;
+            }
+            var headers = ['Mã NL', 'Tên nguyên liệu', 'Nhóm', 'ĐVT', 'Tồn kho', 'Mức tối thiểu', 'Cập nhật', 'Trạng thái'];
+            var rows = rawMaterials.map(function (m) {
+                var q = m.qty != null ? m.qty : 0;
+                var minQ = m.minStock != null ? m.minStock : 0;
+                var st = q <= 0 ? 'Hết hàng' : (q <= minQ ? 'Sắp hết' : 'Còn hàng');
+                return [
+                    m.code || '',
+                    m.name || '',
+                    m.category || '',
+                    m.unit || '',
+                    q,
+                    minQ,
+                    m.updatedAt || '',
+                    st
+                ];
+            });
+            exportCsv('Ton_kho_nguyen_lieu_' + (branchSelect.value || branchId) + '_' + new Date().toISOString().slice(0, 10) + '.csv', headers, rows);
+        });
+
+        var btnPrint = hub.el('button', {
+            class: 'ws-btn secondary',
+            type: 'button',
+            style: 'font-weight: 600;'
+        }, ['In phiếu']);
+        btnPrint.addEventListener('click', function () {
+            window.print();
+        });
+
+        tbRight.appendChild(btnExportExcel);
+        tbRight.appendChild(btnPrint);
+        toolbar.appendChild(tbRight);
+
+        var rawMaterials = [];
+        page.appendChild(toolbar);
+
+        // Bảng hiển thị 9 CỘT
+        var tableCard = hub.el('div', { class: 'ws-card', style: 'padding: 0; overflow: hidden;' });
+        var tableRegion = hub.el('div');
+        tableCard.appendChild(tableRegion);
+        page.appendChild(tableCard);
+
+        targetRoot.replaceChildren(page);
+
+        // Click các thẻ Summary Card để lọc nhanh
+        cardTotal.addEventListener('click', function () {
+            statusSelect.value = '';
+            applyFilters();
+        });
+        cardInStock.addEventListener('click', function () {
+            statusSelect.value = 'IN_STOCK';
+            applyFilters();
+        });
+        cardLowStock.addEventListener('click', function () {
+            statusSelect.value = 'LOW_STOCK';
+            applyFilters();
+        });
+        cardOutOfStock.addEventListener('click', function () {
+            statusSelect.value = 'OUT_OF_STOCK';
+            applyFilters();
+        });
+
+        function highlightCard(selectedVal) {
+            cardTotal.style.boxShadow = selectedVal === '' ? '0 0 0 2px #1d4ed8' : 'none';
+            cardInStock.style.boxShadow = selectedVal === 'IN_STOCK' ? '0 0 0 2px #16a34a' : 'none';
+            cardLowStock.style.boxShadow = selectedVal === 'LOW_STOCK' ? '0 0 0 2px #ea580c' : 'none';
+            cardOutOfStock.style.boxShadow = selectedVal === 'OUT_OF_STOCK' ? '0 0 0 2px #dc2626' : 'none';
+        }
+
+        function loadData() {
+            var activeBranch = branchSelect.value || branchId;
+            tableRegion.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [
+                hub.el('div', { class: 'ws-spinner' }),
+                hub.el('span', {}, ['Đang tải dữ liệu nguyên liệu…'])
+            ]));
+
+            hub.api('/inventory?type=material&branchId=' + activeBranch)
+                .then(function (resList) {
+                    rawMaterials = resList || [];
+
+                    // Cập nhật số liệu trên 4 Summary Cards
+                    var total = rawMaterials.length;
+                    var inStock = 0;
+                    var lowStock = 0;
+                    var outOfStock = 0;
+
+                    rawMaterials.forEach(function (m) {
+                        var q = m.qty != null ? m.qty : 0;
+                        var minQ = m.minStock != null ? m.minStock : 0;
+                        if (q <= 0) {
+                            outOfStock++;
+                        } else if (q <= minQ) {
+                            lowStock++;
+                        } else {
+                            inStock++;
+                        }
+                    });
+
+                    var elTotal = document.getElementById('mrTotalCount');
+                    var elInStock = document.getElementById('mrInStockCount');
+                    var elLowStock = document.getElementById('mrLowStockCount');
+                    var elOutOfStock = document.getElementById('mrOutOfStockCount');
+                    if (elTotal) elTotal.textContent = String(total);
+                    if (elInStock) elInStock.textContent = String(inStock);
+                    if (elLowStock) elLowStock.textContent = String(lowStock);
+                    if (elOutOfStock) elOutOfStock.textContent = String(outOfStock);
+
+                    applyFilters();
+                })
+                .catch(function (err) {
+                    tableRegion.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                        hub.el('h3', {}, ['Lỗi tải dữ liệu']),
+                        hub.el('p', {}, [err.message || 'Không thể tải dữ liệu nguyên liệu. Vui lòng thử lại.'])
+                    ]));
+                });
+        }
+
+        function applyFilters() {
+            var search = (searchInput.value || '').trim().toLowerCase();
+            var searchNorm = search.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            var catFilter = groupSelect.value;
+            var stFilter = statusSelect.value;
+            var sortVal = sortSelect.value;
+
+            highlightCard(stFilter);
+
+            var filtered = rawMaterials.filter(function (it) {
+                // Lọc search
+                if (search) {
+                    var nameLower = (it.name || '').toLowerCase();
+                    var nameNorm = nameLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    var codeLower = (it.code || '').toLowerCase();
+                    var matchName = nameLower.indexOf(search) !== -1 || nameNorm.indexOf(searchNorm) !== -1;
+                    var matchCode = codeLower.indexOf(search) !== -1;
+                    if (!matchName && !matchCode) return false;
+                }
+
+                // Lọc nhóm
+                if (catFilter) {
+                    var c = (it.category || '').toUpperCase();
+                    if (c.indexOf(catFilter.toUpperCase()) === -1) return false;
+                }
+
+                // Lọc trạng thái
+                if (stFilter) {
+                    var q = it.qty != null ? it.qty : 0;
+                    var minQ = it.minStock != null ? it.minStock : 0;
+                    if (stFilter === 'OUT_OF_STOCK' && q > 0) return false;
+                    if (stFilter === 'LOW_STOCK' && (q <= 0 || q > minQ)) return false;
+                    if (stFilter === 'IN_STOCK' && q <= minQ) return false;
+                }
+
+                return true;
+            });
+
+            // Sắp xếp
+            if (sortVal === 'QTY_ASC') {
+                filtered.sort(function (a, b) { return (a.qty != null ? a.qty : 0) - (b.qty != null ? b.qty : 0); });
+            } else if (sortVal === 'QTY_DESC') {
+                filtered.sort(function (a, b) { return (b.qty != null ? b.qty : 0) - (a.qty != null ? a.qty : 0); });
+            } else if (sortVal === 'NAME_ASC') {
+                filtered.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+            }
+
+            renderTable(filtered);
+        }
+
+        function renderTable(items) {
+            if (!items.length) {
+                tableRegion.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                    hub.el('h3', {}, ['Chưa có nguyên liệu']),
+                    hub.el('p', {}, ['Không tìm thấy nguyên liệu nào trong kho theo điều kiện lọc hiện tại.'])
+                ]));
+                return;
+            }
+
+            var table = hub.el('table', { class: 'ws-table', style: 'margin: 0; width: 100%; border-collapse: collapse;' });
+
+            var chkAll = hub.el('input', { type: 'checkbox', style: 'width: 16px; height: 16px; cursor: pointer;' });
+            var thead = hub.el('thead', {}, [
+                hub.el('tr', {}, [
+                    hub.el('th', { style: 'width: 40px; text-align: center;' }, [chkAll]),
+                    hub.el('th', {}, ['Nguyên liệu']),
+                    hub.el('th', {}, ['Nhóm']),
+                    hub.el('th', {}, ['ĐVT']),
+                    hub.el('th', {}, ['Tồn']),
+                    hub.el('th', {}, ['Min']),
+                    hub.el('th', {}, ['Cập nhật']),
+                    hub.el('th', {}, ['Trạng thái']),
+                    hub.el('th', { style: 'text-align: right; width: 100px;' }, ['Thao tác'])
+                ])
+            ]);
+
+            var tbody = hub.el('tbody');
+            var itemCheckboxes = [];
+
+            items.forEach(function (s) {
+                var q = s.qty != null ? s.qty : 0;
+                var minQ = s.minStock != null ? s.minStock : 0;
+                var unit = s.unit || '';
+
+                // Checkbox
+                var rowChk = hub.el('input', { type: 'checkbox', style: 'width: 16px; height: 16px; cursor: pointer;' });
+                itemCheckboxes.push(rowChk);
+
+                // Tên + Mã nguyên liệu (click mở modal chi tiết)
+                var nameEl = hub.el('div', {}, [
+                    hub.el('div', {
+                        style: 'font-weight: 700; color: #1d4ed8; cursor: pointer; text-decoration: underline;'
+                    }, [s.name || ('NL #' + (s.materialId || s.id))]),
+                    hub.el('small', { style: 'color: #64748b; font-size: 0.8rem;' }, ['Mã: ' + (s.code || '—')])
+                ]);
+                nameEl.addEventListener('click', function () {
+                    showMaterialDetailModal(branchSelect.value || branchId, s, rawMaterials, loadData, isStaff);
+                });
+
+                // Nhóm
+                var catBadge = hub.el('span', {
+                    style: 'background: #f1f5f9; color: #334155; padding: 3px 8px; border-radius: 6px; font-size: 0.82rem; font-weight: 600;'
+                }, [s.category || '—']);
+
+                // ĐVT
+                var unitTd = hub.el('span', { style: 'color: #475569; font-size: 0.9rem;' }, [unit]);
+
+                // Tồn (in đậm)
+                var qtyTd = hub.el('strong', { style: 'color: #0f172a; font-size: 0.96rem;' }, [String(q)]);
+
+                // Min
+                var minTd = hub.el('span', { style: 'color: #64748b; font-size: 0.9rem;' }, [String(minQ)]);
+
+                // Cập nhật
+                var updatedTd = hub.el('span', { style: 'color: #64748b; font-size: 0.84rem; white-space: nowrap;' }, [s.updatedAt || '—']);
+
+                // Trạng thái badge: Còn hàng / Sắp hết / Hết hàng
+                var stBadge;
+                if (q <= 0) {
+                    stBadge = hub.el('span', { class: 'ws-badge ws-status-pill ws-badge-red' }, ['Hết hàng']);
+                } else if (q <= minQ) {
+                    stBadge = hub.el('span', { class: 'ws-badge ws-status-pill ws-badge-orange' }, ['Sắp hết']);
+                } else {
+                    stBadge = hub.el('span', { class: 'ws-badge ws-status-pill ws-badge-green' }, ['Còn hàng']);
+                }
+
+                // Cột Thao tác: Nút Lịch sử
+                var btnHist = hub.el('button', {
+                    type: 'button',
+                    class: 'ws-btn secondary',
+                    style: 'padding: 4px 10px; font-size: 0.82rem; border-radius: 6px; cursor: pointer; white-space: nowrap;'
+                }, ['Lịch sử']);
+                btnHist.addEventListener('click', function () {
+                    showMaterialDetailModal(branchSelect.value || branchId, s, rawMaterials, loadData, isStaff);
+                });
+
+                tbody.appendChild(hub.el('tr', {}, [
+                    hub.el('td', { style: 'text-align: center;' }, [rowChk]),
+                    hub.el('td', {}, [nameEl]),
+                    hub.el('td', {}, [catBadge]),
+                    hub.el('td', {}, [unitTd]),
+                    hub.el('td', {}, [qtyTd]),
+                    hub.el('td', {}, [minTd]),
+                    hub.el('td', {}, [updatedTd]),
+                    hub.el('td', {}, [stBadge]),
+                    hub.el('td', { style: 'text-align: right;' }, [btnHist])
+                ]));
+            });
+
+            chkAll.addEventListener('change', function () {
+                var checked = chkAll.checked;
+                itemCheckboxes.forEach(function (c) { c.checked = checked; });
+            });
+
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableRegion.replaceChildren(table);
+        }
+
+        branchSelect.addEventListener('change', loadData);
+        searchInput.addEventListener('input', applyFilters);
+        groupSelect.addEventListener('change', applyFilters);
+        statusSelect.addEventListener('change', applyFilters);
+        sortSelect.addEventListener('change', applyFilters);
+
+        loadData();
+    }
+
+    // ================================================================
+    //  GIAI ĐOẠN 3: CÔNG THỨC (RECIPE) & XUẤT CHẾ BIẾN (KHÔNG ICON)
+    // ================================================================
+
+    // M-R4. Modal Xuất nguyên liệu (Stock-Out / Sản xuất)
+    function showProduceModal(branchId, branchName, onSuccess) {
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            style: 'max-width: 680px; width: 100%; border-radius: 12px; overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; padding: 0; box-shadow: 0 20px 40px rgba(0,0,0,0.25);'
+        });
+
+        var closeBtn = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng',
+            style: 'color: #fff; background: rgba(255,255,255,0.18); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; font-size: 18px; cursor: pointer;'
+        }, ['×']);
+
+        var head = hub.el('div', {
+            style: 'background: #d97706; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('h3', { style: 'margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;' }, ['Xuất nguyên liệu (Chế biến bắp nước)']),
+                hub.el('small', { style: 'font-size: 0.82rem; color: #fef3c7; display: block; margin-top: 2px;' }, ['Xuất nguyên liệu từ kho để chế biến bắp nước thành phẩm bán tại quầy'])
+            ]),
+            closeBtn
+        ]);
+
+        var body = hub.el('div', { style: 'padding: 18px 20px; background: #fff; overflow-y: auto; flex: 1;' });
+
+        // Cảnh báo thân thiện
+        body.appendChild(hub.el('div', {
+            style: 'background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 0.86rem; color: #9a3412; font-weight: 500;'
+        }, ['Lưu ý: Hệ thống sẽ tự động trừ nguyên liệu trong kho và tăng số lượng thành phẩm tương ứng.']));
+
+        body.appendChild(hub.el('div', { style: 'margin-bottom: 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; font-size: 0.88rem; color: #475569;' }, [
+            'Chi nhánh: ', hub.el('strong', { style: 'color: #0f172a;' }, [branchName || ('Chi nhánh #' + branchId)])
+        ]));
+
+        var loadingEl = hub.el('p', { style: 'text-align: center; color: #64748b; padding: 20px;' }, ['Đang tải dữ liệu công thức và kho nguyên liệu…']);
+        body.appendChild(loadingEl);
+
+        panel.appendChild(head);
+        panel.appendChild(body);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        function closeModal() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        closeBtn.addEventListener('click', closeModal);
+        backdrop.addEventListener('click', closeModal);
+
+        var targetBranchId = branchId || 1;
+        Promise.all([
+            hub.api('/inventory?action=recipes&branchId=' + targetBranchId),
+            hub.api('/inventory?type=material&branchId=' + targetBranchId)
+        ]).then(function (results) {
+            var recipeList = Array.isArray(results[0]) ? results[0] : (results[0] && Array.isArray(results[0].items) ? results[0].items : []);
+            var materialsStock = Array.isArray(results[1]) ? results[1] : (results[1] && Array.isArray(results[1].items) ? results[1].items : []);
+            loadingEl.remove();
+
+            var formContainer = hub.el('div');
+            body.appendChild(formContainer);
+
+            // Group recipes by Product
+            var productMap = {};
+            recipeList.forEach(function (r) {
+                if (!r) return;
+                var pId = r.productId || r.product_id;
+                var pName = r.productName || r.product_name || ('Sản phẩm #' + pId);
+                if (!pId) return;
+                if (!productMap[pId]) {
+                    productMap[pId] = { id: pId, name: pName, items: [] };
+                }
+                productMap[pId].items.push(r);
+            });
+            var productList = Object.values(productMap);
+
+            renderRecipeMode();
+
+            // 1. Chế độ Sản xuất theo recipe
+            function renderRecipeMode() {
+                if (!productList.length) {
+                    formContainer.appendChild(hub.el('p', { style: 'color: #ef4444; text-align: center;' }, ['Chưa có công thức sản phẩm nào được cấu hình trong hệ thống.']));
+                    return;
+                }
+
+                var pGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+                pGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+                    'Sản phẩm cần sản xuất ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+                ]));
+                var pSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+                pSelect.appendChild(hub.el('option', { value: '' }, ['-- Chọn mặt hàng bắp nước sản xuất --']));
+                productList.forEach(function (p) {
+                    pSelect.appendChild(hub.el('option', { value: String(p.id) }, [p.name]));
+                });
+                pGroup.appendChild(pSelect);
+                formContainer.appendChild(pGroup);
+
+                var qGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+                qGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+                    'Số lượng sản xuất (phần) ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+                ]));
+                var qInput = hub.el('input', {
+                    type: 'number',
+                    min: '1',
+                    value: '10',
+                    placeholder: 'Nhập số lượng thành phẩm…',
+                    style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem;'
+                });
+                qGroup.appendChild(qInput);
+                formContainer.appendChild(qGroup);
+
+                var previewTitle = hub.el('h5', { style: 'margin: 16px 0 8px; font-size: 0.92rem; font-weight: 700; color: #1e293b;' }, ['Định mức nguyên liệu cần dùng:']);
+                var previewWrap = hub.el('div', { style: 'border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 12px;' });
+                var alertBanner = hub.el('div', { style: 'display: none; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 0.88rem; line-height: 1.45;' });
+                formContainer.appendChild(previewTitle);
+                formContainer.appendChild(previewWrap);
+                formContainer.appendChild(alertBanner);
+
+                var noteGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+                noteGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, ['Ghi chú']));
+                var noteInput = hub.el('input', {
+                    type: 'text',
+                    placeholder: 'Ví dụ: Xuất kho chế biến bắp phục vụ ca sáng…',
+                    style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem;'
+                });
+                noteGroup.appendChild(noteInput);
+                formContainer.appendChild(noteGroup);
+
+                var cancelBtn = hub.el('button', {
+                    type: 'button',
+                    style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #e2e8f0; color: #334155; font-weight: 600; cursor: pointer;'
+                }, ['Hủy']);
+                var confirmBtn = hub.el('button', {
+                    type: 'button',
+                    style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: none; background: #d97706; color: #ffffff; font-weight: 600; cursor: pointer;'
+                }, ['Xác nhận xuất kho chế biến']);
+
+                var footer = hub.el('div', { style: 'display: flex; gap: 12px; margin-top: 18px;' }, [cancelBtn, confirmBtn]);
+                formContainer.appendChild(footer);
+                cancelBtn.addEventListener('click', closeModal);
+
+                var isAllSufficient = true;
+                var currentMissingNames = [];
+
+                function updatePreview() {
+                    var pId = pSelect.value;
+                    var qty = parseInt(qInput.value, 10);
+                    if (!pId || !productMap[pId] || isNaN(qty) || qty <= 0) {
+                        previewWrap.replaceChildren(hub.el('div', { style: 'padding: 16px; text-align: center; color: #94a3b8; font-size: 0.88rem;' }, ['Vui lòng chọn sản phẩm và nhập số lượng để kiểm tra tồn kho.']));
+                        alertBanner.style.display = 'none';
+                        confirmBtn.style.background = '#94a3b8';
+                        return;
+                    }
+
+                    var selectedP = productMap[pId];
+                    if (!selectedP) return;
+
+                    var table = hub.el('table', { class: 'ws-table', style: 'margin: 0; width: 100%; font-size: 0.86rem;' });
+                    var thead = hub.el('thead', {}, [
+                        hub.el('tr', {}, [
+                            hub.el('th', {}, ['Nguyên liệu']),
+                            hub.el('th', { style: 'text-align: right;' }, ['Định mức / phần']),
+                            hub.el('th', { style: 'text-align: right;' }, ['Tổng cần']),
+                            hub.el('th', { style: 'text-align: right;' }, ['Tồn kho']),
+                            hub.el('th', { style: 'text-align: center;' }, ['Trạng thái'])
+                        ])
+                    ]);
+                    var tbody = hub.el('tbody');
+                    isAllSufficient = true;
+                    currentMissingNames = [];
+
+                    selectedP.items.forEach(function (item) {
+                        var qReq = item.quantityRequired != null ? item.quantityRequired : (item.quantity_required != null ? item.quantity_required : 0);
+                        var mName = item.materialName || item.material_name || ('Nguyên liệu #' + (item.materialId || item.material_id));
+                        var mUnit = item.unit || '';
+                        var matId = item.materialId || item.material_id;
+                        var needed = Math.round(qReq * qty * 100) / 100;
+                        var matStockObj = materialsStock.find(function (m) { return (m.materialId || m.material_id) === matId; });
+                        var currentStock = matStockObj ? (matStockObj.qty != null ? matStockObj.qty : (matStockObj.stock_quantity != null ? matStockObj.stock_quantity : 0)) : 0;
+                        var isEnough = currentStock >= needed;
+                        if (!isEnough) {
+                            isAllSufficient = false;
+                            currentMissingNames.push(mName);
+                        }
+
+                        var stPill = isEnough
+                            ? hub.el('span', { class: 'ws-badge ws-badge-green' }, ['Đủ'])
+                            : hub.el('span', { class: 'ws-badge ws-badge-red' }, ['Thiếu']);
+
+                        tbody.appendChild(hub.el('tr', {}, [
+                            hub.el('td', { style: 'font-weight: 600;' }, [mName]),
+                            hub.el('td', { style: 'text-align: right;' }, [qReq + ' ' + mUnit]),
+                            hub.el('td', { style: 'text-align: right; font-weight: 700; color: #d97706;' }, [needed + ' ' + mUnit]),
+                            hub.el('td', { style: 'text-align: right;' }, [currentStock + ' ' + mUnit]),
+                            hub.el('td', { style: 'text-align: center;' }, [stPill])
+                        ]));
+                    });
+
+                    table.appendChild(thead);
+                    table.appendChild(tbody);
+                    previewWrap.replaceChildren(table);
+
+                    if (!isAllSufficient) {
+                        alertBanner.style.display = 'block';
+                        alertBanner.style.background = '#fef2f2';
+                        alertBanner.style.border = '1px solid #fecaca';
+                        alertBanner.style.color = '#991b1b';
+                        alertBanner.innerHTML = '<strong>Chưa đủ nguyên liệu:</strong> Kho hiện đang thiếu: <strong>' + currentMissingNames.join(', ') + '</strong>.<br>Vui lòng đóng cửa sổ này và bấm <strong>Nhập NL</strong> để bổ sung trước khi chế biến.';
+                        confirmBtn.style.background = '#94a3b8';
+                        confirmBtn.title = 'Bấm để xem chi tiết';
+                    } else {
+                        alertBanner.style.display = 'block';
+                        alertBanner.style.background = '#f0fdf4';
+                        alertBanner.style.border = '1px solid #bbf7d0';
+                        alertBanner.style.color = '#166534';
+                        alertBanner.innerHTML = '<strong>Đủ nguyên liệu:</strong> Sẵn sàng chế biến ' + qty + ' phần thành phẩm.';
+                        confirmBtn.style.background = '#d97706';
+                        confirmBtn.title = '';
+                    }
+                }
+
+                pSelect.addEventListener('change', updatePreview);
+                qInput.addEventListener('input', updatePreview);
+                updatePreview();
+
+                confirmBtn.addEventListener('click', function () {
+                    clearFieldError(pSelect);
+                    clearFieldError(qInput);
+
+                    var hasError = false;
+                    var firstErrField = null;
+
+                    var pId = pSelect.value;
+                    if (!pId) {
+                        setFieldError(pSelect, 'Vui lòng chọn sản phẩm cần chế biến.');
+                        hasError = true;
+                        if (!firstErrField) firstErrField = pSelect;
+                    }
+
+                    var qtyRaw = (qInput.value || '').trim();
+                    var qty = parseInt(qtyRaw, 10);
+                    if (!qtyRaw) {
+                        setFieldError(qInput, 'Vui lòng nhập số lượng.');
+                        hasError = true;
+                        if (!firstErrField) firstErrField = qInput;
+                    } else if (isNaN(qty) || qty <= 0) {
+                        setFieldError(qInput, 'Số lượng chế biến phải lớn hơn 0.');
+                        hasError = true;
+                        if (!firstErrField) firstErrField = qInput;
+                    } else if (!isAllSufficient) {
+                        setFieldError(qInput, 'Không đủ nguyên liệu để chế biến! Đang thiếu: ' + currentMissingNames.join(', ') + '. Vui lòng nhập thêm nguyên liệu vào kho trước.');
+                        hasError = true;
+                        if (!firstErrField) firstErrField = qInput;
+                    }
+
+                    if (hasError) {
+                        if (firstErrField) firstErrField.focus();
+                        return;
+                    }
+
+                    confirmBtn.disabled = true;
+                    confirmBtn.textContent = 'Đang xử lý…';
+
+                    hub.api('/inventory', {
+                        method: 'POST',
+                        body: {
+                            action: 'produce',
+                            branchId: targetBranchId,
+                            productId: pId,
+                            productQty: qty,
+                            note: (noteInput.value || '').trim()
+                        }
+                    }).then(function (res) {
+                        closeModal();
+                        hub.notify(res.message || 'Xuất nguyên liệu chế biến thành công! Đã trừ kho nguyên liệu và cộng kho bắp nước.', 'ok');
+                        if (onSuccess) onSuccess();
+                    }).catch(function (err) {
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = 'Xác nhận xuất kho chế biến';
+                        notifyError(err);
+                    });
+                });
+            }
+
+            // 2. Chế độ Xuất hủy / Điều chỉnh thủ công
+            function renderManualMode() {
+                var matGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+                matGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+                    'Nguyên liệu cần xuất ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+                ]));
+                var matSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+                matSelect.appendChild(hub.el('option', { value: '' }, ['-- Chọn nguyên liệu cần xuất --']));
+                materialsStock.forEach(function (m) {
+                    var mId = m.materialId || m.id;
+                    var q = m.qty != null ? m.qty : 0;
+                    var u = m.unit || '';
+                    matSelect.appendChild(hub.el('option', { value: String(mId) }, ['[' + (m.code || 'RM') + '] ' + m.name + ' (Tồn: ' + q + ' ' + u + ')']));
+                });
+                matGroup.appendChild(matSelect);
+                formContainer.appendChild(matGroup);
+
+                var curStockDisplay = hub.el('div', { style: 'margin-bottom: 14px; font-size: 0.88rem; color: #475569;' }, [
+                    'Tồn kho hiện tại: ', hub.el('strong', { id: 'manualStockVal', style: 'color: #0f172a;' }, ['—'])
+                ]);
+                formContainer.appendChild(curStockDisplay);
+
+                var qGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+                qGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+                    'Số lượng xuất ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+                ]));
+                var qInput = hub.el('input', {
+                    type: 'number',
+                    step: 'any',
+                    min: '0.01',
+                    placeholder: 'Nhập số lượng cần xuất giảm…',
+                    style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem;'
+                });
+                qGroup.appendChild(qInput);
+                formContainer.appendChild(qGroup);
+
+                var rGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+                rGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+                    'Lý do xuất ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+                ]));
+                var rSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+                [
+                    { value: '', label: '-- Chọn lý do xuất --' },
+                    { value: 'HU_HONG', label: 'Hư hỏng / Rách vỡ bao bì' },
+                    { value: 'HET_HAN', label: 'Hết hạn sử dụng' },
+                    { value: 'MAT_DO_KHACH', label: 'Thất thoát / Sự cố phục vụ' },
+                    { value: 'KIEM_KE_THIEU', label: 'Hao hụt kiểm kê' },
+                    { value: 'OTHER', label: 'Lý do khác' }
+                ].forEach(function (opt) {
+                    rSelect.appendChild(hub.el('option', { value: opt.value }, [opt.label]));
+                });
+                rGroup.appendChild(rSelect);
+                formContainer.appendChild(rGroup);
+
+                var noteGroup = hub.el('div', { style: 'margin-bottom: 14px;' });
+                noteGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, ['Ghi chú']));
+                var noteInput = hub.el('input', {
+                    type: 'text',
+                    placeholder: 'Nhập ghi chú chi tiết…',
+                    style: 'width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem;'
+                });
+                noteGroup.appendChild(noteInput);
+                formContainer.appendChild(noteGroup);
+
+                var cancelBtn = hub.el('button', {
+                    type: 'button',
+                    style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #e2e8f0; color: #334155; font-weight: 600; cursor: pointer;'
+                }, ['Hủy']);
+                var confirmBtn = hub.el('button', {
+                    type: 'button',
+                    style: 'flex: 1; padding: 10px 16px; border-radius: 8px; border: none; background: #dc2626; color: #ffffff; font-weight: 600; cursor: pointer;'
+                }, ['Xác nhận Xuất kho']);
+
+                var footer = hub.el('div', { style: 'display: flex; gap: 12px; margin-top: 18px;' }, [cancelBtn, confirmBtn]);
+                formContainer.appendChild(footer);
+                cancelBtn.addEventListener('click', closeModal);
+
+                matSelect.addEventListener('change', function () {
+                    var selectedMat = materialsStock.find(function (m) { return String(m.materialId || m.id) === matSelect.value; });
+                    var el = document.getElementById('manualStockVal');
+                    if (el) {
+                        el.textContent = selectedMat ? (selectedMat.qty + ' ' + (selectedMat.unit || '')) : '—';
+                    }
+                });
+
+                confirmBtn.addEventListener('click', function () {
+                    clearFieldError(matSelect);
+                    clearFieldError(qInput);
+                    clearFieldError(rSelect);
+
+                    var hasError = false;
+                    var firstErrField = null;
+
+                    var mId = matSelect.value;
+                    var qtyRaw = (qInput.value || '').trim();
+                    var qty = parseFloat(qtyRaw);
+                    var reason = rSelect.value;
+
+                    if (!mId) {
+                        setFieldError(matSelect, 'Vui lòng chọn nguyên liệu cần xuất.');
+                        hasError = true;
+                        if (!firstErrField) firstErrField = matSelect;
+                    }
+
+                    var selectedMat = materialsStock.find(function (m) { return String(m.materialId || m.id) === mId; });
+                    var curQ = selectedMat ? (selectedMat.qty || 0) : 0;
+
+                    if (!qtyRaw) {
+                        setFieldError(qInput, 'Vui lòng nhập số lượng.');
+                        hasError = true;
+                        if (!firstErrField) firstErrField = qInput;
+                    } else if (isNaN(qty) || qty <= 0) {
+                        setFieldError(qInput, 'Số lượng xuất phải lớn hơn 0.');
+                        hasError = true;
+                        if (!firstErrField) firstErrField = qInput;
+                    } else if (mId && qty > curQ) {
+                        setFieldError(qInput, 'Số lượng xuất (' + qty + ') vượt quá tồn kho hiện tại (' + curQ + ').');
+                        hasError = true;
+                        if (!firstErrField) firstErrField = qInput;
+                    }
+
+                    if (!reason) {
+                        setFieldError(rSelect, 'Vui lòng chọn lý do xuất.');
+                        hasError = true;
+                        if (!firstErrField) firstErrField = rSelect;
+                    }
+
+                    if (hasError) {
+                        if (firstErrField) firstErrField.focus();
+                        return;
+                    }
+
+                    confirmBtn.disabled = true;
+                    confirmBtn.textContent = 'Đang xử lý…';
+
+                    hub.api('/inventory', {
+                        method: 'POST',
+                        body: {
+                            action: 'adjust',
+                            type: 'material',
+                            branchId: targetBranchId,
+                            materialId: mId,
+                            quantity: -qty,
+                            reason: reason,
+                            note: (noteInput.value || '').trim()
+                        }
+                    }).then(function () {
+                        closeModal();
+                        hub.notify('Xuất kho nguyên liệu thành công!', 'ok');
+                        if (onSuccess) onSuccess();
+                    }).catch(function (err) {
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = 'Xác nhận Xuất kho';
+                        notifyError(err);
+                    });
+                });
+            }
+
+            renderMode();
+        }).catch(function (err) {
+            loadingEl.textContent = 'Lỗi tải dữ liệu: ' + (err.message || err);
+            loadingEl.style.color = '#ef4444';
+        });
+    }
+
+    // Modal Xem chi tiết công thức (M-X1 detail)
+    function showRecipeDetailModal(recipeGroup) {
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            style: 'max-width: 650px; width: 100%; border-radius: 12px; overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; padding: 0; box-shadow: 0 20px 40px rgba(0,0,0,0.25);'
+        });
+
+        var closeBtn = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng',
+            style: 'color: #fff; background: rgba(255,255,255,0.18); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; font-size: 18px; cursor: pointer;'
+        }, ['×']);
+
+        var head = hub.el('div', {
+            style: 'background: #0284c7; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('h3', { style: 'margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;' }, ['Chi tiết công thức: ' + recipeGroup.name]),
+                hub.el('small', { style: 'font-size: 0.82rem; color: #e0f2fe; display: block; margin-top: 2px;' }, ['Định mức nguyên liệu tiêu hao / 1 phần thành phẩm'])
+            ]),
+            closeBtn
+        ]);
+
+        var body = hub.el('div', { style: 'padding: 18px 20px; background: #fff; overflow-y: auto; flex: 1;' });
+
+        var dType = (recipeGroup.type || '').toUpperCase();
+        var dTypeLabel = 'Bắp (POPCORN)';
+        if (dType.indexOf('DRINK') !== -1 || dType.indexOf('NƯỚC') !== -1) {
+            dTypeLabel = 'Nước (DRINK)';
+        } else if (dType.indexOf('COMBO') !== -1) {
+            dTypeLabel = 'Combo (COMBO)';
+        }
+
+        var infoCard = hub.el('div', {
+            style: 'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('div', { style: 'font-size: 0.82rem; color: #64748b; font-weight: 600;' }, ['NHÓM SẢN PHẨM']),
+                hub.el('div', { style: 'font-weight: 700; color: #0f172a; margin-top: 2px;' }, [dTypeLabel])
+            ]),
+            hub.el('div', {}, [
+                hub.el('div', { style: 'font-size: 0.82rem; color: #64748b; font-weight: 600;' }, ['SỐ NGUYÊN LIỆU']),
+                hub.el('div', { style: 'font-weight: 700; color: #0284c7; margin-top: 2px;' }, [recipeGroup.items.length + ' nguyên liệu'])
+            ]),
+            hub.el('div', {}, [
+                hub.el('div', { style: 'font-size: 0.82rem; color: #64748b; font-weight: 600;' }, ['TRẠNG THÁI']),
+                hub.el('span', { class: 'ws-badge ws-badge-green', style: 'margin-top: 2px;' }, ['Đang áp dụng'])
+            ])
+        ]);
+        body.appendChild(infoCard);
+
+        var tableWrap = hub.el('div', { style: 'border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;' });
+        var table = hub.el('table', { class: 'ws-table', style: 'margin: 0; width: 100%;' });
+        var thead = hub.el('thead', {}, [
+            hub.el('tr', {}, [
+                hub.el('th', { style: 'width: 40px; text-align: center;' }, ['#']),
+                hub.el('th', {}, ['Nguyên liệu']),
+                hub.el('th', {}, ['Mã NL']),
+                hub.el('th', { style: 'text-align: right;' }, ['Định mức / phần']),
+                hub.el('th', { style: 'text-align: right;' }, ['% Hao hụt']),
+                hub.el('th', {}, ['Ghi chú'])
+            ])
+        ]);
+        var tbody = hub.el('tbody');
+
+        recipeGroup.items.forEach(function (it, idx) {
+            var q = it.quantityRequired != null ? it.quantityRequired : (it.quantity_required != null ? it.quantity_required : it.dosage);
+            var loss = it.lossRate != null ? it.lossRate : (it.loss_rate != null ? it.loss_rate : 0);
+            tbody.appendChild(hub.el('tr', {}, [
+                hub.el('td', { style: 'text-align: center; color: #64748b;' }, [String(idx + 1)]),
+                hub.el('td', { style: 'font-weight: 600; color: #0f172a;' }, [it.materialName || it.material_name || ('NL #' + it.materialId)]),
+                hub.el('td', { style: 'color: #64748b;' }, [it.materialCode || it.material_code || '—']),
+                hub.el('td', { style: 'text-align: right; font-weight: 700; color: #0284c7;' }, [q + ' ' + (it.unit || '')]),
+                hub.el('td', { style: 'text-align: right;' }, [loss > 0 ? (loss + '%') : '0%']),
+                hub.el('td', { style: 'font-size: 0.84rem; color: #64748b;' }, [it.note || '—'])
+            ]));
+        });
+
+        table.appendChild(thead);
+        table.appendChild(tbody);
+        tableWrap.appendChild(table);
+        body.appendChild(tableWrap);
+
+        var footWrap = hub.el('div', {
+            style: 'padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; flex-shrink: 0;'
+        });
+        var closeFoot = hub.el('button', { class: 'ws-btn secondary', type: 'button', style: 'padding: 6px 16px; font-weight: 600;' }, ['Đóng']);
+        footWrap.appendChild(closeFoot);
+
+        panel.appendChild(head);
+        panel.appendChild(body);
+        panel.appendChild(footWrap);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        backdrop.addEventListener('click', close);
+        closeBtn.addEventListener('click', close);
+        closeFoot.addEventListener('click', close);
+    }
+
+    // Modal Editor Công thức (M-X2)
+    function showRecipeEditorModal(productGroup, allProducts, allMaterials, targetBranchId, onSaved, existingRecipeGroups) {
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            style: 'max-width: 720px; width: 100%; border-radius: 12px; overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; padding: 0; box-shadow: 0 20px 40px rgba(0,0,0,0.25);'
+        });
+
+        var closeBtn = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng',
+            style: 'color: #fff; background: rgba(255,255,255,0.18); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; font-size: 18px; cursor: pointer;'
+        }, ['×']);
+
+        var isEdit = !!productGroup;
+        var head = hub.el('div', {
+            style: 'background: #1e293b; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;'
+        }, [
+            hub.el('div', {}, [
+                hub.el('h3', { style: 'margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;' }, [
+                    isEdit ? ('Cập nhật công thức: ' + productGroup.name) : 'Thêm công thức chế biến mới'
+                ]),
+                hub.el('small', { style: 'font-size: 0.82rem; color: #94a3b8; display: block; margin-top: 2px;' }, [
+                    'Định mức nguyên liệu tiêu hao cho 1 phần thành phẩm'
+                ])
+            ]),
+            closeBtn
+        ]);
+
+        var body = hub.el('div', { style: 'padding: 18px 20px; background: #fff; overflow-y: auto; flex: 1;' });
+
+        // Chọn sản phẩm (chỉ lọc món CHƯA có công thức khi tạo mới)
+        var selectedProductId = productGroup ? productGroup.id : null;
+        if (!isEdit) {
+            var existingIds = (existingRecipeGroups || []).map(function (g) { return String(g.id); });
+            var unassignedProducts = (allProducts || []).filter(function (p) {
+                var pId = String(p.productId || p.id);
+                return !existingIds.includes(pId);
+            });
+
+            var pGroup = hub.el('div', { style: 'margin-bottom: 16px;' });
+            pGroup.appendChild(hub.el('label', { style: 'display: block; font-size: 0.86rem; font-weight: 600; color: #334155; margin-bottom: 6px;' }, [
+                'Chọn sản phẩm cần thiết lập công thức ', hub.el('span', { style: 'color: #ef4444;' }, ['*'])
+            ]));
+
+            if (!unassignedProducts.length) {
+                pGroup.appendChild(hub.el('div', {
+                    style: 'background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 12px 14px; font-size: 0.88rem; color: #64748b; line-height: 1.5;'
+                }, ['Tất cả sản phẩm bắp nước trong menu hiện tại đều đã có công thức. Để cập nhật định mức nguyên liệu cho món đã có, vui lòng chọn nút "Sửa" ở danh sách bên ngoài.']));
+            } else {
+                var pSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; box-sizing: border-box; height: 38px;' });
+                pSelect.appendChild(hub.el('option', { value: '' }, ['-- Chọn sản phẩm chưa có công thức (' + unassignedProducts.length + ' món) --']));
+                unassignedProducts.forEach(function (p) {
+                    pSelect.appendChild(hub.el('option', { value: String(p.productId || p.id) }, [p.name + ' (Chưa có công thức)']));
+                });
+                pGroup.appendChild(pSelect);
+                pGroup.appendChild(hub.el('small', { style: 'display: block; color: #64748b; font-size: 0.8rem; margin-top: 5px;' }, [
+                    '* Danh sách chỉ hiển thị các món chưa cài đặt công thức. Món đã có công thức vui lòng bấm "Sửa" ở bảng ngoài.'
+                ]));
+                pSelect.addEventListener('change', function () {
+                    selectedProductId = pSelect.value;
+                });
+            }
+            body.appendChild(pGroup);
+        }
+
+        // Bảng danh sách nguyên liệu
+        var tableSectionHeader = hub.el('div', {
+            style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;'
+        }, [
+            hub.el('h5', { style: 'margin: 0; font-size: 0.95rem; font-weight: 700; color: #1e293b;' }, ['Định mức các nguyên liệu thành phần:']),
+            hub.el('button', {
+                class: 'ws-btn primary',
+                type: 'button',
+                id: 'btnAddRecipeRow',
+                style: 'padding: 4px 10px; font-size: 0.82rem; font-weight: 600;'
+            }, ['+ Thêm nguyên liệu'])
+        ]);
+        body.appendChild(tableSectionHeader);
+
+        var tableWrap = hub.el('div', { style: 'border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 16px;' });
+        var table = hub.el('table', { class: 'ws-table', style: 'margin: 0; width: 100%; font-size: 0.86rem;' });
+        var thead = hub.el('thead', {}, [
+            hub.el('tr', {}, [
+                hub.el('th', { style: 'width: 35%;' }, ['Nguyên liệu']),
+                hub.el('th', { style: 'width: 15%;' }, ['ĐVT']),
+                hub.el('th', { style: 'width: 20%;' }, ['Định mức / phần']),
+                hub.el('th', { style: 'width: 15%;' }, ['% Hao hụt']),
+                hub.el('th', { style: 'width: 15%; text-align: center;' }, ['Xóa'])
+            ])
+        ]);
+        var tbody = hub.el('tbody');
+        table.appendChild(thead);
+        table.appendChild(tbody);
+        tableWrap.appendChild(table);
+        body.appendChild(tableWrap);
+
+        var recipeRows = [];
+
+        function addRow(existingItem) {
+            var tr = hub.el('tr');
+            var mSelect = hub.el('select', { class: 'ws-select', style: 'width: 100%; height: 32px; font-size: 0.84rem;' });
+            mSelect.appendChild(hub.el('option', { value: '' }, ['-- Chọn NL --']));
+            (allMaterials || []).forEach(function (m) {
+                var mId = m.materialId || m.id;
+                var opt = hub.el('option', { value: String(mId) }, [m.name + ' (' + (m.unit || '') + ')']);
+                if (existingItem && String(mId) === String(existingItem.materialId || existingItem.material_id)) {
+                    opt.selected = true;
+                }
+                mSelect.appendChild(opt);
+            });
+
+            var unitCell = hub.el('td', { style: 'color: #64748b; font-weight: 600;' }, [
+                existingItem ? (existingItem.unit || '—') : '—'
+            ]);
+
+            mSelect.addEventListener('change', function () {
+                var found = (allMaterials || []).find(function (m) { return String(m.materialId || m.id) === mSelect.value; });
+                unitCell.textContent = found ? (found.unit || '—') : '—';
+            });
+
+            var initDosage = existingItem ? (existingItem.quantityRequired != null ? existingItem.quantityRequired : (existingItem.quantity_required != null ? existingItem.quantity_required : existingItem.dosage)) : '';
+            var dosageInput = hub.el('input', {
+                type: 'number',
+                step: 'any',
+                min: '0.001',
+                value: initDosage != null ? String(initDosage) : '',
+                placeholder: 'vd: 0.15',
+                style: 'width: 100%; box-sizing: border-box; height: 32px; font-size: 0.84rem; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px;'
+            });
+
+            var initLoss = existingItem ? (existingItem.lossRate != null ? existingItem.lossRate : (existingItem.loss_rate != null ? existingItem.loss_rate : 0)) : 0;
+            var lossInput = hub.el('input', {
+                type: 'number',
+                step: 'any',
+                min: '0',
+                value: String(initLoss),
+                placeholder: '0',
+                style: 'width: 100%; box-sizing: border-box; height: 32px; font-size: 0.84rem; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px;'
+            });
+
+            var delBtn = hub.el('button', {
+                type: 'button',
+                class: 'ws-btn danger',
+                style: 'padding: 3px 8px; font-size: 0.78rem; border-radius: 4px;'
+            }, ['Xóa']);
+
+            var rowObj = {
+                tr: tr,
+                mSelect: mSelect,
+                dosageInput: dosageInput,
+                lossInput: lossInput
+            };
+            recipeRows.push(rowObj);
+
+            delBtn.addEventListener('click', function () {
+                var idx = recipeRows.indexOf(rowObj);
+                if (idx !== -1) recipeRows.splice(idx, 1);
+                tr.remove();
+            });
+
+            tr.appendChild(hub.el('td', {}, [mSelect]));
+            tr.appendChild(unitCell);
+            tr.appendChild(hub.el('td', {}, [dosageInput]));
+            tr.appendChild(hub.el('td', {}, [lossInput]));
+            tr.appendChild(hub.el('td', { style: 'text-align: center;' }, [delBtn]));
+            tbody.appendChild(tr);
+        }
+
+        // Nạp các dòng cũ nếu đang sửa
+        if (productGroup && productGroup.items && productGroup.items.length) {
+            productGroup.items.forEach(function (item) {
+                addRow(item);
+            });
+        } else {
+            // Mặc định tạo 1 dòng trống
+            addRow(null);
+        }
+
+        tableSectionHeader.querySelector('#btnAddRecipeRow').addEventListener('click', function () {
+            addRow(null);
+        });
+
+        // Footer buttons
+        var cancelBtn = hub.el('button', {
+            type: 'button',
+            class: 'ws-btn secondary',
+            style: 'padding: 8px 18px; font-weight: 600;'
+        }, ['Hủy']);
+        var saveBtn = hub.el('button', {
+            type: 'button',
+            class: 'ws-btn primary',
+            style: 'padding: 8px 18px; font-weight: 600; background: #16a34a; border-color: #16a34a;'
+        }, ['Lưu công thức']);
+
+        var footWrap = hub.el('div', {
+            style: 'padding: 14px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0;'
+        }, [cancelBtn, saveBtn]);
+
+        panel.appendChild(head);
+        panel.appendChild(body);
+        panel.appendChild(footWrap);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        backdrop.addEventListener('click', close);
+        closeBtn.addEventListener('click', close);
+        cancelBtn.addEventListener('click', close);
+
+        saveBtn.addEventListener('click', function () {
+            if (pSelect) clearFieldError(pSelect);
+            recipeRows.forEach(function (row) {
+                clearFieldError(row.mSelect);
+                clearFieldError(row.dosageInput);
+            });
+
+            var hasError = false;
+            var firstErrField = null;
+
+            if (!selectedProductId) {
+                if (pSelect) {
+                    setFieldError(pSelect, 'Vui lòng chọn sản phẩm thành phẩm.');
+                    hasError = true;
+                    if (!firstErrField) firstErrField = pSelect;
+                } else {
+                    hub.notify('Vui lòng chọn sản phẩm thành phẩm.', 'warn');
+                    hasError = true;
+                }
+            }
+            if (!recipeRows.length) {
+                hub.notify('Công thức phải có ít nhất 1 nguyên liệu thành phần.', 'warn');
+                hasError = true;
+            }
+
+            var itemsToSave = [];
+            for (var i = 0; i < recipeRows.length; i++) {
+                var r = recipeRows[i];
+                var mId = r.mSelect.value;
+                var dosRaw = (r.dosageInput.value || '').trim();
+                var dos = parseFloat(dosRaw);
+                var loss = parseFloat(r.lossInput.value) || 0;
+                if (!mId) {
+                    setFieldError(r.mSelect, 'Dòng #' + (i + 1) + ': Vui lòng chọn nguyên liệu.');
+                    hasError = true;
+                    if (!firstErrField) firstErrField = r.mSelect;
+                }
+                if (!dosRaw) {
+                    setFieldError(r.dosageInput, 'Dòng #' + (i + 1) + ': Vui lòng nhập định mức.');
+                    hasError = true;
+                    if (!firstErrField) firstErrField = r.dosageInput;
+                } else if (isNaN(dos) || dos <= 0) {
+                    setFieldError(r.dosageInput, 'Dòng #' + (i + 1) + ': Định mức tiêu hao phải lớn hơn 0.');
+                    hasError = true;
+                    if (!firstErrField) firstErrField = r.dosageInput;
+                }
+                if (mId && !isNaN(dos) && dos > 0) {
+                    var foundMat = (allMaterials || []).find(function (m) { return String(m.materialId || m.id) === mId; });
+                    itemsToSave.push({
+                        materialId: parseInt(mId, 10),
+                        dosage: dos,
+                        lossRate: loss,
+                        note: '',
+                        unit: foundMat ? (foundMat.unit || '') : ''
+                    });
+                }
+            }
+
+            if (hasError) {
+                if (firstErrField) firstErrField.focus();
+                return;
+            }
+
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Đang lưu…';
+
+            hub.api('/inventory', {
+                method: 'POST',
+                body: {
+                    action: 'save_recipe',
+                    productId: selectedProductId,
+                    items: JSON.stringify(itemsToSave)
+                }
+            }).then(function (res) {
+                close();
+                hub.notify(res.message || 'Đã lưu công thức thành công!', 'ok');
+                if (onSaved) onSaved();
+            }).catch(function (err) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Lưu công thức';
+                notifyError(err);
+            });
+        });
+    }
+
+    // M-X1. Danh sách công thức chế biến
+    function renderRecipeInventoryPage(targetRoot, branchId, branches, isStaff, onSwitchTab) {
+        if (!targetRoot) return;
+        hub.setWorkspaceHeader('Công Thức Chế Biến');
+
+        var page = hub.el('div', { class: 'ws-page' });
+
+        var header = hub.el('div', { class: 'ws-page-header', style: 'margin-bottom: 20px;' }, [
+            hub.el('h1', { class: 'ws-page-title' }, ['Công Thức Chế Biến']),
+            hub.el('p', { class: 'ws-page-subtitle' }, ['Quản lý định mức nguyên liệu tiêu hao cho các món bắp nước tại rạp.'])
+        ]);
+        page.appendChild(header);
+
+        var toolbar = hub.el('div', { class: 'ws-list-toolbar', style: 'margin-bottom: 16px;' });
+        var tbLeft = hub.el('div', { class: 'ws-list-toolbar-left', style: 'display: flex; gap: 10px; align-items: center; flex-wrap: wrap;' });
+
+        // Tìm kiếm
+        var searchWrap = hub.el('div', { class: 'ws-search' });
+        searchWrap.appendChild(hub.el('span', { 'aria-hidden': 'true', innerHTML: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>' }));
+        var searchInput = hub.el('input', {
+            type: 'search',
+            placeholder: 'Tìm theo tên sản phẩm…',
+            'aria-label': 'Tìm sản phẩm'
+        });
+        searchWrap.appendChild(searchInput);
+        tbLeft.appendChild(searchWrap);
+
+        // Lọc Nhóm sản phẩm
+        var groupSelect = hub.el('select', { class: 'ws-select', 'aria-label': 'Nhóm sản phẩm' });
+        [
+            { value: '', label: 'Tất cả nhóm' },
+            { value: 'POPCORN', label: 'Bắp (POPCORN)' },
+            { value: 'DRINK', label: 'Nước (DRINK)' },
+            { value: 'COMBO', label: 'Combo (COMBO)' }
+        ].forEach(function (g) {
+            groupSelect.appendChild(hub.el('option', { value: g.value }, [g.label]));
+        });
+        tbLeft.appendChild(groupSelect);
+        toolbar.appendChild(tbLeft);
+
+        var tbRight = hub.el('div', { class: 'ws-list-toolbar-right' });
+        if (!isStaff) {
+            var btnAddRecipe = hub.el('button', {
+                class: 'ws-btn primary',
+                type: 'button',
+                style: 'font-weight: 600;'
+            }, ['+ Thêm công thức']);
+            tbRight.appendChild(btnAddRecipe);
+        }
+        toolbar.appendChild(tbRight);
+        page.appendChild(toolbar);
+
+        var contentCard = hub.el('div', { class: 'ws-card', style: 'padding: 0; overflow: hidden; border-radius: 10px;' });
+        var tableRegion = hub.el('div');
+        contentCard.appendChild(tableRegion);
+        page.appendChild(contentCard);
+
+        targetRoot.replaceChildren(page);
+
+        var targetBranchId = branchId || (branches && branches[0] ? branches[0].id : 1);
+        var allProducts = [];
+        var allMaterials = [];
+        var groupedRecipes = [];
+
+        function loadRecipes() {
+            tableRegion.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [
+                hub.el('div', { class: 'ws-spinner' }),
+                hub.el('span', {}, ['Đang tải danh sách công thức chế biến…'])
+            ]));
+
+            Promise.all([
+                hub.api('/inventory?action=recipes&branchId=' + targetBranchId),
+                hub.api('/inventory?branchId=' + targetBranchId),
+                hub.api('/inventory?type=material&branchId=' + targetBranchId)
+            ]).then(function (results) {
+                var rawRecipes = Array.isArray(results[0]) ? results[0] : (results[0] && Array.isArray(results[0].items) ? results[0].items : []);
+                allProducts = Array.isArray(results[1]) ? results[1] : (results[1] && Array.isArray(results[1].items) ? results[1].items : []);
+                allMaterials = Array.isArray(results[2]) ? results[2] : (results[2] && Array.isArray(results[2].items) ? results[2].items : []);
+
+                // Nhóm theo sản phẩm
+                var productMap = {};
+                rawRecipes.forEach(function (r) {
+                    var pId = r.productId || r.product_id;
+                    if (!pId) return;
+                    if (!productMap[pId]) {
+                        var foundP = (allProducts || []).find(function (p) {
+                            return String(p.id || p.productId) === String(pId);
+                        });
+                        var pName = r.productName || r.product_name || (foundP ? (foundP.name || foundP.productName) : ('Sản phẩm #' + pId));
+                        var pType = (foundP && (foundP.type || foundP.productType || foundP.category)) || r.productType || r.category;
+                        if (!pType) {
+                            var nl = pName.toLowerCase();
+                            if (nl.indexOf('coca') !== -1 || nl.indexOf('pepsi') !== -1 || nl.indexOf('nước') !== -1 || nl.indexOf('trà') !== -1 || nl.indexOf('drink') !== -1) {
+                                pType = 'DRINK';
+                            } else if (nl.indexOf('combo') !== -1) {
+                                pType = 'COMBO';
+                            } else {
+                                pType = 'POPCORN';
+                            }
+                        }
+                        productMap[pId] = {
+                            id: pId,
+                            name: pName,
+                            type: pType,
+                            items: []
+                        };
+                    }
+                    productMap[pId].items.push(r);
+                });
+                groupedRecipes = Object.values(productMap);
+
+                applyFilters();
+            }).catch(function (err) {
+                tableRegion.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                    hub.el('h3', {}, ['Lỗi tải dữ liệu']),
+                    hub.el('p', {}, [err.message || 'Không thể tải danh sách công thức. Vui lòng thử lại.'])
+                ]));
+            });
+        }
+
+        if (!isStaff) {
+            btnAddRecipe.addEventListener('click', function () {
+                showRecipeEditorModal(null, allProducts, allMaterials, targetBranchId, loadRecipes, groupedRecipes);
+            });
+        }
+
+        function applyFilters() {
+            var search = (searchInput.value || '').trim().toLowerCase();
+            var searchNorm = search.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            var groupVal = groupSelect.value;
+
+            var filtered = groupedRecipes.filter(function (g) {
+                if (search) {
+                    var nameLower = (g.name || '').toLowerCase();
+                    var nameNorm = nameLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    if (nameLower.indexOf(search) === -1 && nameNorm.indexOf(searchNorm) === -1) return false;
+                }
+                if (groupVal) {
+                    var t = (g.type || '').toUpperCase();
+                    if (t.indexOf(groupVal.toUpperCase()) === -1) return false;
+                }
+                return true;
+            });
+
+            renderTable(filtered);
+        }
+
+        function renderTable(items) {
+            if (!items.length) {
+                tableRegion.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                    hub.el('h3', {}, ['Chưa có công thức']),
+                    hub.el('p', {}, ['Không tìm thấy công thức chế biến nào phù hợp.'])
+                ]));
+                return;
+            }
+
+            var table = hub.el('table', { class: 'ws-table', style: 'margin: 0; width: 100%;' });
+            var thead = hub.el('thead', {}, [
+                hub.el('tr', {}, [
+                    hub.el('th', {}, ['Sản phẩm']),
+                    hub.el('th', {}, ['Nhóm']),
+                    hub.el('th', {}, ['Số NL']),
+                    hub.el('th', {}, ['Thời gian SX']),
+                    hub.el('th', { style: 'text-align: center;' }, ['Trạng thái']),
+                    hub.el('th', { style: 'text-align: right; width: 160px;' }, ['Hành động'])
+                ])
+            ]);
+            var tbody = hub.el('tbody');
+
+            items.forEach(function (g) {
+                var btnView = hub.el('button', {
+                    class: 'ws-btn secondary',
+                    type: 'button',
+                    style: 'padding: 4px 10px; font-size: 0.82rem; margin-right: 6px;'
+                }, ['Xem']);
+                btnView.addEventListener('click', function () {
+                    showRecipeDetailModal(g);
+                });
+
+                var actionWrap = hub.el('td', { style: 'text-align: right; white-space: nowrap;' }, [btnView]);
+
+                if (!isStaff) {
+                    var btnEdit = hub.el('button', {
+                        class: 'ws-btn primary',
+                        type: 'button',
+                        style: 'padding: 4px 10px; font-size: 0.82rem;'
+                    }, ['Sửa']);
+                    btnEdit.addEventListener('click', function () {
+                        showRecipeEditorModal(g, allProducts, allMaterials, targetBranchId, loadRecipes, groupedRecipes);
+                    });
+                    actionWrap.appendChild(btnEdit);
+                }
+
+                var uType = (g.type || '').toUpperCase();
+                var badgeLabel = 'POPCORN';
+                var badgeStyle = 'background: #fef3c7; color: #92400e; border: 1px solid #fde68a; font-weight: 600; padding: 3px 8px; border-radius: 4px; font-size: 0.78rem;';
+                var prodTime = '2.5 phút';
+
+                if (uType.indexOf('DRINK') !== -1 || uType.indexOf('NƯỚC') !== -1) {
+                    badgeStyle = 'background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight: 600; padding: 3px 8px; border-radius: 4px; font-size: 0.78rem;';
+                    badgeLabel = 'DRINK';
+                    prodTime = '30 giây';
+                } else if (uType.indexOf('COMBO') !== -1) {
+                    badgeStyle = 'background: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff; font-weight: 600; padding: 3px 8px; border-radius: 4px; font-size: 0.78rem;';
+                    badgeLabel = 'COMBO';
+                    prodTime = '5 phút';
+                }
+
+                tbody.appendChild(hub.el('tr', {}, [
+                    hub.el('td', {}, [
+                        hub.el('strong', { style: 'color: #1d4ed8; font-size: 0.94rem;' }, [g.name]),
+                        hub.el('div', { style: 'font-size: 0.8rem; color: #64748b;' }, ['ID: ' + g.id])
+                    ]),
+                    hub.el('td', {}, [
+                        hub.el('span', { style: badgeStyle }, [badgeLabel])
+                    ]),
+                    hub.el('td', { style: 'font-weight: 600; color: #0f172a;' }, [g.items.length + ' nguyên liệu']),
+                    hub.el('td', { style: 'color: #475569; font-size: 0.88rem; font-weight: 500;' }, [prodTime]),
+                    hub.el('td', { style: 'text-align: center;' }, [
+                        hub.el('span', { class: 'ws-badge ws-badge-green' }, ['Đang áp dụng'])
+                    ]),
+                    actionWrap
+                ]));
+            });
+
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableRegion.replaceChildren(table);
+        }
+
+        searchInput.addEventListener('input', applyFilters);
+        groupSelect.addEventListener('change', applyFilters);
+
+        loadRecipes();
+    }
+
+    // ================================================================
+    //  PHẦN 3: BỘ ĐIỀU HƯỚNG TẬP TRUNG (ROUTER DISPATCHER)
+    // ================================================================
+
+    router.register('inventory', {
+        list: function () {
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
+            var isStaff = roleMeta === 'STAFF' || roleMeta === 'BRANCH_STAFF';
+            var viewRoot = document.getElementById('viewRoot');
+            if (!viewRoot) return;
+
+            // Hiển thị loading state ngay lập tức để người dùng không thấy trang trắng
+            viewRoot.replaceChildren(hub.el('div', { class: 'ws-list-loading', style: 'padding: 48px 24px; text-align: center;' }, [
+                hub.el('div', { class: 'ws-spinner' }),
+                hub.el('span', { style: 'display: block; margin-top: 12px; color: #64748b; font-weight: 500;' }, ['Đang tải dữ liệu kho hàng…'])
+            ]));
+
+            hub.api(branchListApiPath(roleMeta)).then(function (branches) {
+                var params = new URLSearchParams(window.location.search);
+                var activeTab = params.get('tab') === 'material' ? 'material' : (params.get('tab') === 'recipe' ? 'recipe' : 'product');
+                var branchId = params.get('branchId') || (branches && branches[0] ? branches[0].id : null);
+
+                function syncSidebarSubmenu(tab) {
+                    var acc = document.querySelector('.ws-menu-accordion');
+                    if (acc) {
+                        acc.classList.add('open');
+                        var toggle = acc.querySelector('.ws-menu-accordion-toggle');
+                        if (toggle) {
+                            toggle.classList.add('active');
+                            toggle.setAttribute('aria-expanded', 'true');
+                        }
+                    }
+                    document.querySelectorAll('.ws-menu-sub-link').forEach(function (sub) {
+                        if (sub.getAttribute('data-tab') === tab) {
+                            sub.classList.add('active');
+                        } else {
+                            sub.classList.remove('active');
+                        }
+                    });
+                }
+
+                function switchTab(newTab) {
+                    activeTab = newTab;
+                    var newUrl = window.location.pathname + '?module=inventory&tab=' + newTab + (branchId ? '&branchId=' + branchId : '');
+                    window.history.replaceState(null, '', newUrl);
+                    syncSidebarSubmenu(newTab);
+                    if (newTab === 'material') {
+                        renderMaterialInventoryPage(viewRoot, branchId, branches, isStaff, switchTab);
+                    } else if (newTab === 'recipe') {
+                        renderRecipeInventoryPage(viewRoot, branchId, branches, isStaff, switchTab);
+                    } else {
+                        renderProductInventoryPage(viewRoot, branchId, branches, isStaff, switchTab);
+                    }
+                }
+
+                window.CinemaHubSwitchInventoryTab = switchTab;
+                syncSidebarSubmenu(activeTab);
+
+                if (activeTab === 'material') {
+                    renderMaterialInventoryPage(viewRoot, branchId, branches, isStaff, switchTab);
+                } else if (activeTab === 'recipe') {
+                    renderRecipeInventoryPage(viewRoot, branchId, branches, isStaff, switchTab);
+                } else {
+                    renderProductInventoryPage(viewRoot, branchId, branches, isStaff, switchTab);
+                }
+            }).catch(function (err) {
+                notifyError(err);
+                viewRoot.replaceChildren(hub.el('div', { class: 'ws-empty', style: 'padding: 48px 24px; text-align: center;' }, [
+                    hub.el('h3', {}, ['Không thể tải dữ liệu kho hàng']),
+                    hub.el('p', { class: 'muted', style: 'margin: 8px 0 16px;' }, [(err && err.message) || 'Vui lòng kiểm tra lại kết nối mạng hoặc thử tải lại.']),
+                    hub.el('button', {
+                        class: 'ws-btn primary',
+                        type: 'button',
+                        onClick: function () {
+                            if (window.CinemaHubRouter) window.CinemaHubRouter.autoRoute();
+                        }
+                    }, ['Tải lại trang'])
+                ]));
+            });
+        },
+        create: function () {
+            var params = new URLSearchParams(window.location.search);
+            var branchId = params.get('branchId');
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
+            Promise.all([
+                hub.api(branchListApiPath(roleMeta)).catch(function () { return []; }),
+                branchId ? hub.api('/inventory?branchId=' + branchId).catch(function () { return []; }) : Promise.resolve([])
+            ]).then(function (results) {
+                var branches = results[0] || [];
+                var activeBranch = branchId || (branches[0] && branches[0].id);
+                var items = results[1] || [];
+                showProductRestockModal(activeBranch, items, function () {
+                    var branchSelect = document.querySelector('select[name="branchId"]');
+                    if (branchSelect) branchSelect.dispatchEvent(new Event('change'));
+                });
+            }).catch(notifyError);
+        },
+        edit: function (id) {
+            var params = new URLSearchParams(window.location.search);
+            var branchId = params.get('branchId');
+            var productId = params.get('productId') || id;
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
+            Promise.all([
+                hub.api(branchListApiPath(roleMeta)).catch(function () { return []; }),
+                branchId ? hub.api('/inventory?branchId=' + branchId).catch(function () { return []; }) : Promise.resolve([])
+            ]).then(function (results) {
+                var branches = results[0] || [];
+                var activeBranch = branchId || (branches[0] && branches[0].id);
+                var items = results[1] || [];
+                var selected = items.find(function (it) { return String(it.productId || it.id) === String(productId); });
+                showProductAdjustModal(activeBranch, selected || { productId: productId }, items, function () {
+                    var branchSelect = document.querySelector('select[name="branchId"]');
+                    if (branchSelect) branchSelect.dispatchEvent(new Event('change'));
+                });
+            }).catch(notifyError);
+        }
+    });
+
+
 })();
