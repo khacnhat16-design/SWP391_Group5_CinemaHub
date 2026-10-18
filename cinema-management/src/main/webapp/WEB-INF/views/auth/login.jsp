@@ -31,7 +31,7 @@
         </form>
 
         <div class="demo-hint">
-            Chưa có tài khoản? <a href="${ctx}/register">Đăng ký ngay</a> để quản lý vé đã đặt.
+            Chưa có tài khoản? <a href="${ctx}/register">Đăng ký ngay</a> để tích điểm và nhận ưu đãi.
             <br>
             <a href="${ctx}/forgot-password">Quên mật khẩu?</a>
         </div>

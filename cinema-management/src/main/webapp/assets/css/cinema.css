@@ -119,10 +119,6 @@ nav>a:not(.btn):hover{color:var(--red)}
 .movie-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:16px}
 .movie-card{min-width:0;background:var(--surface);border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,.04);transition:.25s}
 .movie-card:hover{transform:translateY(-6px);border-color:rgba(217,54,62,.55)}
-.movie-card-ended{opacity:.78}
-.movie-state-badge{position:absolute;top:9px;left:9px;font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.5px;padding:5px 8px;border-radius:5px;line-height:1}
-.movie-state-upcoming{background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;box-shadow:0 4px 12px rgba(29,78,216,.45)}
-.movie-state-ended{background:rgba(0,0,0,.78);color:#d3d3da}
 .poster{position:relative;aspect-ratio:2/3;overflow:hidden}
 .poster img{width:100%;height:100%;object-fit:cover;transition:.35s}
 .movie-card:hover img{transform:scale(1.08)}
@@ -208,25 +204,12 @@ footer{background:#08080a;border-top:1px solid var(--line);padding:26px 0;margin
 .seat.hold.vip,.seat.hold.couple{background:var(--warn);border-color:var(--warn)}
 .legend{display:flex;flex-wrap:wrap;gap:15px;margin-top:22px;font-size:.72rem;color:var(--muted)}
 .ticket-barcode{display:block;max-width:100%;height:auto;background:#fff;border-radius:4px;margin:6px 0}
-.ticket-barcode[hidden]{display:none}
 .ticket-code{font-weight:800}
 .ticket-success{margin-top:16px;padding:14px;background:#fff;border:1px solid var(--ok);border-radius:8px;color:var(--text-on-light);text-align:center}
 .ticket-success h3{margin:0 0 5px}
-.ticket-success-code{display:grid;justify-items:center;gap:3px;width:fit-content;max-width:100%;margin:14px auto 8px;padding:9px 16px;border:1px solid #f1c4c7;border-radius:8px;background:#fff6f6;color:var(--text-on-light)}
-.ticket-success-code small{color:var(--muted-on-light);font-size:.68rem;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
-.ticket-success-code strong,.ticket-result-code{overflow-wrap:anywhere;color:var(--red);font-size:1.12rem;font-weight:850;letter-spacing:.04em}
-.booking-payment-modal{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:18px}
-.booking-payment-backdrop{position:absolute;inset:0;background:rgba(5,5,8,.66);backdrop-filter:blur(2px)}
-.booking-payment-panel{position:relative;z-index:1;width:min(520px,100%);max-height:calc(100vh - 36px);overflow:auto;border:1px solid var(--card-line);border-radius:var(--r-lg);background:#fff;color:var(--text-on-light);box-shadow:var(--sh-3)}
-.booking-payment-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 20px;border-bottom:1px solid var(--card-line)}
-.booking-payment-head h2{margin:0;font-size:1.08rem}
-.booking-payment-close{padding:4px 10px!important;font-size:1.15rem!important}
-.booking-payment-body{padding:22px;text-align:center}
-.booking-payment-body h3{margin:0 0 8px;font-size:1.2rem}
-.booking-payment-body .muted{color:var(--muted-on-light)}
-.booking-payment-body .ticket-barcode{margin:8px auto 2px}
-.booking-payment-foot{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;padding:14px 20px;border-top:1px solid var(--card-line);background:#fafafb}
-.booking-payment-foot .btn.secondary{background:#fff;border:1px solid var(--card-line);color:var(--text-on-light)}
+.wallet-balance{display:grid;gap:4px;padding:18px;margin:10px 0 16px;background:#fff4f4;border:1px solid rgba(217,54,62,.3);border-radius:8px}
+.wallet-balance span{font-size:.78rem;color:var(--muted-on-light)}
+.wallet-balance strong{font-size:1.8rem;color:var(--red)}
 .scanner-layout{max-width:720px}
 .scanner-video{display:block;width:100%;min-height:260px;max-height:480px;object-fit:cover;background:#101013;border-radius:8px;border:1px solid var(--card-line)}
 .scanner-manual{display:flex;gap:8px;margin:12px 0}
@@ -245,10 +228,21 @@ footer{background:#08080a;border-top:1px solid var(--line);padding:26px 0;margin
 .payment-method input{margin-top:3px;accent-color:var(--red)}
 .payment-method span{display:grid;gap:3px}
 .payment-method small{color:var(--muted);font-size:.72rem}
+.voucher-list{margin:14px 0;border:1px solid var(--line);border-radius:7px;padding:10px 12px}
+.voucher-list summary{cursor:pointer;font-size:.8rem;font-weight:700}
+.voucher-list #availableVouchers{display:grid;gap:8px;margin-top:10px;text-align:left}
+.voucher-option{display:grid;gap:4px;width:100%;padding:10px;text-align:left;color:var(--text);background:#202126;border:1px solid var(--line);border-radius:6px;cursor:pointer}
+.voucher-option:hover{border-color:var(--red)}
+.voucher-option small{color:var(--muted);font-size:.68rem;line-height:1.4}
+#voucherCode{width:100%;margin:6px 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:#17181c;color:var(--text);text-transform:uppercase}
 .panel-light{margin-top:18px;padding:14px;background:#202126;border:1px solid var(--line);border-radius:8px}
 .panel-light .panel-title{margin-bottom:10px}
 .panel-light h3{margin:0;font-size:.9rem}
 .panel-light a{font-size:.72rem;color:var(--ok)}
+.wallet-quick-balance{font-size:.82rem;color:var(--muted);margin-bottom:10px}
+.wallet-topup-form{display:flex;gap:8px}
+.wallet-topup-form input{min-width:0;width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;background:#17181c;color:var(--text)}
+.wallet-topup-form .btn{white-space:nowrap}
 .profile-edit-form{display:grid;gap:12px;margin-top:18px}
 .profile-edit-form label{display:grid;gap:6px;color:var(--muted);font-size:.78rem;font-weight:700}
 .profile-edit-form input{padding:11px 12px;border:1px solid var(--line);border-radius:6px;background:#17181c;color:var(--text)}
