@@ -1,5 +1,7 @@
 package com.cinema.model.review;
 
+import com.cinema.model.movie.Movie;
+
 import java.time.LocalDateTime;
 
 /** Movie review entity (RSC-2). */
