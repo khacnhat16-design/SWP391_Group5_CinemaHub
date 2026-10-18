@@ -1,0 +1,280 @@
+/* ============================================================================
+ * rsc.css — Stylesheet riêng cho các module RSC (Reviews / Support / Complaints)
+ * được nhúng trong customer area (header.jsp với cờ loadRscCss=true).
+ *
+ * Tách ra khỏi workspace.css để tránh kéo theo:
+ *   - .workspace-page (đổi nền trắng → phá giao diện dark của discovery.jsp)
+ *   - .ws-sidebar / .app-shell (admin layout)
+ *
+ * Chỉ chứa các class mà modules-rsc.js sinh ra: ws-page, ws-card, ws-label,
+ * ws-input, ws-textarea, ws-btn, ws-actions, ws-flash, ws-muted, ws-eyebrow,
+ * ws-page-header, ws-row, ws-form-row, ws-callout, ws-list, ws-summary,
+ * ws-stars, ws-star-display, ws-card-header, ws-badge.
+ *
+ * Tokens CSS (--ws-*) lấy từ workspace.css để đảm bảo đồng bộ khi render cùng
+ * trong admin workspace.
+ * ============================================================================ */
+
+:root {
+    --ws-card: #ffffff;
+    --ws-line: #e5e7eb;
+    --ws-line-strong: #d8dce3;
+    --ws-text: #1f2937;
+    --ws-text-muted: #6b7280;
+    --ws-text-strong: #111827;
+    --ws-accent: #2563eb;
+    --ws-accent-soft: #eff6ff;
+    --ws-accent-strong: #1d4ed8;
+    --ws-accent-text: #1e40af;
+    --ws-success: #16a34a;
+    --ws-success-soft: #ecfdf5;
+    --ws-warn: #d97706;
+    --ws-warn-soft: #fef3c7;
+    --ws-danger: #dc2626;
+    --ws-danger-soft: #fee2e2;
+    --ws-info: #0891b2;
+    --ws-info-soft: #ecfeff;
+    --ws-radius: 12px;
+    --ws-radius-sm: 8px;
+    --ws-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+/* ---------- Page wrappers ---------- */
+.ws-page {
+    display: block;
+    max-width: 960px;
+    margin: 24px auto;
+    padding: 0 16px;
+    color: var(--ws-text);
+}
+.ws-page-header {
+    margin-bottom: 16px;
+}
+.ws-page-header h2 {
+    margin: 0 0 6px;
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: var(--ws-text-strong);
+    letter-spacing: -0.4px;
+    line-height: 1.2;
+}
+.ws-page-header p.ws-muted {
+    margin: 0;
+    color: var(--ws-text-muted);
+    font-size: 0.92rem;
+    line-height: 1.4;
+}
+.ws-eyebrow {
+    display: inline-block;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 0.72rem;
+    color: var(--ws-text-muted);
+    margin-bottom: 4px;
+}
+
+/* ---------- Card ---------- */
+.ws-card {
+    background: var(--ws-card);
+    border: 1px solid var(--ws-line);
+    border-radius: var(--ws-radius);
+    padding: 18px 20px;
+    margin-bottom: 14px;
+    box-shadow: var(--ws-shadow);
+}
+.ws-card.small {
+    padding: 12px 16px;
+}
+.ws-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+.ws-card h3 {
+    margin: 0 0 12px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--ws-text-strong);
+}
+.ws-card p {
+    margin: 0 0 6px;
+    color: var(--ws-text);
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+/* ---------- Form rows / labels / inputs ---------- */
+.ws-form-row {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+.ws-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+.ws-label {
+    display: grid;
+    gap: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--ws-text-strong);
+    margin-bottom: 10px;
+}
+.ws-row .ws-label { margin-bottom: 0; }
+.ws-input,
+.ws-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border: 1px solid var(--ws-line-strong);
+    border-radius: var(--ws-radius-sm);
+    font: inherit;
+    color: var(--ws-text);
+    background: #fff;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ws-input:focus,
+.ws-textarea:focus {
+    outline: none;
+    border-color: var(--ws-accent);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+.ws-textarea {
+    min-height: 90px;
+    resize: vertical;
+    font-family: inherit;
+}
+.ws-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+
+/* ---------- Buttons ---------- */
+.ws-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 9px 16px;
+    border-radius: var(--ws-radius-sm);
+    border: 1px solid transparent;
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.88rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+    background: #f3f4f6;
+    color: var(--ws-text);
+    text-decoration: none;
+}
+.ws-btn:hover { background: #e5e7eb; }
+.ws-btn.primary {
+    background: var(--ws-accent);
+    color: #fff;
+    border-color: var(--ws-accent-strong);
+}
+.ws-btn.primary:hover {
+    background: var(--ws-accent-strong);
+}
+.ws-btn.ghost {
+    background: transparent;
+    color: var(--ws-text);
+    border-color: var(--ws-line-strong);
+}
+.ws-btn.ghost:hover {
+    background: var(--ws-accent-soft);
+    color: var(--ws-accent-text);
+    border-color: var(--ws-accent);
+}
+
+/* ---------- Flash messages ---------- */
+.ws-flash {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: var(--ws-radius-sm);
+    font-size: 0.85rem;
+}
+.ws-flash.ok {
+    background: var(--ws-success-soft);
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+.ws-flash.err {
+    background: var(--ws-danger-soft);
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+/* ---------- Muted text ---------- */
+.ws-muted { color: var(--ws-text-muted); }
+.ws-muted.small { font-size: 0.78rem; }
+
+/* ---------- List ---------- */
+.ws-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ---------- Summary / stars (reviews) ---------- */
+.ws-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 12px;
+    font-size: 0.95rem;
+    color: var(--ws-text-strong);
+}
+.ws-stars {
+    color: #f59e0b;
+    font-size: 1.05rem;
+    letter-spacing: 1px;
+}
+.ws-star-display {
+    color: #f59e0b;
+    letter-spacing: 1px;
+}
+
+/* ---------- Callout (manager reply) ---------- */
+.ws-callout {
+    background: var(--ws-accent-soft);
+    border-left: 3px solid var(--ws-accent);
+    padding: 10px 12px;
+    border-radius: var(--ws-radius-sm);
+    margin-top: 10px;
+}
+.ws-callout strong {
+    display: block;
+    font-size: 0.82rem;
+    color: var(--ws-accent-text);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+
+/* ---------- Badges (cart, status) ---------- */
+.ws-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--ws-danger);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    margin-left: 6px;
+}
+.ws-badge.ws-badge-red { background: var(--ws-danger); }
