@@ -42,10 +42,6 @@ public class InventoryController extends HttpServlet {
 
         try {
             String action = request.getParameter("action");
-            if ("recipes".equalsIgnoreCase(action)) {
-                sendOk(response, inventoryService.allRecipes());
-                return;
-            }
 
             long branchId = branchId(scope, request);
             String type = request.getParameter("type");
@@ -83,44 +79,9 @@ public class InventoryController extends HttpServlet {
 
         try {
             String action = request.getParameter("action");
-            if ("save_recipe".equalsIgnoreCase(action) || "saveRecipe".equalsIgnoreCase(action)) {
-                long productId = Long.parseLong(required(request, "productId"));
-                String rawItems = request.getParameter("items");
-                List<InventoryDAO.RecipeItemInput> itemsList = new ArrayList<>();
-                if (rawItems != null && !rawItems.isBlank()) {
-                    List<?> parsed = SerializationUtil.fromJson(rawItems, List.class);
-                    for (Object obj : parsed) {
-                        if (obj instanceof Map<?, ?> map) {
-                            long mId = Long.parseLong(String.valueOf(map.get("materialId")));
-                            double dosage = Double.parseDouble(String.valueOf(map.get("dosage")));
-                            double lossRate = map.get("lossRate") != null
-                                    ? Double.parseDouble(String.valueOf(map.get("lossRate")))
-                                    : 0.0;
-                            String note = map.get("note") != null ? String.valueOf(map.get("note")) : "";
-                            String unit = map.get("unit") != null ? String.valueOf(map.get("unit")) : "";
-                            itemsList.add(new InventoryDAO.RecipeItemInput(mId, dosage, lossRate, note, unit));
-                        }
-                    }
-                }
-                inventoryService.saveRecipe(productId, itemsList);
-                sendOk(response, Map.of("status", "SUCCESS", "message", "Đã lưu công thức sản phẩm thành công!"));
-                return;
-            }
-
             long branchId = branchId(scope, request);
             String type = request.getParameter("type");
             long actorId = sessionUserId(request);
-
-            if ("produce".equalsIgnoreCase(action)) {
-                long productId = Long.parseLong(required(request, "productId"));
-                int productQty = Integer.parseInt(required(request, "productQty"));
-                String note = request.getParameter("note");
-                inventoryService.produce(scopeBranch(scope), branchId, productId, productQty, actorId, note);
-                sendOk(response, Map.of(
-                        "status", "SUCCESS",
-                        "message", "Chế biến bắp nước thành công! Đã tự động cập nhật cả 2 kho."));
-                return;
-            }
 
             if ("material".equalsIgnoreCase(type)) {
                 long materialId = Long.parseLong(required(request, "materialId"));
