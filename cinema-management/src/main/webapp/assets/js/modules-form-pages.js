@@ -4045,6 +4045,11 @@
         return str;
     }
 
+    function formatMoneyVnd(val) {
+        if (val == null || val === '' || isNaN(val)) return '—';
+        return Number(val).toLocaleString('vi-VN') + ' đ';
+    }
+
     // ================================================================
     //  PHẦN 1: GIAI ĐOẠN 1 - KHO THÀNH PHẨM (BẮP NƯỚC BÁN LẺ)
     // ================================================================
@@ -4933,6 +4938,16 @@
         ]);
         body.appendChild(infoCard);
 
+        var auditFilterSelect = hub.el('select', {
+            class: 'ws-select',
+            style: 'font-size: 0.82rem; padding: 4px 8px; height: 32px; border: 1px solid #cbd5e1; border-radius: 6px;'
+        }, [
+            hub.el('option', { value: 'ALL' }, ['Tất cả thời gian']),
+            hub.el('option', { value: 'TODAY' }, ['Hôm nay']),
+            hub.el('option', { value: '7DAYS' }, ['7 ngày gần nhất']),
+            hub.el('option', { value: '30DAYS' }, ['30 ngày gần nhất'])
+        ]);
+
         var histHead = hub.el('div', {
             style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;'
         }, [
@@ -5788,6 +5803,7 @@
         hub.setWorkspaceHeader('Kho Nguyên Liệu');
 
         var page = hub.el('div', { class: 'ws-page' });
+        var rawMaterials = [];
 
         // Header
         var header = hub.el('div', { class: 'ws-page-header', style: 'margin-bottom: 20px;' }, [

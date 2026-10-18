@@ -44,7 +44,7 @@
             <script src="${ctx}/assets/js/list-page.js?v=20261003-pricing-target-1" defer></script>
             <script src="${ctx}/assets/js/form-page.js?v=20261004-movie-author-validation-1" defer></script>
             <script src="${ctx}/assets/js/pricing-templates.js?v=20261004-branch-pricing-templates-1" defer></script>
-            <script src="${ctx}/assets/js/modules-form-pages.js?v=20261018-no-export-2" defer></script>
+            <script src="${ctx}/assets/js/modules-form-pages.js?v=20261019-hist-fix-v3" defer></script>
             <script src="${ctx}/assets/js/console.js?v=20261017-inv-fix-1" defer></script>
         </body>
         </html>
@@ -107,7 +107,7 @@
                 <script src="${ctx}/assets/js/page-router.js?v=20260925-1" defer></script>
                 <script src="${ctx}/assets/js/list-page.js?v=20261003-no-list-ids-1" defer></script>
                 <script src="${ctx}/assets/js/form-page.js?v=20261004-movie-author-validation-1" defer></script>
-                <script src="${ctx}/assets/js/modules-form-pages.js?v=20261004-movie-author-validation-1" defer></script>
+                <script src="${ctx}/assets/js/modules-form-pages.js?v=20261019-hist-fix-v4" defer></script>
                 <script src="${ctx}/assets/js/console.js?v=20261004-sidebar-active-1" defer></script>
                 <%@ include file="/WEB-INF/views/layout/footer.jsp" %>
             </c:otherwise>

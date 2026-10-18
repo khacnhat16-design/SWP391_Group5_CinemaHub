@@ -26,7 +26,6 @@
              làm sidebar admin bị include — chỉ load rsc.css vừa đủ. --%>
         <link rel="stylesheet" href="${ctx}/assets/css/rsc.css?v=20261012-review-ui-2">
     </c:if>
-    </c:if>
 </head>
 <body>
 <c:set var="currentRole" value="${sessionScope.role}"/>
