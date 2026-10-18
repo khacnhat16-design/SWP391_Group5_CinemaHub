@@ -1,0 +1,1 @@
+/** rest-page.js: da duoc thay the boi modules-form-pages.js. File nay de trong de khong gay loi syntax cho legacy JSP views. */
