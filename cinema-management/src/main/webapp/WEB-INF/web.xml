@@ -114,6 +114,22 @@
         <url-pattern>/branch/*</url-pattern>
     </servlet-mapping>
     <servlet>
+        <servlet-name>staffBranchAssignmentController</servlet-name>
+        <servlet-class>com.cinema.controller.StaffBranchAssignmentController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>staffBranchAssignmentController</servlet-name>
+        <url-pattern>/api/staff-assignments/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
+        <servlet-name>adminUsersServlet</servlet-name>
+        <servlet-class>com.cinema.controller.AdminUsersServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>adminUsersServlet</servlet-name>
+        <url-pattern>/api/users/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
         <servlet-name>movieController</servlet-name>
         <servlet-class>com.cinema.controller.MovieController</servlet-class>
     </servlet>

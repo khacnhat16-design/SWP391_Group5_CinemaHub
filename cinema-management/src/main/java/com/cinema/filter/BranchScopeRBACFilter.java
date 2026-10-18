@@ -169,6 +169,10 @@ public final class BranchScopeRBACFilter implements Filter {
             return true;
         }
 
+        if (scope.isGuest() && "GET".equalsIgnoreCase(method) && "/movie".equals(path)) {
+            return true;
+        }
+
         // Let guests see the booking entry page, which explains that login is required.
         if (scope.isGuest() && "GET".equalsIgnoreCase(method) && "/booking".equals(path)) {
             return true;

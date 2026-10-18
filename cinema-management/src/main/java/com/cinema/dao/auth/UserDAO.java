@@ -1,8 +1,10 @@
 package com.cinema.dao.auth;
 
-import com.cinema.infrastructure.database.DBContext;
 import com.cinema.model.auth.Role;
 import com.cinema.model.auth.User;
+import com.cinema.model.auth.CustomerSummary;
+
+import com.cinema.infrastructure.database.DBContext;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -10,6 +12,8 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /** Data access for user_account table. */
@@ -20,12 +24,12 @@ public class UserDAO {
      */
     public void insert(User user) throws Exception {
         String sql = """
-            INSERT INTO dbo.user_account 
+            INSERT INTO dbo.user_account
             (email, phone, password_hash, full_name, role_code, status, failed_login_count,
              email_verified, email_verification_token, email_verification_expires_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, SYSUTCDATETIME())
             """;
-        
+
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, user.email());
@@ -38,9 +42,9 @@ public class UserDAO {
             ps.setBoolean(8, user.emailVerified());
             ps.setString(9, user.verificationToken());
             ps.setObject(10, user.verificationExpiresAt());
-            
+
             ps.executeUpdate();
-            
+
             try (ResultSet rs = ps.getGeneratedKeys()) {
                 if (rs.next()) {
                     user.setId(rs.getLong(1));
@@ -55,13 +59,13 @@ public class UserDAO {
      */
     public Optional<User> findByEmail(String email) throws Exception {
         String sql = """
-            SELECT id, email, phone, password_hash, full_name, role_code, status, 
+            SELECT id, email, phone, password_hash, full_name, role_code, status,
                    failed_login_count, locked_until, last_login_at, created_at, version,
                    email_verified, email_verification_token, email_verification_expires_at
             FROM dbo.user_account
             WHERE email = ?
             """;
-        
+
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, email);
@@ -127,7 +131,7 @@ public class UserDAO {
      */
     public void updateFailedLoginCount(Long userId, int count) throws Exception {
         String sql = "UPDATE dbo.user_account SET failed_login_count = ? WHERE id = ?";
-        
+
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, count);
@@ -141,7 +145,7 @@ public class UserDAO {
      */
     public void updateLockedUntil(Long userId, LocalDateTime lockedUntil) throws Exception {
         String sql = "UPDATE dbo.user_account SET locked_until = ? WHERE id = ?";
-        
+
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, lockedUntil);
@@ -155,7 +159,7 @@ public class UserDAO {
      */
     public void resetFailedLoginCount(Long userId) throws Exception {
         String sql = "UPDATE dbo.user_account SET failed_login_count = 0, locked_until = NULL WHERE id = ?";
-        
+
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, userId);
@@ -168,7 +172,7 @@ public class UserDAO {
      */
     public void updateLastLoginAt(Long userId, LocalDateTime at) throws Exception {
         String sql = "UPDATE dbo.user_account SET last_login_at = ? WHERE id = ?";
-        
+
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, at);
@@ -176,7 +180,6 @@ public class UserDAO {
             ps.executeUpdate();
         }
     }
-    
 
     public boolean verifyEmailToken(String token) throws Exception {
         String sql = """
@@ -219,6 +222,75 @@ public class UserDAO {
             ps.setString(2, phone);
             ps.setLong(3, userId);
             ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Search customers by email OR phone (LIKE %term%).
+     * Returns empty list when term is null/blank.
+     * Dùng cho trang "Điểm khách hàng" của staff/manager — staff tìm khách
+     * để tra cứu điểm trước khi điều chỉnh.
+     */
+    public List<CustomerSummary> searchCustomers(String term, int limit) throws Exception {
+        if (term == null || term.isBlank()) return List.of();
+        String like = "%" + term.trim() + "%";
+        String sql = """
+            SELECT TOP (?) id, email, phone, full_name, status
+            FROM dbo.user_account
+            WHERE role_code = 'CUSTOMER'
+              AND (email LIKE ? OR phone LIKE ? OR full_name LIKE ?)
+            ORDER BY id DESC
+            """;
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, Math.min(Math.max(limit, 1), 200));
+            ps.setString(2, like);
+            ps.setString(3, like);
+            ps.setString(4, like);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<CustomerSummary> out = new ArrayList<>();
+                while (rs.next()) {
+                    out.add(new CustomerSummary(
+                            rs.getLong("id"),
+                            rs.getString("email"),
+                            rs.getString("phone"),
+                            rs.getString("full_name"),
+                            rs.getString("status")
+                    ));
+                }
+                return out;
+            }
+        }
+    }
+
+    /**
+     * List tất cả khách hàng (role=CUSTOMER) mới nhất trước.
+     * Dùng cho trang "Điểm khách hàng" — staff/manager cần thấy danh sách
+     * ngay khi vào trang, không cần nhập từ khóa.
+     */
+    public List<CustomerSummary> listCustomers(int limit) throws Exception {
+        String sql = """
+            SELECT TOP (?) id, email, phone, full_name, status
+            FROM dbo.user_account
+            WHERE role_code = 'CUSTOMER'
+            ORDER BY id DESC
+            """;
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, Math.min(Math.max(limit, 1), 500));
+            try (ResultSet rs = ps.executeQuery()) {
+                List<CustomerSummary> out = new ArrayList<>();
+                while (rs.next()) {
+                    out.add(new CustomerSummary(
+                            rs.getLong("id"),
+                            rs.getString("email"),
+                            rs.getString("phone"),
+                            rs.getString("full_name"),
+                            rs.getString("status")
+                    ));
+                }
+                return out;
+            }
         }
     }
 
@@ -274,4 +346,5 @@ public class UserDAO {
             user.setVerificationExpiresAt(((java.sql.Timestamp) verificationExpiry).toLocalDateTime());
         }
         return user;
-    }}
+    }
+}

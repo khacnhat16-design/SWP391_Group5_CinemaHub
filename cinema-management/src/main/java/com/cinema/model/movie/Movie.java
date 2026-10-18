@@ -1,5 +1,7 @@
 package com.cinema.model.movie;
 
+import com.cinema.model.branch.Branch;
+
 import java.time.LocalDate;
 
 /** Movie entity for the centralized catalog (Admin-managed, Req 2.1-2.6). */
