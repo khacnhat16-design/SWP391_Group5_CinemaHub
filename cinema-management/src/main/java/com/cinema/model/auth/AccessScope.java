@@ -12,14 +12,14 @@ public final class AccessScope {
     private static final Set<String> CUSTOMER_PERMISSIONS = Set.of(
             "SHOWTIME_BROWSE", "BOOKING_CREATE", "BOOKING_VIEW_OWN", "BOOKING_CANCEL_OWN");
     private static final Set<String> STAFF_PERMISSIONS = Set.of(
-<<<<<<< HEAD
             "SHOWTIME_BROWSE", "TICKET_SELL", "TICKET_VALIDATE", "CONCESSION_SELL",
             "CONCESSION_PICKUP", "SHIFT_OPEN", "SHIFT_CLOSE", "INVENTORY_VIEW",
             "LOYALTY_ADJUST", "SHIFT_ASSIGNMENT_VIEW_OWN", "SHIFT_REQUEST_SUBMIT");
     private static final Set<String> MANAGER_PERMISSIONS = Set.of(
             "SHOWTIME_BROWSE", "SCREEN_MANAGE", "SHOWTIME_MANAGE", "INVENTORY_MANAGE",
             "SHIFT_APPROVE", "REPORT_VIEW", "REFUND_APPROVE", "TICKET_SELL", "TICKET_VALIDATE",
-            "CONCESSION_SELL", "LOYALTY_ADJUST", "VOUCHER_MANAGE",
+            "CONCESSION_SELL", "LOYALTY_ADJUST", "VOUCHER_MANAGE", "HOLIDAY_MANAGE",
+            "PRICING_MANAGE",
             "SHIFT_TEMPLATE_MANAGE", "SHIFT_ASSIGNMENT_MANAGE", "SHIFT_REQUEST_REVIEW");
     private static final Set<String> ADMIN_PERMISSIONS = Set.of(
             "SHOWTIME_BROWSE", "BRANCH_MANAGE", "MOVIE_MANAGE", "PRICING_MANAGE",
@@ -27,16 +27,6 @@ public final class AccessScope {
             "REPORT_VIEW", "AUDIT_VIEW",
             "SHIFT_TEMPLATE_MANAGE", "SHIFT_ASSIGNMENT_MANAGE", "SHIFT_ASSIGNMENT_VIEW_OWN",
             "SHIFT_REQUEST_SUBMIT", "SHIFT_REQUEST_REVIEW");
-=======
-            "SHOWTIME_BROWSE", "TICKET_SELL");
-    private static final Set<String> MANAGER_PERMISSIONS = Set.of(
-            "SHOWTIME_BROWSE", "SCREEN_MANAGE", "SHOWTIME_MANAGE",
-            "REPORT_VIEW", "REFUND_APPROVE", "TICKET_SELL", "HOLIDAY_MANAGE",
-            "PRICING_MANAGE");
-    private static final Set<String> ADMIN_PERMISSIONS = Set.of(
-            "SHOWTIME_BROWSE", "BRANCH_MANAGE", "MOVIE_MANAGE", "PRICING_MANAGE",
-            "HOLIDAY_MANAGE", "USER_MANAGE", "REPORT_VIEW", "AUDIT_VIEW");
->>>>>>> TuanLM
 
     private final Role role;
     private final Set<Long> branchIds;
@@ -60,10 +50,7 @@ public final class AccessScope {
         return new AccessScope(role, branchIds, null);
     }
 
-<<<<<<< HEAD
-=======
     /** Gắn userId vào scope — dùng từ AuthFilter / controller nội bộ. */
->>>>>>> TuanLM
     public static AccessScope forAuthenticatedUser(Role role, Set<Long> branchIds, Long userId) {
         return new AccessScope(role, branchIds, userId);
     }

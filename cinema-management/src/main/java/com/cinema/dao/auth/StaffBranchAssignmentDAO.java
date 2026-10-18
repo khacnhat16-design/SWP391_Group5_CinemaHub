@@ -52,7 +52,7 @@ public class StaffBranchAssignmentDAO {
             FROM dbo.staff_branch_assignment
             WHERE id = ?
             """;
-        
+
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, id);
@@ -73,7 +73,7 @@ public class StaffBranchAssignmentDAO {
             SELECT 1 FROM dbo.staff_branch_assignment
             WHERE user_id = ? AND branch_id = ? AND status = 'ACTIVE'
             """;
-        
+
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, userId);
@@ -175,9 +175,9 @@ public class StaffBranchAssignmentDAO {
             AND effective_from <= SYSUTCDATETIME()
             AND (effective_to IS NULL OR effective_to > SYSUTCDATETIME())
             """;
-        
+
         Set<Long> branches = new HashSet<>();
-        
+
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, userId);
@@ -187,7 +187,7 @@ public class StaffBranchAssignmentDAO {
                 }
             }
         }
-        
+
         return branches;
     }
 
@@ -495,20 +495,20 @@ public class StaffBranchAssignmentDAO {
             rs.getLong("branch_id"),
             rs.getLong("assigned_by")
         );
-        
+
         assignment.setId(rs.getLong("id"));
         assignment.setStatus(rs.getString("status"));
-        
+
         Object fromObj = rs.getObject("effective_from");
         if (fromObj != null) {
             assignment.setEffectiveFrom(((java.sql.Timestamp) fromObj).toLocalDateTime());
         }
-        
+
         Object toObj = rs.getObject("effective_to");
         if (toObj != null) {
             assignment.setEffectiveTo(((java.sql.Timestamp) toObj).toLocalDateTime());
         }
-        
+
         return assignment;
     }
 }

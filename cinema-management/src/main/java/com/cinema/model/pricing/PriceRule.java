@@ -1,21 +1,26 @@
 package com.cinema.model.pricing;
 
+import com.cinema.model.branch.Branch;
+import com.cinema.model.movie.Movie;
+import com.cinema.model.showtime.Showtime;
+import com.cinema.service.pricing.PricingService;
+
 import java.time.LocalDate;
 
 /**
- * Entity khung giÃ¡ vÃ© (Req 5.1, 7 â€” dynamic pricing theo Movie / Branch / Showtime / TicketType).
+ * Entity khung giá vé (Req 5.1, 7 — dynamic pricing theo Movie / Branch / Showtime / TicketType).
  *
- * <p>Má»™t {@code PriceRule} cÃ³ thá»ƒ thuá»™c má»™t trong cÃ¡c scope (Æ°u tiÃªn giáº£m dáº§n):
+ * <p>Một {@code PriceRule} có thể thuộc một trong các scope (ưu tiên giảm dần):
  * <ul>
- *   <li>{@link #SHOWTIME_SCOPE} â€” {@code showtimeId != null} (showtime-specific).</li>
- *   <li>{@link #MOVIE_BRANCH_SCOPE} â€” {@code movieId != null} and {@code branchId != null}.</li>
- *   <li>{@link #MOVIE_SCOPE} â€” {@code movieId != null}, showtime/branch null (Movie + Time-based).</li>
- *   <li>{@link #BRANCH_SCOPE} â€” {@code branchId != null}, movie/showtime null (Branch default).</li>
- *   <li>{@link #SYSTEM_SCOPE} â€” cáº£ ba null (System default).</li>
+ *   <li>{@link #SHOWTIME_SCOPE} — {@code showtimeId != null} (showtime-specific).</li>
+ *   <li>{@link #MOVIE_BRANCH_SCOPE} — {@code movieId != null} and {@code branchId != null}.</li>
+ *   <li>{@link #MOVIE_SCOPE} — {@code movieId != null}, showtime/branch null (Movie + Time-based).</li>
+ *   <li>{@link #BRANCH_SCOPE} — {@code branchId != null}, movie/showtime null (Branch default).</li>
+ *   <li>{@link #SYSTEM_SCOPE} — cả ba null (System default).</li>
  * </ul>
  *
- * <p>Khi cÃ³ nhiá»u rule khá»›p, {@link PricingService} Ä‘i tá»« trÃªn xuá»‘ng dÆ°á»›i Ä‘á»ƒ chá»n giÃ¡
- * (Req 7.4 â€” Æ°u tiÃªn Showtime â†’ Movie+Time â†’ Branch â†’ System).</p>
+ * <p>Khi có nhiều rule khớp, {@link PricingService} đi từ trên xuống dưới để chọn giá
+ * (Req 7.4 — ưu tiên Showtime → Movie+Time → Branch → System).</p>
  */
 public class PriceRule {
     private Long id;
@@ -24,11 +29,11 @@ public class PriceRule {
     private String timeSlot;
     private long price;
 
-    /** Override theo Movie / Branch / Showtime / TicketType â€” Ä‘á»u nullable (Req 7). */
+    /** Override theo Movie / Branch / Showtime / TicketType — đều nullable (Req 7). */
     private Long movieId;
     private Long branchId;
     private Long showtimeId;
-    /** ADULT / CHILD / STUDENT / VIP â€” null = Ã¡p dá»¥ng má»i ticketType (Req 9). */
+    /** ADULT / CHILD / STUDENT / VIP — null = áp dụng mọi ticketType (Req 9). */
     private String ticketType;
     private LocalDate activeFrom;
     private LocalDate activeTo;
@@ -62,7 +67,7 @@ public class PriceRule {
     public LocalDate activeTo() { return activeTo; }
     public void setActiveTo(LocalDate activeTo) { this.activeTo = activeTo; }
 
-    /** PhÃ¢n cáº¥p scope Ä‘á»ƒ PricingService Ã¡p dá»¥ng Ä‘Ãºng thá»© tá»± Æ°u tiÃªn (Req 7.4). */
+    /** Phân cấp scope để PricingService áp dụng đúng thứ tự ưu tiên (Req 7.4). */
     public String scope() {
         if (showtimeId != null) return SCOPE_SHOWTIME;
         if (movieId != null && branchId != null) return SCOPE_MOVIE_BRANCH;

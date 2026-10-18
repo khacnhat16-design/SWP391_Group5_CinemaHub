@@ -1,10 +1,14 @@
 package com.cinema.dao.pricing;
 
-import com.cinema.model.pricing.*;
-import com.cinema.infrastructure.database.DBContext;
-// import dal.DBContext;
+import com.cinema.model.branch.Branch;
+import com.cinema.model.movie.Movie;
+import com.cinema.model.pricing.PriceRule;
+import com.cinema.model.pricing.PriceRules;
+import com.cinema.model.pricing.PricingEngine;
+import com.cinema.model.pricing.TicketType;
+import com.cinema.model.showtime.Showtime;
 
-// import dal.DBContext;
+import com.cinema.infrastructure.database.DBContext;
 
 import java.sql.Connection;
 import java.sql.Date;
@@ -18,10 +22,10 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Data access cho {@code dbo.price_rule} (Req 5.1-5.5, 7 â€” dynamic pricing).
+ * Data access cho {@code dbo.price_rule} (Req 5.1-5.5, 7 — dynamic pricing).
  *
- * <p>Backward compatible: rule cÅ© (chá»‰ seat_type/day_type/time_slot) váº«n Ä‘Æ°á»£c load
- * bÃ¬nh thÆ°á»ng vá»›i cÃ¡c cá»™t scope vÃ  ngÃ y hiá»‡u lá»±c = NULL. Admin cÃ³ thá»ƒ táº¡o rule má»›i vá»›i
+ * <p>Backward compatible: rule cũ (chỉ seat_type/day_type/time_slot) vẫn được load
+ * bình thường với các cột scope và ngày hiệu lực = NULL. Admin có thể tạo rule mới với
  * movie_id/branch_id/showtime_id/ticket_type override.</p>
  */
 public class PriceRuleDAO {
@@ -30,8 +34,8 @@ public class PriceRuleDAO {
             "id, seat_type, day_type, time_slot, price, movie_id, branch_id, showtime_id, ticket_type, active_from, active_to";
 
     /**
-     * Táº¡o khung giÃ¡. CÃ³ thá»ƒ override theo Movie / Branch / Showtime / TicketType â€” chá»‰ má»™t
-     * trong movie/branch/showtime Ä‘Æ°á»£c phÃ©p NOT NULL (xem CK_price_rule.check_constraint trong
+     * Tạo khung giá. Có thể override theo Movie / Branch / Showtime / TicketType — chỉ một
+     * trong movie/branch/showtime được phép NOT NULL (xem CK_price_rule.check_constraint trong
      * migration_dynamic_pricing.sql).
      */
     public void insert(PriceRule rule) throws Exception {
@@ -138,7 +142,7 @@ public class PriceRuleDAO {
         }
     }
 
-    /** Req 5.1 â€” tra theo tá»• há»£p seat_type Ã— day_type Ã— time_slot (scope = SYSTEM). */
+    /** Req 5.1 — tra theo tổ hợp seat_type × day_type × time_slot (scope = SYSTEM). */
     public Optional<PriceRule> findCombo(String seatType, String dayType, String timeSlot) throws Exception {
         String sql = """
             SELECT """ + COLUMNS + """
@@ -157,7 +161,7 @@ public class PriceRuleDAO {
         }
     }
 
-    /** ToÃ n bá»™ khung giÃ¡ â€” dÃ¹ng náº¡p cache PriceRules cho PricingEngine. */
+    /** Toàn bộ khung giá — dùng nạp cache PriceRules cho PricingEngine. */
     public List<PriceRule> findAll() throws Exception {
         String sql = "SELECT " + COLUMNS + " FROM dbo.price_rule ORDER BY seat_type, day_type, time_slot";
         List<PriceRule> rules = new ArrayList<>();
@@ -171,7 +175,7 @@ public class PriceRuleDAO {
         return rules;
     }
 
-    /** Cáº­p nháº­t giÃ¡ (Req 5.4 â€” chá»‰ Ã¡p dá»¥ng cho vÃ© táº¡o sau, khÃ´ng há»“i tá»‘ ticket_seat.price). */
+    /** Cập nhật giá (Req 5.4 — chỉ áp dụng cho vé tạo sau, không hồi tố ticket_seat.price). */
     public void updatePrice(long ruleId, long price) throws Exception {
         String sql = "UPDATE dbo.price_rule SET price = ? WHERE id = ?";
         try (Connection conn = DBContext.getConnection();
@@ -192,7 +196,7 @@ public class PriceRuleDAO {
             setNullableDate(ps, 3, activeTo);
             ps.setLong(4, ruleId);
             if (ps.executeUpdate() != 1) {
-                throw new IllegalStateException("Khung giÃ¡ khÃ´ng cÃ²n tá»“n táº¡i");
+                throw new IllegalStateException("Khung giá không còn tồn tại");
             }
         }
     }

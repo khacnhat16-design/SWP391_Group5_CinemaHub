@@ -1,20 +1,24 @@
 package com.cinema.model.pricing;
 
+import com.cinema.model.branch.Branch;
+import com.cinema.model.movie.Movie;
+import com.cinema.model.showtime.Showtime;
+
 import java.util.List;
 
 /**
- * Loáº¡i vÃ© do Customer chá»n lÃºc booking â€” áº£nh hÆ°á»Ÿng Ä‘áº¿n giÃ¡ (Req 9).
+ * Loại vé do Customer chọn lúc booking — ảnh hưởng đến giá (Req 9).
  *
- * <p>PhÃ¢n biá»‡t vá»›i {@link PricingEngine.SeatType} (loáº¡i gháº¿ â€” STANDARD/VIP/COUPLE).
- * TicketType = há»“ sÆ¡ ngÆ°á»i mua (ADULT/CHILD/STUDENT) hoáº·c tráº¡ng thÃ¡i Ä‘áº·c biá»‡t (VIP).
- * Má»™t gháº¿ cÃ³ thá»ƒ bÃ¡n cho báº¥t ká»³ ticket type nÃ o; giÃ¡ resolve theo priority
- * Showtime â†’ Movie+Time â†’ Branch â†’ System, sau Ä‘Ã³ Æ°u tiÃªn rule cÃ³ {@code ticket_type}
- * khá»›p trÆ°á»›c rule cÃ¹ng scope nhÆ°ng ticket_type NULL (Req 7.4).</p>
+ * <p>Phân biệt với {@link PricingEngine.SeatType} (loại ghế — STANDARD/VIP/COUPLE).
+ * TicketType = hồ sơ người mua (ADULT/CHILD/STUDENT) hoặc trạng thái đặc biệt (VIP).
+ * Một ghế có thể bán cho bất kỳ ticket type nào; giá resolve theo priority
+ * Showtime → Movie+Time → Branch → System, sau đó ưu tiên rule có {@code ticket_type}
+ * khớp trước rule cùng scope nhưng ticket_type NULL (Req 7.4).</p>
  */
 public enum TicketType {
     ADULT, CHILD, STUDENT, VIP;
 
-    /** Háº±ng sá»‘ DB dÃ¹ng trong {@code dbo.price_rule.ticket_type} vÃ  {@code dbo.ticket_seat.ticket_type}. */
+    /** Hằng số DB dùng trong {@code dbo.price_rule.ticket_type} và {@code dbo.ticket_seat.ticket_type}. */
     public String code() {
         return name();
     }

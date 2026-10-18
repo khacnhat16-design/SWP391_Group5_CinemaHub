@@ -34,4 +34,3 @@ public class PriceTemplate {
         this.rules = rules == null ? new ArrayList<>() : new ArrayList<>(rules);
     }
 }
-

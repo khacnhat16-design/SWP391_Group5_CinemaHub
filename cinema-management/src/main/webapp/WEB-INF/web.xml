@@ -158,6 +158,26 @@
         <url-pattern>/screen/*</url-pattern>
     </servlet-mapping>
     <servlet>
+        <servlet-name>pricingController</servlet-name>
+        <servlet-class>com.cinema.controller.PricingController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>pricingController</servlet-name>
+        <url-pattern>/pricing/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
+        <servlet-name>priceTemplateController</servlet-name>
+        <servlet-class>com.cinema.controller.PriceTemplateController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>priceTemplateController</servlet-name>
+        <url-pattern>/pricing-templates</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>priceTemplateController</servlet-name>
+        <url-pattern>/pricing-templates/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
         <servlet-name>showtimeController</servlet-name>
         <servlet-class>com.cinema.controller.ShowtimeController</servlet-class>
     </servlet>

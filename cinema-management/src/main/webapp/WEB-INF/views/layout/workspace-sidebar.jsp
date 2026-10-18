@@ -121,6 +121,10 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                         Bảng giá
                     </a>
+                    <a class="ws-menu-link ${wsActive == 'pricing-templates' ? 'active' : ''}" href="${wsCtx}/console?module=pricing-templates">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h6M7 16h4"/></svg>
+                        Mẫu giá vé
+                    </a>
                     <a class="ws-menu-link ${wsActive == 'wallet' ? 'active' : ''}" href="${wsCtx}/console?module=wallet">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v4"/><path d="M2 12h20v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><circle cx="17" cy="15" r="1.5"/></svg>
                         Giao dịch ví
@@ -240,6 +244,10 @@
 
                 <div class="ws-menu-group">
                     <div class="ws-menu-group-label">Kinh doanh</div>
+                    <a class="ws-menu-link ${wsActive == 'pricing-templates' ? 'active' : ''}" href="${wsCtx}/console?module=pricing-templates">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h6M7 16h4"/></svg>
+                        Mẫu giá vé
+                    </a>
                     <a class="ws-menu-link ${wsActive == 'report' ? 'active' : ''}" href="${wsCtx}/console?module=report">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                         Báo cáo

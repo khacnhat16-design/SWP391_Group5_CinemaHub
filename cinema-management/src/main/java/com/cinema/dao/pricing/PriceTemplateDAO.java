@@ -1,10 +1,9 @@
 package com.cinema.dao.pricing;
 
-import com.cinema.model.pricing.*;
-import com.cinema.infrastructure.database.DBContext;
-// import dal.DBContext;
+import com.cinema.model.pricing.PriceTemplate;
+import com.cinema.model.pricing.PriceTemplateRule;
 
-// import dal.DBContext;
+import com.cinema.infrastructure.database.DBContext;
 
 import java.sql.Connection;
 import java.sql.Date;
@@ -23,16 +22,16 @@ import java.util.Optional;
 public class PriceTemplateDAO {
 
     public record Summary(long id, String name, String description, String sourceType, int ruleCount,
-                          LocalDateTime createdAt, LocalDateTime updatedAt) { }
+                          LocalDateTime createdAt, LocalDateTime updatedAt, Long createdBy) { }
 
     public List<Summary> findAll() throws Exception {
         String sql = """
                 SELECT t.id, t.name, t.description, t.source_type, COUNT(r.id) AS rule_count,
-                       t.created_at, t.updated_at
+                       t.created_at, t.updated_at, t.created_by
                 FROM dbo.ticket_price_template t
                 LEFT JOIN dbo.ticket_price_template_rule r ON r.template_id = t.id
                 GROUP BY t.id, t.name, t.description, t.source_type,
-                         t.created_at, t.updated_at
+                         t.created_at, t.updated_at, t.created_by
                 ORDER BY t.name, t.id
                 """;
         List<Summary> summaries = new ArrayList<>();
@@ -43,7 +42,8 @@ public class PriceTemplateDAO {
                 summaries.add(new Summary(rs.getLong("id"), rs.getString("name"),
                         rs.getString("description"), rs.getString("source_type"), rs.getInt("rule_count"),
                         localDateTime(rs.getTimestamp("created_at")),
-                        localDateTime(rs.getTimestamp("updated_at"))));
+                        localDateTime(rs.getTimestamp("updated_at")),
+                        nullableLong(rs, "created_by")));
             }
         }
         return summaries;
@@ -92,7 +92,7 @@ public class PriceTemplateDAO {
             else ps.setLong(4, template.getCreatedBy());
             ps.executeUpdate();
             try (ResultSet rs = ps.getGeneratedKeys()) {
-                if (!rs.next()) throw new IllegalStateException("KhÃ´ng láº¥y Ä‘Æ°á»£c ID máº«u giÃ¡ vá»«a táº¡o");
+                if (!rs.next()) throw new IllegalStateException("Không lấy được ID mẫu giá vừa tạo");
                 return rs.getLong(1);
             }
         }

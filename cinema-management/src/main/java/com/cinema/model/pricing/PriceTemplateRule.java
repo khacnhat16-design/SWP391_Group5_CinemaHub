@@ -30,4 +30,3 @@ public class PriceTemplateRule {
     public LocalDate getActiveTo() { return activeTo; }
     public void setActiveTo(LocalDate activeTo) { this.activeTo = activeTo; }
 }
-
