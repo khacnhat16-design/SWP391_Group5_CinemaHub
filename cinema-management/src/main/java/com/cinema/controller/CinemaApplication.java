@@ -187,6 +187,9 @@ public final class CinemaApplication {
         Tomcat.addServlet(context, "branchController", new BranchController());
         context.addServletMappingDecoded("/branch/*", "branchController");
         context.addServletMappingDecoded("/api/branch/*", "branchController");
+        Tomcat.addServlet(context, "inventoryController", new InventoryController());
+        context.addServletMappingDecoded("/inventory", "inventoryController");
+        context.addServletMappingDecoded("/inventory/*", "inventoryController");
         Tomcat.addServlet(context, "staffBranchAssignmentController", new StaffBranchAssignmentController());
         context.addServletMappingDecoded("/api/staff-assignments/*", "staffBranchAssignmentController");
         Tomcat.addServlet(context, "screenController", new ScreenController());
