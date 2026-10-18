@@ -1,5 +1,7 @@
 package com.cinema.controller;
 
+import com.cinema.infrastructure.database.DBContext;
+
 import com.cinema.model.booking.Ticket;
 import com.cinema.dao.booking.TicketDAO;
 import com.cinema.common.ErrorEnvelope;
@@ -11,10 +13,6 @@ import com.cinema.service.payment.MockGatewayProvider;
 import com.cinema.model.payment.Payment;
 import com.cinema.dao.payment.PaymentDAO;
 import com.cinema.service.payment.PaymentService;
-import com.cinema.service.wallet.WalletService;
-import com.cinema.dao.wallet.WalletDAO;
-import com.cinema.infrastructure.database.DBContext;
-import com.cinema.model.wallet.Wallet;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -32,18 +30,16 @@ public final class PaymentController extends HttpServlet {
             "cinema.payment.hmacSecret", "cinema-demo-secret");
 
     private PaymentService paymentService;
-    private WalletService walletService;
     private PaymentDAO paymentDao;
     private TicketDAO ticketDao;
     private NotificationService notificationService;
 
     @Override
     public void init() throws ServletException {
-        walletService = new WalletService(new com.cinema.dao.wallet.WalletDAO());
         paymentDao = new PaymentDAO();
         ticketDao = new TicketDAO();
         notificationService = new NotificationService(new NotificationDAO());
-        paymentService = new PaymentService(paymentDao, walletService,
+        paymentService = new PaymentService(paymentDao,
                 new MockGatewayProvider(HMAC_SECRET, ""), "CinemaHub demo account");
     }
 
@@ -95,39 +91,33 @@ public final class PaymentController extends HttpServlet {
             boolean success = requestedSuccess && isSandboxSuccessCode(request.getParameter("sandboxCode"));
             String hmac = request.getParameter("hmac");
             String key = request.getParameter("idempotencyKey");
-            String redirect = request.getContextPath() + "/console?module=wallet";
-            if (key != null && key.startsWith("TOPUP-")) {
-                walletService.handleTopUpCallback(key, hmac, success,
-                        new MockGatewayProvider(HMAC_SECRET, ""));
-                redirect += success ? "&topup=success" : "&topup=failed";
-            } else {
-                long paymentId = Long.parseLong(require(request, "paymentId"));
-                paymentService.handleMockCallback(paymentId, hmac, success,
-                        new MockGatewayProvider(HMAC_SECRET, ""));
-                Payment payment = paymentDao.findById(paymentId).orElse(null);
-                if (payment != null && payment.ticketId() != null) {
-                    Ticket ticket = ticketDao.findById(payment.ticketId()).orElse(null);
-                    String paymentResult = Payment.STATUS_REVIEW_REQUIRED.equals(payment.status())
-                            ? "review"
-                            : Payment.STATUS_SUCCESS.equals(payment.status()) ? "success" : "failed";
-                    redirect = request.getContextPath() + "/console?module=my-tickets"
-                            + "&payment=" + paymentResult;
-                    if ("success".equals(paymentResult) && ticket != null
-                            && ticket.ticketCode() != null) {
-                        TicketDAO.ConfirmationDetails details = null;
-                        try (Connection conn = com.cinema.infrastructure.database.DBContext.getConnection()) {
-                            details = ticketDao.findConfirmationDetails(conn, ticket.id()).orElse(null);
-                        } catch (Exception notificationDetailsFailure) {
-                            logger.log(Level.WARNING, "Unable to load confirmation details for ticket "
-                                    + ticket.id(), notificationDetailsFailure);
-                        }
-                        notificationService.notifyTicketConfirmed(null, ticket.userId(),
-                                ticket.ticketCode(), details, payment.amount());
-                        redirect += "&ticketCode=" + java.net.URLEncoder.encode(
-                                ticket.ticketCode(), java.nio.charset.StandardCharsets.UTF_8);
-                    } else if ("review".equals(paymentResult)) {
-                        redirect += "&paymentId=" + payment.id();
+            String redirect = request.getContextPath() + "/console?module=my-tickets";
+            long paymentId = Long.parseLong(require(request, "paymentId"));
+            paymentService.handleMockCallback(paymentId, hmac, success,
+                    new MockGatewayProvider(HMAC_SECRET, ""));
+            Payment payment = paymentDao.findById(paymentId).orElse(null);
+            if (payment != null && payment.ticketId() != null) {
+                Ticket ticket = ticketDao.findById(payment.ticketId()).orElse(null);
+                String paymentResult = Payment.STATUS_REVIEW_REQUIRED.equals(payment.status())
+                        ? "review"
+                        : Payment.STATUS_SUCCESS.equals(payment.status()) ? "success" : "failed";
+                redirect = request.getContextPath() + "/console?module=my-tickets"
+                        + "&payment=" + paymentResult;
+                if ("success".equals(paymentResult) && ticket != null
+                        && ticket.ticketCode() != null) {
+                    TicketDAO.ConfirmationDetails details = null;
+                    try (Connection conn = com.cinema.infrastructure.database.DBContext.getConnection()) {
+                        details = ticketDao.findConfirmationDetails(conn, ticket.id()).orElse(null);
+                    } catch (Exception notificationDetailsFailure) {
+                        logger.log(Level.WARNING, "Unable to load confirmation details for ticket "
+                                + ticket.id(), notificationDetailsFailure);
                     }
+                    notificationService.notifyTicketConfirmed(null, ticket.userId(),
+                            ticket.ticketCode(), details, payment.amount());
+                    redirect += "&ticketCode=" + java.net.URLEncoder.encode(
+                            ticket.ticketCode(), java.nio.charset.StandardCharsets.UTF_8);
+                } else if ("review".equals(paymentResult)) {
+                    redirect += "&paymentId=" + payment.id();
                 }
             }
             response.sendRedirect(redirect);

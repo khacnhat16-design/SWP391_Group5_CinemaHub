@@ -1,13 +1,21 @@
 package com.cinema.controller;
 
+import com.cinema.controller.auth.AuthController;
+import com.cinema.controller.payment.VnPayDemoServlet;
+import com.cinema.listener.AppContextListener;
+import com.cinema.listener.ExpiryScheduler;
+import com.cinema.model.branch.Branch;
+import com.cinema.model.notification.Notification;
+import com.cinema.model.showtime.Showtime;
+import com.cinema.service.payment.PaymentService;
+import com.cinema.service.upload.UploadThingService;
+
 import com.cinema.filter.CsrfFilter;
 import com.cinema.filter.EncodingFilter;
 import com.cinema.filter.ExceptionMappingFilter;
 import com.cinema.filter.AuthFilter;
 import com.cinema.filter.BranchScopeRBACFilter;
 import com.cinema.filter.NoCacheFilter;
-import com.cinema.model.auth.User;
-import com.cinema.service.payment.PaymentService;
 import org.apache.catalina.Context;
 import org.apache.catalina.servlets.DefaultServlet;
 import org.apache.catalina.startup.Tomcat;
@@ -19,12 +27,9 @@ import org.apache.tomcat.util.descriptor.web.FilterMap;
 
 import java.io.File;
 
-/**
- * Local development entry point. Start it from VS Code with `mvn exec:java`.
- */
+/** Local development entry point. Start it from VS Code with `mvn exec:java`. */
 public final class CinemaApplication {
-    private static void registerFilter(Context context, String name,
-            Class<? extends jakarta.servlet.Filter> filterClass) {
+    private static void registerFilter(Context context, String name, Class<? extends jakarta.servlet.Filter> filterClass) {
         FilterDef definition = new FilterDef();
         definition.setFilterName(name);
         definition.setFilterClass(filterClass.getName());
@@ -36,32 +41,32 @@ public final class CinemaApplication {
         context.addFilterMap(mapping);
     }
 
-    private CinemaApplication() {
-    }
+    private CinemaApplication() { }
 
     public static void main(String[] args) throws Exception {
         loadEnvFile();
-        String environmentPort = System.getenv("CINEMA_PORT");
-        int port = resolvePort(System.getProperty("cinema.port"), environmentPort, "8080");
+        int port = resolvePort(
+                System.getProperty("cinema.port"),
+                System.getenv("CINEMA_PORT"),
+                System.getProperty("CINEMA_PORT"),
+                System.getenv("APP_PORT"),
+                System.getProperty("APP_PORT"));
         Tomcat tomcat = start(port);
         System.out.printf("Cinema Management is running at http://localhost:%d/%n",
                 tomcat.getConnector().getLocalPort());
         tomcat.getServer().await();
     }
 
-    public static int resolvePort(String... overrides) {
-        for (String override : overrides) {
-            if (override != null && !override.isBlank()) {
-                return Integer.parseInt(override.trim());
+    static int resolvePort(String... configuredPorts) {
+        for (String configuredPort : configuredPorts) {
+            if (configuredPort != null && !configuredPort.isBlank()) {
+                return Integer.parseInt(configuredPort.trim());
             }
         }
         return 8080;
     }
 
-    /**
-     * Khởi động Tomcat 10.1 embedded và deploy webapp; không block (dùng cho cả
-     * smoke test).
-     */
+    /** Khởi động Tomcat 10.1 embedded và deploy webapp; không block (dùng cho cả smoke test). */
     public static Tomcat start(int port) throws Exception {
         File webRootDir = new File("src/main/webapp");
         if (!webRootDir.isDirectory()) {
@@ -71,26 +76,24 @@ public final class CinemaApplication {
 
         Tomcat tomcat = new Tomcat();
         tomcat.setPort(port);
-        tomcat.getConnector();
+        tomcat.getConnector().setParseBodyMethods("POST,PUT,DELETE");
         Context context = tomcat.addContext("", webRoot);
         // Fix: Add target/classes (Maven compile output) to the webapp classloader.
         // Without this, the WebappClassLoader only looks in WEB-INF/classes inside the
-        // docBase (src/main/webapp), causing ClassNotFoundException for compiled
-        // classes.
+        // docBase (src/main/webapp), causing ClassNotFoundException for compiled classes.
         // webRootDir = src/main/webapp -> go up 3 levels to get project root
         File projectDir = webRootDir.getParentFile().getParentFile().getParentFile();
         File classesDir = new File(projectDir, "target/classes");
         if (classesDir.exists()) {
-            org.apache.catalina.webresources.StandardRoot resources = new org.apache.catalina.webresources.StandardRoot(
-                    context);
+            org.apache.catalina.webresources.StandardRoot resources =
+                    new org.apache.catalina.webresources.StandardRoot(context);
             resources.addPreResources(new DirResourceSet(resources, "/WEB-INF/classes",
                     classesDir.getAbsolutePath(), "/"));
 
             // WebappClassLoader mặc định chỉ load class từ WEB-INF/classes bên trong
             // webapp — nhưng chúng ta cần cả dependency JAR từ Maven. Đăng ký từng
             // JAR làm webapp resource để ClassLoader nhìn thấy; nếu không sẽ
-            // ClassNotFoundException khi filter/servlet dùng dependency trong
-            // contextInitialized.
+            // ClassNotFoundException khi filter/servlet dùng dependency trong contextInitialized.
             // (e.g. jakarta.servlet.ServletContextListener → NoClassDefFoundError.)
             File mavenRepo = resolveMavenLocalRepo();
             File webInfLib = new File(webRootDir, "WEB-INF/lib");
@@ -116,7 +119,8 @@ public final class CinemaApplication {
             // setDelegate(true) để Tomcat ưu tiên parent classloader (exec classloader
             // chứa Maven JAR) trước. Tránh trường hợp cùng 1 class được load 2 lần
             // (một từ parent, một từ webapp) → request attribute có 2 bản khác nhau.
-            org.apache.catalina.loader.WebappLoader loader = new org.apache.catalina.loader.WebappLoader();
+            org.apache.catalina.loader.WebappLoader loader =
+                    new org.apache.catalina.loader.WebappLoader();
             loader.setDelegate(true);
             context.setLoader(loader);
         } else {
@@ -141,7 +145,7 @@ public final class CinemaApplication {
         context.addServletMappingDecoded("/assets/*", "staticAssets");
         // ExpiryScheduler được khởi động qua listener — đăng ký thủ công vì
         // embedded mode bỏ qua web.xml listeners.
-        // context.addApplicationListener("com.cinema.listener.AppContextListener");
+        context.addApplicationListener(com.cinema.listener.AppContextListener.class.getName());
         registerFilter(context, "exceptionMapping", ExceptionMappingFilter.class);
         registerFilter(context, "encoding", EncodingFilter.class);
         registerFilter(context, "auth", AuthFilter.class);
@@ -149,14 +153,12 @@ public final class CinemaApplication {
         registerFilter(context, "csrf", CsrfFilter.class);
         registerFilter(context, "noCache", NoCacheFilter.class);
         // LƯU Ý: AuthFilter + BranchScopeRBACFilter KHÔNG đăng ký ở embedded dev path.
-        // isPublicEndpoint() của RBAC filter không whitelist "/", "/assets/*",
-        // "/dashboard",
-        // "/booking", "/concessions" → mọi trang public sẽ bị 403.
+        // isPublicEndpoint() của RBAC filter không whitelist các trang public
+        // → mọi trang public sẽ bị 403.
         // Ở deploy path (WEB-INF/web.xml) filter chain đầy đủ vẫn được áp dụng.
         Tomcat.addServlet(context, "cinemaServlet", new CinemaServlet());
         context.addServletMappingDecoded("/", "cinemaServlet");
-        // Embedded server cần map thủ công các servlet của PageController cho
-        // /console/*
+        // Embedded server cần map thủ công các servlet của PageController cho /console/*
         // để khớp với web.xml production — tránh CinemaServlet nuốt mất các route
         // /console/{domain}/list dành cho trang quản lý Admin/Manager.
         Tomcat.addServlet(context, "pageController", new PageController());
@@ -171,7 +173,6 @@ public final class CinemaApplication {
         context.addServletMappingDecoded("/register", "authController");
         context.addServletMappingDecoded("/login", "authController");
         context.addServletMappingDecoded("/admin/login", "authController");
-        context.addServletMappingDecoded("/verify-email", "authController");
         context.addServletMappingDecoded("/logout", "authController");
         Tomcat.addServlet(context, "showtimeController", new ShowtimeController());
         context.addServletMappingDecoded("/showtime/*", "showtimeController");
@@ -179,57 +180,46 @@ public final class CinemaApplication {
         context.addServletMappingDecoded("/discover", "discoveryServlet");
         Tomcat.addServlet(context, "bookingController", new BookingController());
         context.addServletMappingDecoded("/booking/*", "bookingController");
-        Tomcat.addServlet(context, "refundController", new RefundController());
-        context.addServletMappingDecoded("/api/refunds/*", "refundController");
         Tomcat.addServlet(context, "bookingEntry", new BookingEntryServlet());
         context.addServletMappingDecoded("/booking", "bookingEntry");
         Tomcat.addServlet(context, "movieController", new MovieController());
         context.addServletMappingDecoded("/movie/*", "movieController");
         Tomcat.addServlet(context, "branchController", new BranchController());
         context.addServletMappingDecoded("/branch/*", "branchController");
-        Tomcat.addServlet(context, "staffBranchAssignmentController",
-                new StaffBranchAssignmentController());
-        context.addServletMappingDecoded("/api/staff-assignments/*",
-                "staffBranchAssignmentController");
-        Tomcat.addServlet(context, "adminUsersServlet", new AdminUsersServlet());
-        context.addServletMappingDecoded("/api/users/*", "adminUsersServlet");
-        Tomcat.addServlet(context, "inventoryController", new InventoryController());
-        context.addServletMappingDecoded("/inventory", "inventoryController");
-        context.addServletMappingDecoded("/inventory/*", "inventoryController");
-        Tomcat.addServlet(context, "showtimeAllocationController",
-                new ShowtimeAllocationController());
-        context.addServletMappingDecoded("/api/showtime-allocations",
-                "showtimeAllocationController");
-        context.addServletMappingDecoded("/api/showtime-allocations/*",
-                "showtimeAllocationController");
+        context.addServletMappingDecoded("/api/branch/*", "branchController");
+        Tomcat.addServlet(context, "staffBranchAssignmentController", new StaffBranchAssignmentController());
+        context.addServletMappingDecoded("/api/staff-assignments/*", "staffBranchAssignmentController");
         Tomcat.addServlet(context, "screenController", new ScreenController());
         context.addServletMappingDecoded("/screen/*", "screenController");
-        Tomcat.addServlet(context, "pricingController", new PricingController());
-        context.addServletMappingDecoded("/pricing/*", "pricingController");
-        Tomcat.addServlet(context, "priceTemplateController", new PriceTemplateController());
-        context.addServletMappingDecoded("/pricing-templates", "priceTemplateController");
-        context.addServletMappingDecoded("/pricing-templates/*", "priceTemplateController");
+        Tomcat.addServlet(context, "pricingTemplateController", new PricingTemplateController());
+        context.addServletMappingDecoded("/pricing-templates", "pricingTemplateController");
+        context.addServletMappingDecoded("/pricing-templates/*", "pricingTemplateController");
         Tomcat.addServlet(context, "notificationController", new NotificationController());
         context.addServletMappingDecoded("/notification/*", "notificationController");
+        Tomcat.addServlet(context, "reviewController", new ReviewController());
+        context.addServletMappingDecoded("/api/reviews", "reviewController");
+        context.addServletMappingDecoded("/api/reviews/*", "reviewController");
         Tomcat.addServlet(context, "paymentController", new PaymentController());
         context.addServletMappingDecoded("/payment/*", "paymentController");
-        Tomcat.addServlet(context, "walletController", new WalletController());
-        context.addServletMappingDecoded("/wallet", "walletController");
-        context.addServletMappingDecoded("/wallet/*", "walletController");
+        // Refund request workflow (customer → manager approval → email).
+        Tomcat.addServlet(context, "refundController", new RefundController());
+        context.addServletMappingDecoded("/api/refunds", "refundController");
+        context.addServletMappingDecoded("/api/refunds/*", "refundController");
         // Image upload via UploadThing — Admin / Branch Manager only.
-        // NOTE: Tomcat.addServlet(name, instance) does NOT honor @MultipartConfig
-        // annotation
+        // NOTE: Tomcat.addServlet(name, instance) does NOT honor @MultipartConfig annotation
         // on the servlet class for embedded deployment. We must register the multipart
         // config element explicitly so request.getPart() works; otherwise the servlet
         // throws "no multi-part configuration has been provided".
-        jakarta.servlet.MultipartConfigElement mce = new jakarta.servlet.MultipartConfigElement(
-                "", // location (String)
-                5L * 1024 * 1024, // maxFileSize (long)
-                5L * 1024 * 1024 + 1024, // maxRequestSize (long)
-                1024 * 1024 // fileSizeThreshold (int)
-        );
+        jakarta.servlet.MultipartConfigElement mce =
+                new jakarta.servlet.MultipartConfigElement(
+                        "",                              // location (String)
+                        5L * 1024 * 1024,                // maxFileSize (long)
+                        5L * 1024 * 1024 + 1024,         // maxRequestSize (long)
+                        1024 * 1024                      // fileSizeThreshold (int)
+                );
         org.apache.catalina.startup.Tomcat.addServlet(context, "uploadServlet", new UploadServlet());
-        org.apache.catalina.Wrapper uploadWrapper = (org.apache.catalina.Wrapper) context.findChild("uploadServlet");
+        org.apache.catalina.Wrapper uploadWrapper = (org.apache.catalina.Wrapper)
+                context.findChild("uploadServlet");
         if (uploadWrapper != null) {
             uploadWrapper.setMultipartConfigElement(mce);
         }
@@ -237,6 +227,9 @@ public final class CinemaApplication {
         // Notification bell cho header workspace
         Tomcat.addServlet(context, "workspaceNotifServlet", new WorkspaceNotificationServlet());
         context.addServletMappingDecoded("/api/notification/*", "workspaceNotifServlet");
+        // Admin user management (CRUD users)
+        Tomcat.addServlet(context, "adminUsersServlet", new AdminUsersServlet());
+        context.addServletMappingDecoded("/api/users/*", "adminUsersServlet");
         // Forgot Password flow (3 endpoints under one servlet)
         Tomcat.addServlet(context, "forgotPasswordServlet", new ForgotPasswordServlet());
         context.addServletMappingDecoded("/forgot-password", "forgotPasswordServlet");
@@ -245,16 +238,18 @@ public final class CinemaApplication {
         // VNPay endpoints — Return URL và IPN phải khớp vnpay.returnUrl / vnpay.ipnUrl.
         Tomcat.addServlet(context, "vnPayController", new VnPayController());
         context.addServletMappingDecoded("/vnpay/*", "vnPayController");
+        // Demo gateway nội bộ cho SANDBOX — mô phỏng form VNPay trong chính app.
+        Tomcat.addServlet(context, "vnPayDemoServlet", new com.cinema.controller.payment.VnPayDemoServlet());
+        context.addServletMappingDecoded("/vnpay/demo", "vnPayDemoServlet");
+        context.addServletMappingDecoded("/vnpay/demo/callback", "vnPayDemoServlet");
         tomcat.start();
         tomcat.getHost().setBackgroundProcessorDelay(600);
         return tomcat;
     }
 
     /**
-     * Load key=value pairs from {@code cinema-management/.env} (or project
-     * root/.env)
-     * into System properties so UploadThingService / PaymentService etc. pick them
-     * up
+     * Load key=value pairs from {@code cinema-management/.env} (or project root/.env)
+     * into System properties so UploadThingService / PaymentService etc. pick them up
      * without requiring each developer to set shell environment variables.
      * Lines starting with {@code #} are comments and are skipped.
      */
@@ -269,15 +264,14 @@ public final class CinemaApplication {
                 try {
                     for (String line : java.nio.file.Files.readAllLines(f.toPath())) {
                         String trimmed = line.trim();
-                        if (trimmed.isEmpty() || trimmed.startsWith("#"))
-                            continue;
+                        if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
                         int eq = trimmed.indexOf('=');
                         if (eq > 0) {
                             String key = trimmed.substring(0, eq).trim();
                             String val = trimmed.substring(eq + 1).trim();
                             if (val.length() >= 2
                                     && ((val.startsWith("\"") && val.endsWith("\""))
-                                            || (val.startsWith("'") && val.endsWith("'")))) {
+                                    || (val.startsWith("'") && val.endsWith("'")))) {
                                 val = val.substring(1, val.length() - 1);
                             }
                             // Only set if not already in environment (shell env wins).
@@ -296,8 +290,7 @@ public final class CinemaApplication {
     }
 
     /**
-     * Locate the Maven local repository directory so JAR dependencies can be
-     * registered
+     * Locate the Maven local repository directory so JAR dependencies can be registered
      * as Tomcat webapp resources. Checks {@code M2_REPO} env-var first, then
      * {@code user.home/.m2/repository} as fallback.
      */
@@ -305,13 +298,11 @@ public final class CinemaApplication {
         String m2 = System.getenv("M2_REPO");
         if (m2 != null && !m2.isBlank()) {
             File f = new File(m2);
-            if (f.isDirectory())
-                return f;
+            if (f.isDirectory()) return f;
         }
         File home = new File(System.getProperty("user.home"));
         File m2Home = new File(home, ".m2/repository");
-        if (m2Home.isDirectory())
-            return m2Home;
+        if (m2Home.isDirectory()) return m2Home;
         // Fallback: assume Maven's computed classpath is correct and extract repo path
         // from one of the dependency JARs (e.g. tomcat-embed-core).
         String cp = System.getProperty("java.class.path");
@@ -319,7 +310,7 @@ public final class CinemaApplication {
             for (String entry : cp.split(File.pathSeparator)) {
                 File f = new File(entry);
                 if (f.isFile() && f.getName().startsWith("tomcat-embed-core")) {
-                    // JAR lives at ~/.m2/repository/org/apache/tomcat/embed/...
+                    // JAR lives at  ~/.m2/repository/org/apache/tomcat/embed/...
                     File repo = f.getParentFile(); // WEB-INF/lib or root
                     if (repo != null && repo.getName().equals("repository")) {
                         return repo;

@@ -1,6 +1,7 @@
 package com.cinema.controller;
 
-import com.cinema.model.auth.Role;
+import com.cinema.model.showtime.Showtime;
+
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,7 +25,8 @@ public class PageController extends HttpServlet {
 
     /** Domain có trang danh mục tại /console/{domain}/list (whitelist chống path traversal). */
     private static final Set<String> LIST_PAGES = Set.of(
-            "branch", "movie", "screen", "booking", "notification", "inventory");
+            "branch", "movie", "screen", "booking", "notification", "reviews"
+    );
 
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
@@ -39,14 +41,11 @@ public class PageController extends HttpServlet {
             request.getRequestDispatcher("/WEB-INF/views/console.jsp").forward(request, response);
             return;
         }
+
         // Pattern /console/{domain}/list map thẳng tới views/{domain}/list.jsp
         // để giữ URL quen thuộc cho các module quản lý (movie, screen, branch...).
         if (path.matches("/[^/]+/list")) {
             String domain = path.substring(1, path.length() - "/list".length());
-            if ("inventory".equals(domain)) {
-                response.sendRedirect(request.getContextPath() + "/console?module=inventory&tab=product");
-                return;
-            }
             if (LIST_PAGES.contains(domain)) {
                 request.getRequestDispatcher("/WEB-INF/views/" + domain + "/list.jsp")
                         .forward(request, response);

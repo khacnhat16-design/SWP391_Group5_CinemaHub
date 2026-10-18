@@ -1,12 +1,8 @@
 package com.cinema.controller;
 
-import com.cinema.model.auth.Role;
-import com.cinema.model.booking.SeatStatus;
-import com.cinema.model.booking.Ticket;
 import com.cinema.model.payment.Payment;
-import com.cinema.model.screen.Seat;
 import com.cinema.model.showtime.Showtime;
-import com.cinema.model.wallet.Wallet;
+
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -58,9 +54,8 @@ public final class BookingEntryServlet extends HttpServlet {
             <meta name="viewport" content="width=device-width,initial-scale=1">
             <meta name="ctx" content="__CTX__">
             <meta name="user-role" content="CUSTOMER">
-            <link rel="stylesheet" href="__CTX__/assets/css/cinema.css?v=20261003-booking-showtime-cards-1">
-            <link rel="stylesheet" href="__CTX__/assets/css/dashboard.css?v=20261006-payment-result-1">
-            <script src="__CTX__/assets/js/app.js?v=20261003-notification-time-2"></script>
+            <link rel="stylesheet" href="__CTX__/assets/css/cinema.css?v=20261009-customer-header-2">
+            <script src="__CTX__/assets/js/app.js?v=20261009-customer-header-1"></script>
             <title>Đặt vé - CinemaHub</title></head><body>
             <header class="nav-wrapper"><div class="nav container">
             <a class="logo" href="__CTX__/">Cinema<span class="accent">Hub</span></a>
@@ -73,7 +68,7 @@ public final class BookingEntryServlet extends HttpServlet {
             <main class="container booking-page">
               <div class="page-heading"><div><span class="eyebrow">CINEMAHUB BOOKING</span>
               <h1>Chọn suất chiếu và ghế</h1>
-              <p class="muted">Chọn lịch chiếu, giữ ghế trong 10 phút và thanh toán an toàn.</p></div></div>
+              <p class="muted">Chọn suất chiếu, giữ ghế trong 10 phút và thanh toán qua VNPay Sandbox.</p></div></div>
               <div id="message"></div>
               <div class="booking-layout">
                 <section class="panel"><h2>Suất chiếu đang mở bán</h2>
@@ -90,26 +85,14 @@ public final class BookingEntryServlet extends HttpServlet {
                 </section>
                 <aside class="panel order-summary"><h2>Thanh toán</h2>
                   <div id="summary"><p class="muted">Chưa chọn ghế.</p></div>
-                  <button id="holdButton" class="btn full" type="button" disabled>Giữ ghế</button>
                   <div id="paymentArea" hidden>
-                    <p class="tiny">Ghế được giữ trong 10 phút. Chọn phương thức thanh toán để tiếp tục.</p>
-                    <div class="payment-methods" role="radiogroup" aria-label="Phương thức thanh toán">
-                      <label class="payment-method selected"><input type="radio" name="paymentMethod" value="WALLET" checked>
-                        <span><strong>Ví CinemaHub</strong><small>Thanh toán bằng số dư ví. Tiền hoàn vé đủ điều kiện được cộng lại vào ví.</small></span></label>
-                      <label class="payment-method"><input type="radio" name="paymentMethod" value="VNPAY">
-                        <span><strong>VNPay Sandbox</strong><small>Thanh toán trực tiếp qua cổng thử nghiệm VNPay</small></span></label>
+                    <p class="tiny">Ghế được giữ trong 10 phút. Thanh toán an toàn qua cổng VNPay Sandbox.</p>
+                    <div class="payment-method selected">
+                      <span><strong>VNPay Sandbox</strong><small>Thanh toán trực tiếp qua cổng thử nghiệm VNPay</small></span>
                     </div>
-                    <button id="payButton" class="btn full" type="button">Thanh toán bằng Ví CinemaHub</button>
+                    <button id="payButton" class="btn full" type="button">Thanh toán qua VNPay Sandbox</button>
                   </div>
-                  <div class="wallet-quick panel-light">
-                    <div class="panel-title"><h3>Ví CinemaHub</h3><a href="__CTX__/console?module=wallet">Quản lý ví</a></div>
-                    <div id="walletBalance" class="wallet-quick-balance">Đang tải số dư...</div>
-                    <div class="wallet-topup-form">
-                      <input id="topupAmount" type="number" min="10000" step="10000" placeholder="Số tiền nạp">
-                      <button id="topupButton" class="btn secondary" type="button">Nạp tiền</button>
-                    </div>
-                    <div id="walletStatus" class="tiny" role="status"></div>
-                  </div>
+                  <div id="successTicket" class="ticket-success" hidden></div>
                 </aside>
               </div>
             </main>
@@ -125,14 +108,8 @@ public final class BookingEntryServlet extends HttpServlet {
               const showInfo = document.getElementById('showInfo');
               const summary = document.getElementById('summary');
               const message = document.getElementById('message');
-              const holdButton = document.getElementById('holdButton');
               const paymentArea = document.getElementById('paymentArea');
               const payButton = document.getElementById('payButton');
-              const paymentMethods = document.querySelectorAll('input[name="paymentMethod"]');
-              const walletBalance = document.getElementById('walletBalance');
-              const topupAmount = document.getElementById('topupAmount');
-              const topupButton = document.getElementById('topupButton');
-              const walletStatus = document.getElementById('walletStatus');
               // Back/Forward cache can restore stale seat buttons after a completed booking.
               // Bắt buộc reload khi page được restore từ bfcache — browser có thể
               // cache HTML cũ với seat status lỗi thời; reload để render đúng SOLD/HOLD.
@@ -144,6 +121,7 @@ public final class BookingEntryServlet extends HttpServlet {
               let currentShow = null;
               let selectedSeats = [];
               let holdId = null;
+              let holdRequestInFlight = false;
               let quoteRevision = 0;
 
               function node(tag, attrs, text) {
@@ -156,72 +134,8 @@ public final class BookingEntryServlet extends HttpServlet {
                 message.replaceChildren();
                 message.appendChild(node('div', { class: 'flash flash-' + (kind || 'err'), role: 'alert' }, text));
               }
-              function selectedPaymentMethod() {
-                const selected = document.querySelector('input[name="paymentMethod"]:checked');
-                return selected ? selected.value : 'WALLET';
-              }
-              function updatePaymentButton() {
-                payButton.textContent = selectedPaymentMethod() === 'WALLET'
-                  ? 'Thanh toán bằng Ví CinemaHub'
-                  : 'Thanh toán qua VNPay Sandbox';
-                document.querySelectorAll('.payment-method').forEach(item => {
-                  const radio = item.querySelector('input');
-                  item.classList.toggle('selected', radio && radio.checked);
-                });
-              }
-              async function refreshWallet() {
-                try {
-                  const data = await api('/wallet');
-                  walletBalance.textContent = 'Số dư hiện tại: '
-                    + money(data && data.wallet ? data.wallet.balance : 0);
-                  walletStatus.textContent = '';
-                } catch (error) {
-                  walletBalance.textContent = 'Không tải được số dư ví.';
-                  walletStatus.textContent = error.message || 'Vui lòng thử tải lại trang.';
-                }
-              }
               function money(value) {
                 return Number(value || 0).toLocaleString('vi-VN') + 'đ';
-              }
-              function showPaymentSuccess(ticketCode) {
-                const modal = document.createElement('div');
-                modal.className = 'modal';
-                modal.innerHTML = `
-                  <div class="modal-backdrop"></div>
-                  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="paymentSuccessTitle">
-                    <div class="modal-head">
-                      <h2 id="paymentSuccessTitle">Thanh toán thành công</h2>
-                      <button type="button" class="btn secondary modal-x" aria-label="Đóng">×</button>
-                    </div>
-                    <div class="modal-body ticket-result-modal">
-                      <div class="payment-result-icon ok">OK</div>
-                      <h3>Vé của bạn đã sẵn sàng</h3>
-                      <p class="muted">Đưa mã barcode này cho nhân viên tại rạp để vào suất chiếu.</p>
-                      <strong class="ticket-result-code"></strong>
-                      <canvas class="ticket-barcode" width="240" height="82"></canvas>
-                    </div>
-                    <div class="modal-foot">
-                      <a class="btn secondary" href="${ctx}/console?module=booking">Xem vé của tôi</a>
-                      <button type="button" class="btn" data-close-payment>Đóng</button>
-                    </div>
-                  </div>`;
-                document.body.appendChild(modal);
-                modal.querySelector('.ticket-result-code').textContent = ticketCode;
-                if (window.CinemaHub && window.CinemaHub.renderBarcode) {
-                  window.CinemaHub.renderBarcode(modal.querySelector('canvas'), ticketCode);
-                }
-                const dismiss = function () {
-                  modal.remove();
-                  const clean = new URL(location.href);
-                  clean.searchParams.delete('payment');
-                  clean.searchParams.delete('ticketCode');
-                  clean.searchParams.delete('reason');
-                  window.history.replaceState(null, '', clean.pathname + clean.search);
-                  window.location.reload();
-                };
-                modal.querySelector('.modal-backdrop').addEventListener('click', dismiss);
-                modal.querySelector('.modal-x').addEventListener('click', dismiss);
-                modal.querySelector('[data-close-payment]').addEventListener('click', dismiss);
               }
               function holdOwnerId(seat) {
                 return seat.holdUserId ?? seat.hold_user_id ?? seat.userId ?? seat.user_id;
@@ -281,8 +195,6 @@ public final class BookingEntryServlet extends HttpServlet {
                 const revision = ++quoteRevision;
                 if (!currentShow || !selectedSeats.length) {
                   summary.innerHTML = '<p class="muted">Chưa chọn ghế.</p>';
-                  holdButton.disabled = true;
-                  holdButton.textContent = 'Giữ ghế';
                   paymentArea.hidden = true;
                   return;
                 }
@@ -294,8 +206,6 @@ public final class BookingEntryServlet extends HttpServlet {
                   node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seat => seat.rowLabel + seat.colNo).join(', ')),
                   node('div', { class: 'summary-line total' }, 'Đang tính giá…')
                 );
-                holdButton.disabled = true;
-                holdButton.textContent = holdId ? 'Hủy giữ ghế' : 'Giữ ghế';
                 paymentArea.hidden = !holdId;
                 api('/booking/quote', {
                   method: 'POST',
@@ -305,20 +215,17 @@ public final class BookingEntryServlet extends HttpServlet {
                   const lines = [
                     node('div', { class: 'summary-line' }, currentShow.movieTitle || 'Suất chiếu'),
                     node('div', { class: 'summary-line' }, 'Đang chọn: ' + seats.length + ' ghế'),
-                    node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seat => seat.rowLabel + seat.colNo).join(', ')),
-                    node('div', { class: 'summary-line' }, 'Giá vé: ' + money(order.baseTotal))
+                    node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seat => seat.rowLabel + seat.colNo).join(', '))
                   ];
                   lines.push(node('div', { class: 'summary-line total' },
-                    'Cần thanh toán: ' + money(order.payable)));
+                    'Tổng thanh toán: ' + money(order.baseTotal)));
                   summary.replaceChildren(...lines);
-                  holdButton.disabled = false;
                 }).catch(error => {
                   if (revision !== quoteRevision) return;
                   summary.replaceChildren(
                     node('div', { class: 'summary-line' }, currentShow.movieTitle || 'Suất chiếu'),
                     node('div', { class: 'summary-line error' }, 'Không thể tính giá vé.')
                   );
-                  holdButton.disabled = true;
                   notify(error.message);
                 });
               }
@@ -361,23 +268,53 @@ public final class BookingEntryServlet extends HttpServlet {
                     const isOwnHold = belongsToCurrentUser(seat);
                     const isSelected = isOwnHold || selectedSeats.some(item => item.seatId === seat.seatId);
                     if (isSelected) button.classList.add('selected');
-                    const isSelectable = isOwnHold || (status === 'AVAILABLE' && !holdId);
+                    const isSelectable = isOwnHold || status === 'AVAILABLE';
                     if (!isSelectable) button.disabled = true;
                     button.addEventListener('click', async () => {
-                      if (!isSelectable) return;
+                      if (!isSelectable || holdRequestInFlight) return;
+                      // Click = chọn + giữ luôn (không cần nút "Giữ ghế" riêng).
+                      // Nếu 2 khách click cùng lúc, server trả 409 → revert visual + thông báo.
                       if (isOwnHold) {
                         await releaseCurrentHold().catch(error => notify(error.message));
                         return;
                       }
-                      const index = selectedSeats.findIndex(item => item.seatId === seat.seatId);
-                      if (index >= 0) {
-                        selectedSeats.splice(index, 1);
+                      const wasSelected = selectedSeats.some(item => item.seatId === seat.seatId);
+                      if (wasSelected) {
+                        selectedSeats = selectedSeats.filter(item => item.seatId !== seat.seatId);
                         button.classList.remove('selected');
-                      } else {
-                        selectedSeats.push(seat);
-                        button.classList.add('selected');
+                        renderSummary();
+                        return;
                       }
+                      // optimistic add trước khi server xác nhận
+                      selectedSeats.push(seat);
+                      button.classList.add('selected');
                       renderSummary();
+                      holdRequestInFlight = true;
+                      try {
+                        const seatIds = selectedSeats.map(item => item.seatId);
+                        const result = await api('/booking/hold', { method: 'POST', body: {
+                          showtimeId: currentShow.id,
+                          seatIds: seatIds.join(','),
+                          holdId: holdId || ''
+                        }});
+                        if (!result.success) throw new Error(result.message || 'Không giữ được ghế.');
+                        holdId = result.holdId;
+                        paymentArea.hidden = false;
+                        notify('Đã giữ ghế. Bạn có 10 phút để thanh toán.', 'ok');
+                        await selectShow(currentShow);
+                      } catch (error) {
+                        // Server từ chối (ghế bị người khác giữ trước / không khả dụng) → revert.
+                        selectedSeats = selectedSeats.filter(item => item.seatId !== seat.seatId);
+                        button.classList.remove('selected');
+                        renderSummary();
+                        notify(error.message || 'Ghế đã được chọn bởi người khác — vui lòng thử ghế khác.');
+                        // Reload seat map để đồng bộ với server
+                        if (currentShow) {
+                          try { await selectShow(currentShow); } catch (ignored) { /* noop */ }
+                        }
+                      } finally {
+                        holdRequestInFlight = false;
+                      }
                     });
                     row.appendChild(button);
                   }
@@ -426,12 +363,12 @@ public final class BookingEntryServlet extends HttpServlet {
               }
               async function releaseCurrentHold() {
                 if (!holdId || !selectedSeats.length || !currentShow) return;
-                holdButton.disabled = true;
                 await api('/booking/release', {
                   method: 'POST',
                   body: {
                     showtimeId: currentShow.id,
-                    seatIds: selectedSeats.map(seat => seat.seatId).join(',')
+                    seatIds: selectedSeats.map(seat => seat.seatId).join(','),
+                    holdId: holdId
                   }
                 });
                 holdId = null;
@@ -472,42 +409,12 @@ public final class BookingEntryServlet extends HttpServlet {
                 const initial = list.find(show => String(show.id) === selectedFromUrl);
                 if (initial) await selectShow(initial);
               }
-              holdButton.addEventListener('click', async () => {
-                try {
-                  if (holdId) {
-                    await releaseCurrentHold();
-                    return;
-                  }
-                  const seatIds = selectedSeats.map(seat => seat.seatId);
-                  console.log('[CinemaHub booking] HOLD click:', {
-                    showtimeId: currentShow && currentShow.id,
-                    seatIds: seatIds,
-                    count: seatIds.length,
-                    statuses: selectedSeats.map(seat => seatStatus(seat))
-                  });
-                  if (!currentShow || !seatIds.length) {
-                    throw new Error('Vui lòng chọn ít nhất một ghế.');
-                  }
-                  holdButton.disabled = true;
-                  const result = await api('/booking/hold', { method: 'POST', body: {
-                    showtimeId: currentShow.id, seatIds: seatIds.join(',')
-                  }});
-                  if (!result.success) throw new Error(result.message || 'Không giữ được ghế.');
-                  holdId = result.holdId;
-                  paymentArea.hidden = false;
-                  notify('Đã giữ ghế. Bạn có 10 phút để thanh toán.', 'ok');
-                  await selectShow(currentShow);
-                } catch (error) {
-                  holdButton.disabled = false;
-                  notify(error.message);
-                }
-              });
               payButton.addEventListener('click', async () => {
                 try {
                   payButton.disabled = true;
                   const result = await api('/booking/confirm', {
                     method: 'POST',
-                    body: { holdId, paymentMethod: selectedPaymentMethod() }
+                    body: { holdId, paymentMethod: 'VNPAY' }
                   });
                   if (result.redirectUrl) {
                     window.location.href = result.redirectUrl;
@@ -520,7 +427,6 @@ public final class BookingEntryServlet extends HttpServlet {
                     setTimeout(function () { window.CinemaHub.refreshNotifications(); }, 300);
                   }
                   payButton.textContent = 'Đã thanh toán';
-                  holdButton.disabled = true;
                   // Payment has consumed the hold. Clear the client selection first,
                   // then reload the authoritative seat state so the paid seats render
                   // as SOLD instead of remaining red/selected.
@@ -528,37 +434,28 @@ public final class BookingEntryServlet extends HttpServlet {
                   selectedSeats = [];
                   paymentArea.hidden = true;
                   const code = ticket.ticketCode || String(ticket.id);
+                  const success = document.getElementById('successTicket');
+                  success.hidden = false;
+                  const successCode = node('div', { class: 'ticket-success-code' });
+                  successCode.append(node('small', {}, 'Mã vé'), node('strong', {}, code));
+                  success.replaceChildren(
+                    node('h3', {}, 'Vé đã sẵn sàng'),
+                    node('p', { class: 'muted' }, 'Lưu mã vé này và xuất trình cho nhân viên tại rạp.'),
+                    successCode,
+                    node('canvas', { class: 'ticket-barcode', width: '220', height: '76' })
+                  );
+                  if (window.CinemaHub && window.CinemaHub.renderBarcode) {
+                    window.CinemaHub.renderBarcode(success.querySelector('canvas'), code);
+                  }
                   renderSummary();
                   await selectShow(currentShow);
-                  showPaymentSuccess(code);
                 } catch (error) {
                   payButton.disabled = false;
                   notify(error.message);
                 }
               });
-              paymentMethods.forEach(radio => radio.addEventListener('change', updatePaymentButton));
-              topupButton.addEventListener('click', async () => {
-                try {
-                  const amount = Number(topupAmount.value);
-                  if (!amount || amount < 10000 || amount % 10000 !== 0) {
-                    throw new Error('Số tiền nạp phải là bội số của 10.000đ.');
-                  }
-                  topupButton.disabled = true;
-                  walletStatus.textContent = 'Đang tạo giao dịch nạp tiền...';
-                  const result = await api('/wallet/top-up', {
-                    method: 'POST', body: { amount: amount }
-                  });
-                  if (!result || typeof result.redirectUrl !== 'string' || !result.redirectUrl) {
-                    throw new Error('Không nhận được liên kết thanh toán từ máy chủ. Vui lòng thử lại.');
-                  }
-                  window.location.href = result.redirectUrl;
-                } catch (error) {
-                  walletStatus.textContent = error.message || 'Không thể tạo giao dịch nạp tiền.';
-                  topupButton.disabled = false;
-                }
-              });
-              updatePaymentButton();
-              load().then(refreshWallet).catch(error => {
+              payButton.textContent = 'Thanh toán qua VNPay Sandbox';
+              load().catch(error => {
                 showtimesNode.replaceChildren(node('p', { class: 'muted' }, 'Không thể tải suất chiếu: ' + error.message));
               });
 
@@ -573,8 +470,45 @@ public final class BookingEntryServlet extends HttpServlet {
                   if (window.CinemaHub && window.CinemaHub.refreshNotifications) {
                     window.CinemaHub.refreshNotifications();
                   }
-                  // Sau IPN, reload khi đóng để đọc lại trạng thái vé chính thức từ DB.
-                  showPaymentSuccess(__code);
+                  const modal = document.createElement('div');
+                  modal.className = 'booking-payment-modal';
+                  modal.innerHTML = `
+                    <div class="booking-payment-backdrop"></div>
+                    <div class="booking-payment-panel" role="dialog" aria-modal="true" aria-labelledby="bookingPaymentTitle">
+                      <div class="booking-payment-head">
+                        <h2 id="bookingPaymentTitle">Thanh toán thành công</h2>
+                        <button type="button" class="btn secondary booking-payment-close" aria-label="Đóng">×</button>
+                      </div>
+                      <div class="booking-payment-body ticket-result-modal">
+                        <h3>Vé của bạn đã sẵn sàng</h3>
+                        <p class="muted">Lưu mã vé này và xuất trình cho nhân viên tại rạp để vào suất chiếu.</p>
+                        <div class="ticket-success-code"><small>Mã vé</small><strong class="ticket-result-code"></strong></div>
+                        <canvas class="ticket-barcode" width="240" height="82"></canvas>
+                      </div>
+                      <div class="booking-payment-foot">
+                        <a class="btn secondary" href="${ctx}/console/booking/list">Xem vé của tôi</a>
+                        <button type="button" class="btn" id="__closeAndReload">Đóng</button>
+                      </div>
+                    </div>`;
+                  document.body.appendChild(modal);
+                  modal.querySelector('.ticket-result-code').textContent = __code;
+                  if (window.CinemaHub && window.CinemaHub.renderBarcode) {
+                    window.CinemaHub.renderBarcode(modal.querySelector('canvas'), __code);
+                  }
+                  const __dismiss = function () {
+                    modal.remove();
+                    const __clean = new URL(location.href);
+                    __clean.searchParams.delete('payment');
+                    __clean.searchParams.delete('ticketCode');
+                    __clean.searchParams.delete('reason');
+                    window.history.replaceState(null, '', __clean.pathname + __clean.search);
+                    // Sau IPN, reload để frontend đọc lại DB mới nhất — tránh trường hợp
+                    // trang cache hiển thị status "PENDING" dù IPN đã set "CONFIRMED".
+                    window.location.reload();
+                  };
+                  modal.querySelector('.booking-payment-backdrop').addEventListener('click', __dismiss);
+                  modal.querySelector('.booking-payment-close').addEventListener('click', __dismiss);
+                  modal.querySelector('#__closeAndReload').addEventListener('click', __dismiss);
                 } else {
                   // payment=failed: thông báo thân thiện, dọn query
                   const clean = new URL(location.href);

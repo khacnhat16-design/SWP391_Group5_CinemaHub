@@ -1,19 +1,20 @@
 package com.cinema.controller;
 
-import com.cinema.model.auth.CustomerProfile;
+import com.cinema.controller.payment.VnPayDemoServlet;
+
 import com.cinema.dao.auth.CustomerProfileDAO;
 import com.cinema.service.auth.AuthService;
 import com.cinema.model.auth.User;
 import com.cinema.dao.auth.UserDAO;
+import com.cinema.dao.branch.BranchDAO;
 import com.cinema.common.ServiceException;
 import com.cinema.model.movie.Movie;
 import com.cinema.dao.movie.MovieDAO;
+import com.cinema.dao.screen.ScreenDAO;
 import com.cinema.service.site.SiteSettingService;
-import com.cinema.model.wallet.Wallet;
-import com.cinema.dao.wallet.WalletDAO;
-import com.cinema.model.auth.Role;
-import com.cinema.model.branch.Branch;
-import com.cinema.model.movie.Genre;
+import com.cinema.model.showtime.Showtime;
+import com.cinema.dao.showtime.ShowtimeDAO;
+import com.cinema.service.showtime.ShowtimeService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,6 +23,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
 
@@ -31,8 +33,9 @@ public final class CinemaServlet extends HttpServlet {
     private final UserDAO userDao = new UserDAO();
     private final CustomerProfileDAO profileDao = new CustomerProfileDAO();
     private final AuthService authService = new AuthService(userDao, profileDao);
-    private final WalletDAO walletDao = new WalletDAO();
     private final SiteSettingService siteSettingService = new SiteSettingService();
+    private final ShowtimeService showtimeService = new ShowtimeService(
+            new ShowtimeDAO(), new ScreenDAO(), movieDao, new BranchDAO());
 
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
@@ -64,8 +67,8 @@ public final class CinemaServlet extends HttpServlet {
             }
             return;
         }
-        if (path.equals("/console") || path.startsWith("/console/")) {
-            renderConsoleShell(request, response);
+        if ("/movie-detail".equals(path)) {
+            renderMovieDetail(request, response);
             return;
         }
         if (path.startsWith("/vnpay/demo")) {
@@ -84,13 +87,13 @@ public final class CinemaServlet extends HttpServlet {
             response.sendRedirect(request.getContextPath() + "/");
             return;
         }
-        // Admin/Manager/Staff đã đăng nhập vào trang chủ → đẩy thẳng vào Dashboard.
+        // Admin/Manager/Staff đã đăng nhập vào trang chủ → vào khu vực quản lý.
         var session = request.getSession(false);
         if (session != null && session.getAttribute("userId") != null) {
             Object roleObj = session.getAttribute("role");
             String role = roleObj == null ? "" : String.valueOf(roleObj);
             if ("ADMIN".equals(role) || "BRANCH_MANAGER".equals(role) || "BRANCH_STAFF".equals(role)) {
-                response.sendRedirect(request.getContextPath() + "/console?module=dashboard");
+                response.sendRedirect(request.getContextPath() + "/console");
                 return;
             }
         }
@@ -129,12 +132,12 @@ public final class CinemaServlet extends HttpServlet {
             <meta name="ctx" content="%s">
             <meta name="user-role" content="%s">
             <title>CinemaHub</title>
-            <link rel="stylesheet" href="%s/assets/css/cinema.css?v=20260917-1"></head><body>
+            <link rel="stylesheet" href="%s/assets/css/cinema.css?v=20261003-genres-1"></head><body>
             <header class="nav-wrapper"><div class="nav container">
             <a class="logo" href="%s/"><span class="logo-mark">C</span>Cinema<span class="accent">Hub</span></a>
             <nav><a href="%s/">Trang ch&#7911;</a><a href="%s/#movies">Phim</a>
             <a href="%s/discover">Su&#7845;t chi&#7871;u</a>%s</nav></div></header>
-            <main><section class="hero" style="background-image:url('%s')"><div class="hero-overlay"></div>
+            <main><section class="hero" style="background-image:linear-gradient(90deg,rgba(8,8,10,.78) 0%%,rgba(8,8,10,.45) 50%%,rgba(8,8,10,.12) 100%%),url('%s');background-size:cover;background-position:center;background-repeat:no-repeat"><div class="hero-overlay"></div>
             <div class="hero-content container"><span class="eyebrow">MULTI-BRANCH CINEMA</span>
             <h1>&#272;i&#7879;n &#7843;nh hay.<br><span class="accent">Tr&#7843;i nghi&#7879;m tuy&#7879;t v&#7901;i.</span></h1>
             <p>Kh&#225;m ph&#225; phim &#273;ang chi&#7871;u, su&#7845;t chi&#7871;u v&#224; chi nh&#225;nh CinemaHub.</p>
@@ -142,10 +145,19 @@ public final class CinemaServlet extends HttpServlet {
             <a class="btn ghost" href="%s/booking">&#272;&#7863;t v&#233; ngay</a></div></div></section>
             <section id="movies" class="section container"><div class="section-heading">
             <div><span class="eyebrow">NOW SHOWING</span><h2>Phim &#273;ang chi&#7871;u</h2></div>
-            </div><div class="movie-grid">
+            </div><label class="genre-filter-label" for="customerGenreFilter">Thể loại phim
+            <select id="customerGenreFilter" class="genre-filter"><option value="">Tất cả thể loại</option>
             """, ctx, currentRole(request), ctx, ctx, ctx, ctx, ctx, accountNav, bannerUrl, ctx, ctx);
+        out.println("</select></label>"
+                + "<p id=\"genreFilterEmpty\" class=\"empty-state\" hidden>Không có phim thuộc thể loại này.</p>"
+                + "<p id=\"genreFilterStatus\" class=\"genre-filter-status\" role=\"status\" hidden></p>"
+                + "<div class=\"movie-grid\" id=\"customerMovieGrid\">");
         try {
-            List<Movie> movies = movieDao.findPublished(LocalDate.now());
+            // Public landing page cần show MỌI phim PUBLISHED (kể cả "Sắp chiếu"
+            // với release_date tương lai hoặc "Ngừng chiếu" với end_date đã qua)
+            // — filter date-range hẹp của findPublished() khiến nhiều phim biến mất
+            // ngay khi Admin tạo mới. UI sẽ tự gắn badge theo ngày.
+            List<Movie> movies = movieDao.findPublishedAll();
             if (movies.isEmpty()) out.println("<p class=\"empty-state\">Ch&#432;a c&#243; phim &#273;ang chi&#7871;u.</p>");
             else for (Movie movie : movies) renderMovieClean(out, ctx, movie);
         } catch (Exception e) {
@@ -157,7 +169,48 @@ public final class CinemaServlet extends HttpServlet {
             <span>H&#7879; th&#7889;ng qu&#7843;n l&#253; r&#7841;p phim &#273;a chi nh&#225;nh</span>
             </div></footer>
             <script>window.CINEMA_CONTEXT = '%s';</script>
-            <script src="%s/assets/js/app.js?v=20260914-6" defer></script>
+            <script src="%s/assets/js/app.js?v=20261003-notification-time-2" defer></script>
+            <script>
+              document.addEventListener('DOMContentLoaded', function () {
+                var filter = document.getElementById('customerGenreFilter');
+                var cards = Array.from(document.querySelectorAll('#customerMovieGrid .movie-card'));
+                var empty = document.getElementById('genreFilterEmpty');
+                var status = document.getElementById('genreFilterStatus');
+                if (!filter) return;
+                if (!cards.length) {
+                  filter.disabled = true;
+                  empty.hidden = true;
+                  return;
+                }
+                fetch((window.CINEMA_CONTEXT || '') + '/movie/genres', { credentials: 'same-origin' })
+                  .then(function (response) {
+                    if (!response.ok) throw new Error('Không thể tải danh mục thể loại phim.');
+                    return response.json();
+                  })
+                  .then(function (genres) {
+                    genres.forEach(function (genre) {
+                      filter.appendChild(new Option(genre.name, genre.name));
+                    });
+                  })
+                  .catch(function () {
+                    status.textContent = 'Không thể tải danh mục thể loại phim. Vui lòng thử tải lại trang.';
+                    status.hidden = false;
+                  });
+                filter.addEventListener('change', function () {
+                  var selected = filter.value.toLocaleLowerCase();
+                  var visible = 0;
+                  cards.forEach(function (card) {
+                    var genres = (card.dataset.genres || '').split('|').map(function (g) {
+                      return g.trim().toLocaleLowerCase();
+                    });
+                    var show = !selected || genres.includes(selected);
+                    card.hidden = !show;
+                    if (show) visible++;
+                  });
+                  empty.hidden = visible !== 0;
+                });
+              });
+            </script>
             </body></html>
             """, ctx, ctx, ctx);
     }
@@ -172,26 +225,33 @@ public final class CinemaServlet extends HttpServlet {
         if (!(value instanceof Long userId)) return "";
         try {
             User user = userDao.findById(userId).orElse(null);
-            CustomerProfile profile = profileDao.findByUserId(userId).orElse(null);
-            walletDao.ensureWallet(userId);
-            Wallet wallet = walletDao.findByUser(userId).orElse(null);
             String name = user == null ? String.valueOf(session.getAttribute("username")) : user.fullName();
-            int points = profile == null ? 0 : profile.points();
-            long balance = wallet == null ? 0 : wallet.balance();
             session.setAttribute("username", name);
-            return "<span class=\"account-summary\"><strong>" + escape(name)
-                    + "</strong><small>" + points + " &#273;i&#7875;m &#183; " + formatMoneyHtml(balance)
-                    + "</small></span>"
-                    + "<button id=\"notificationBell\" class=\"nav-bell\" type=\"button\" aria-label=\"Thong bao\">"
-                    + "<span aria-hidden=\"true\">&#128276;</span><span id=\"notifCount\" class=\"nav-badge\" hidden>0</span>"
-                    + "</button><div id=\"notificationPopover\" class=\"notification-popover\" hidden></div>"
-                    + "<a class=\"btn ghost\" href=\"" + ctx + "/console?module=profile\">H&#7891; s&#417;</a>"
-                    + "<a class=\"btn\" href=\"" + ctx + "/logout\">&#272;&#259;ng xu&#7845;t</a>";
+            return renderCustomerHeaderNav(ctx, name);
         } catch (Exception e) {
-            return "<span class=\"account-summary\"><strong>"
-                    + escape(String.valueOf(session.getAttribute("username")))
-                    + "</strong></span><a class=\"btn\" href=\"" + ctx + "/logout\">&#272;&#259;ng xu&#7845;t</a>";
+            String fallbackName = String.valueOf(session.getAttribute("username"));
+            return renderCustomerHeaderNav(ctx, fallbackName);
         }
+    }
+
+    private String renderCustomerHeaderNav(String ctx, String name) {
+        String safeName = name == null ? "Customer" : name.trim();
+        if (safeName.isEmpty()) safeName = "Customer";
+        String initial = safeName.substring(0, 1).toUpperCase(Locale.ROOT);
+        return "<span class=\"nav-notif-wrap\">"
+                + "<button class=\"nav-bell\" type=\"button\" id=\"notificationBell\" aria-label=\"Thông báo\" aria-expanded=\"false\" title=\"Thông báo\">"
+                + "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\">"
+                + "<path d=\"M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9\"/>"
+                + "<path d=\"M13.73 21a2 2 0 0 1-3.46 0\"/>"
+                + "</svg>"
+                + "<span id=\"notifCount\" class=\"badge\" style=\"display:none\"></span>"
+                + "</button>"
+                + "<div class=\"notification-popover\" id=\"notificationPopover\" hidden></div>"
+                + "</span>"
+                + "<a class=\"btn ghost nav-user-btn\" href=\"" + ctx + "/console?module=profile\">"
+                + "<span class=\"nav-avatar\">" + escape(initial) + "</span>"
+                + "<span class=\"nav-username\">" + escape(safeName) + "</span>"
+                + "</a>";
     }
 
     private void renderMovieClean(PrintWriter out, String ctx, Movie movie) {
@@ -199,13 +259,169 @@ public final class CinemaServlet extends HttpServlet {
         String poster = movie.posterUrl();
         String image = poster == null || poster.isBlank()
                 ? "<div class=\"poster-placeholder\">No poster</div>"
-                : "<img src=\"" + escape(resolveAssetUrl(ctx, poster)) + "\" alt=\"" + title + "\">";
-        out.println("<article class=\"movie-card\"><div class=\"poster\">" + image
+                : "<img data-poster-fallback=\"poster-placeholder\" loading=\"lazy\" referrerpolicy=\"no-referrer\" src=\""
+                        + escape(resolveAssetUrl(ctx, poster)) + "\" alt=\"" + title + "\">";
+        String genreData = String.join("|", genreTokens(movie.genre())).toLowerCase(Locale.ROOT);
+        out.println("<article class=\"movie-card\" data-genres=\"" + escape(genreData) + "\"><div class=\"poster\"><a href=\"" + ctx
+                + "/movie-detail?movieId=" + movie.id() + "\">" + image + "</a>"
                 + "<span class=\"rating\">&#9733; " + escape(movie.rating()) + "</span>"
                 + "<a class=\"quick-book\" href=\"" + ctx + "/booking?movieId=" + movie.id()
                 + "\">&#272;&#7863;t v&#233;</a>"
                 + "</div><div class=\"movie-info\"><h3>" + title + "</h3><p>"
                 + escape(movie.genre()) + " &#183; " + movie.durationMin() + " mins</p></div></article>");
+    }
+
+    private List<String> genreTokens(String genre) {
+        if (genre == null || genre.isBlank()) return List.of();
+        return java.util.Arrays.stream(genre.split("[,;/]"))
+                .map(String::trim).filter(value -> !value.isEmpty()).toList();
+    }
+
+    private void renderMovieDetail(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        Long movieId;
+        try {
+            movieId = Long.valueOf(request.getParameter("movieId"));
+        } catch (Exception e) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND, "Phim không tồn tại");
+            return;
+        }
+
+        Movie movie;
+        try {
+            movie = movieDao.findById(movieId)
+                    .filter(Movie::isPublished)
+                    .orElse(null);
+        } catch (Exception e) {
+            response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                    "Không thể tải thông tin phim");
+            return;
+        }
+        if (movie == null) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND, "Phim không tồn tại");
+            return;
+        }
+
+        String ctx = request.getContextPath();
+        String title = escape(movie.title());
+        String poster = movie.posterUrl();
+        String image = poster == null || poster.isBlank()
+                ? "<div class=\"poster-placeholder\">No poster</div>"
+                : "<img data-poster-fallback=\"poster-placeholder\" loading=\"lazy\" referrerpolicy=\"no-referrer\" src=\""
+                        + escape(resolveAssetUrl(ctx, poster)) + "\" alt=\"" + title + "\">";
+
+        // Header động: nếu Customer đã login → renderAccountNavClean (Hồ sơ + Đăng xuất).
+        // Nếu guest → "Đăng nhập" + "Đăng ký".
+        String accountNav = renderAccountNavClean(request, ctx);
+        Long currentUserId = currentUserId(request);
+        String role = currentRole(request);
+        String movieShowtimes = renderMovieShowtimes(ctx, movieId);
+
+        response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        response.setContentType("text/html;charset=UTF-8");
+        response.getWriter().printf("""
+            <!doctype html><html lang="vi"><head><meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <meta name="ctx" content="%s">
+            <meta name="user-role" content="%s">
+            <meta name="user-id" content="%s">
+            <title>%s - CinemaHub</title>
+            <link rel="stylesheet" href="%s/assets/css/cinema.css?v=20261003-discovery-group-1">
+            <link rel="stylesheet" href="%s/assets/css/workspace.css?v=20261012-review-ui-2">
+            <link rel="stylesheet" href="%s/assets/css/rsc.css?v=20261012-review-ui-2">
+            </head><body class="movie-detail-page">
+            <header class="nav-wrapper"><div class="nav container">
+              <a class="logo" href="%s/"><span class="logo-mark">C</span>Cinema<span class="accent">Hub</span></a>
+              <nav><a href="%s/">Trang ch&#7911;</a><a href="%s/discover">Su&#7845;t chi&#7871;u</a>%s</nav>
+            </div></header>
+            <main class="container section"><div class="panel movie-detail-panel" style="display:grid;grid-template-columns:minmax(180px,280px) 1fr;gap:28px;padding:28px">
+              <div class="poster">%s</div><div class="movie-meta">
+                <span class="eyebrow">MOVIE DETAIL</span>
+                <h1>%s</h1>
+                <p class="muted">%s &#183; %d ph&#250;t &#183; Kh&#7899;i chi&#7871;u %s</p>
+                <p class="movie-description">%s</p>
+                <div class="movie-actions"><a class="btn" href="%s/booking?movieId=%d">&#272;&#7863;t v&#233;</a></div>
+              </div>
+            </div>
+            %s
+            <section class="container section reviews-section">
+              <div class="section-heading"><div><span class="eyebrow">REVIEWS &amp; RATINGS</span><h2>&#272;&#225;nh gi&#225; &amp; nh&#7853;n x&#233;t</h2></div></div>
+              <div id="reviewsRoot" class="ws-reviews-root"></div>
+            </section>
+            </main>
+            <footer><div class="container footer-inner">
+              <a class="logo" href="%s/">Cinema<span class="accent">Hub</span></a>
+              <span>H&#7879; th&#7889;ng qu&#7843;n l&#253; r&#7841;p phim &#273;a chi nh&#225;nh</span>
+            </div></footer>
+            <script>window.CINEMA_CONTEXT = '%s';</script>
+            <script src="%s/assets/js/app.js?v=20261003-notification-time-2" defer></script>
+            <script src="%s/assets/js/modules-rsc.js?v=20261012-review-delete-2" defer></script>
+            <script>
+              document.addEventListener('DOMContentLoaded', function () {
+                var root = document.getElementById('reviewsRoot');
+                if (root && window.CinemaHubReviews && typeof window.CinemaHubReviews.renderForMovie === 'function') {
+                  window.CinemaHubReviews.renderForMovie(%d, root);
+                } else if (root) {
+                  root.innerHTML = '<p class="ws-muted">Ch&#7913;c n&#259;ng &#273;ang &#273;&#432;&#7907;c t&#7843;i...</p>';
+                }
+              });
+            </script>
+            </body></html>
+            """, ctx, role, currentUserId == null ? "" : currentUserId.toString(),
+                title,
+                ctx, ctx, ctx,
+                ctx, ctx, ctx, accountNav,
+                image,
+                title,
+                escape(movie.genre()), movie.durationMin(), movie.releaseDate(),
+                escape(movie.description()),
+                ctx, movie.id(),
+                movieShowtimes,
+                ctx,
+                ctx,
+                ctx, ctx,
+                movieId);
+    }
+
+    private String renderMovieShowtimes(String ctx, long movieId) {
+        StringBuilder html = new StringBuilder("""
+                <section class="section movie-venues">
+                  <div class="section-heading"><div><span class="eyebrow">SHOWTIMES</span>
+                    <h2>Rạp và suất chiếu</h2></div></div>
+                """);
+        try {
+            List<Showtime> showtimes = showtimeService.discover(null, movieId, null);
+            if (showtimes.isEmpty()) {
+                html.append("<p class=\"empty-state\">Hiện chưa có suất chiếu sắp tới cho phim này.</p>");
+            } else {
+                for (Showtime showtime : showtimes) {
+                    html.append("<article class=\"panel movie-venue-row\"><div><b>")
+                            .append(escape(showtime.branchName()))
+                            .append("</b><span>")
+                            .append(escape(showtime.screenName()))
+                            .append(" · ")
+                            .append(escape(String.valueOf(showtime.startTime()).replace('T', ' ')))
+                            .append("</span></div><strong>")
+                            .append(showtime.availableSeats())
+                            .append(" ghế trống</strong><a class=\"btn small\" href=\"")
+                            .append(ctx).append("/booking?movieId=").append(movieId)
+                            .append("\">Đặt vé</a></article>");
+                }
+            }
+        } catch (Exception e) {
+            html.append("<p class=\"empty-state\">Không thể tải danh sách rạp và suất chiếu. Vui lòng thử lại.</p>");
+        }
+        return html.append("</section>").toString();
+    }
+
+    /**
+     * Helper: lấy currentUserId từ session (Long) — null nếu chưa login.
+     */
+    private Long currentUserId(HttpServletRequest request) {
+        var session = request.getSession(false);
+        if (session == null) return null;
+        Object value = session.getAttribute("userId");
+        return value instanceof Long l ? l : null;
     }
 
     private String formatMoneyHtml(long amount) {
@@ -235,7 +451,7 @@ public final class CinemaServlet extends HttpServlet {
             <a class="logo" href="%s/"><span class="logo-mark">C</span>Cinema<span class="accent">Hub</span></a>
             <nav><a href="%s/">Trang chÃ¡Â»Â§</a><a href="%s/#movies">Phim</a>
             <a href="%s/discover">SuÃ¡ÂºÂ¥t chiÃ¡ÂºÂ¿u</a>%s</nav></div></header>
-            <main><section class="hero" style="background-image:url('%s')"><div class="hero-overlay"></div>
+            <main><section class="hero" style="background-image:linear-gradient(90deg,rgba(8,8,10,.78) 0%%,rgba(8,8,10,.45) 50%%,rgba(8,8,10,.12) 100%%),url('%s');background-size:cover;background-position:center;background-repeat:no-repeat"><div class="hero-overlay"></div>
             <div class="hero-content container"><span class="eyebrow">MULTI-BRANCH CINEMA</span>
             <h1>Ã„ÂiÃ¡Â»â€¡n Ã¡ÂºÂ£nh hay.<br><span class="accent">TrÃ¡ÂºÂ£i nghiÃ¡Â»â€¡m tuyÃ¡Â»â€¡t vÃ¡Â»Âi.</span></h1>
             <p>KhÃƒÂ¡m phÃƒÂ¡ phim Ã„â€˜ang chiÃ¡ÂºÂ¿u, suÃ¡ÂºÂ¥t chiÃ¡ÂºÂ¿u vÃƒÂ  chi nhÃƒÂ¡nh CinemaHub.</p>
@@ -258,86 +474,29 @@ public final class CinemaServlet extends HttpServlet {
             <span>HÃ¡Â»â€¡ thÃ¡Â»â€˜ng quÃ¡ÂºÂ£n lÃƒÂ½ rÃ¡ÂºÂ¡p phim Ã„â€˜a chi nhÃƒÂ¡nh</span>
             </div></footer>
             <script>window.CINEMA_CONTEXT = '%s';</script>
-            <script src="%s/assets/js/app.js?v=20260914-1" defer></script>
+            <script src="%s/assets/js/app.js?v=20261003-notification-time-2" defer></script>
             </body></html>
             """, ctx, ctx, ctx);
-    }
-
-    private void renderConsoleShell(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        var session = request.getSession(false);
-        if (session == null || session.getAttribute("userId") == null) {
-            response.sendRedirect(request.getContextPath() + "/admin/login");
-            return;
-        }
-        String ctx = request.getContextPath();
-        String role = escape(String.valueOf(session.getAttribute("role")));
-        String name = escape(String.valueOf(session.getAttribute("username")));
-        String notificationNav = "CUSTOMER".equals(role)
-                ? "<button id=\"notificationBell\" class=\"nav-bell\" type=\"button\" aria-label=\"Notifications\">"
-                    + "<span aria-hidden=\"true\">&#128276;</span><span id=\"notifCount\" class=\"nav-badge\" hidden>0</span>"
-                    + "</button><div id=\"notificationPopover\" class=\"notification-popover\" hidden></div>"
-                : "";
-        response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-        response.setContentType("text/html;charset=UTF-8");
-        response.getWriter().printf("""
-            <!doctype html><html lang="vi"><head><meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width,initial-scale=1">
-            <meta name="ctx" content="%s">
-            <meta name="user-role" content="%s">
-            <title>CinemaHub Workspace</title>
-            <link rel="stylesheet" href="%s/assets/css/cinema.css?v=20260914-4">
-            <link rel="stylesheet" href="%s/assets/css/dashboard.css?v=20260914-4">
-            <link rel="stylesheet" href="%s/assets/css/workspace.css?v=20260917-1"></head><body class="admin-page">
-            <header class="nav-wrapper"><div class="nav container">
-            <a class="logo" href="%s/">Cinema<span class="accent">Hub</span></a>
-            <nav><span class="account-summary"><strong>%s</strong><small>%s</small></span>%s
-            <a class="btn ghost" href="%s/">Trang ch&#7911;</a>
-            <a class="btn" href="%s/logout">&#272;&#259;ng xu&#7845;t</a></nav></div></header>
-            <main class="app-shell">
-              <div class="app-main">
-                <div class="container dashboard"><div id="viewRoot"></div></div>
-              </div>
-            </main>
-            <script>window.CINEMA_CONTEXT = '%s';</script>
-            <script src="%s/assets/js/app.js?v=20260914-8" defer></script>
-            <script src="%s/assets/js/rest-page.js?v=20260914-8" defer></script>
-            <script src="%s/assets/js/console.js?v=20260914-8" defer></script>
-            </body></html>
-            """, ctx, role, ctx, ctx, ctx, name, role, notificationNav,
-                ctx, ctx, ctx, ctx, ctx, ctx);
     }
 
     private String renderAccountNav(HttpServletRequest request, String ctx) {
         var session = request.getSession(false);
         if (session == null || session.getAttribute("userId") == null) {
-            return "<a class=\"btn ghost\" href=\"" + ctx + "/login\">Ã„ÂÃ„Æ’ng nhÃ¡ÂºÂ­p</a>"
-                    + "<a class=\"btn\" href=\"" + ctx + "/register\">Ã„ÂÃ„Æ’ng kÃƒÂ½</a>";
+            return "<a class=\"btn ghost\" href=\"" + ctx + "/login\">&#272;&#259;ng nh&#7853;p</a>"
+                    + "<a class=\"btn\" href=\"" + ctx + "/register\">&#272;&#259;ng k&#253;</a>";
         }
         Object value = session.getAttribute("userId");
         if (!(value instanceof Long userId)) return "";
         try {
             User user = userDao.findById(userId).orElse(null);
-            CustomerProfile profile = profileDao.findByUserId(userId).orElse(null);
-            walletDao.ensureWallet(userId);
-            Wallet wallet = walletDao.findByUser(userId).orElse(null);
             String name = user == null ? String.valueOf(session.getAttribute("username")) : user.fullName();
-            int points = profile == null ? 0 : profile.points();
-            long balance = wallet == null ? 0 : wallet.balance();
             session.setAttribute("username", name);
-            return "<span class=\"account-summary\"><strong>" + escape(name)
-                    + "</strong><small>" + points + " Ã„â€˜iÃ¡Â»Æ’m Ã‚Â· " + formatMoney(balance)
-                    + "</small></span>"
-                    + "<button id=\"notificationBell\" class=\"nav-bell\" type=\"button\" aria-label=\"Notifications\">"
-                    + "<span aria-hidden=\"true\">&#128276;</span><span id=\"notifCount\" class=\"nav-badge\" hidden>0</span>"
-                    + "</button><div id=\"notificationPopover\" class=\"notification-popover\" hidden></div>"
-                    + "<a class=\"btn ghost\" href=\"" + ctx
-                    + "/console?module=profile\">HÃ¡Â»â€œ sÃ†Â¡</a><a class=\"btn\" href=\"" + ctx
-                    + "/logout\">Ã„ÂÃ„Æ’ng xuÃ¡ÂºÂ¥t</a>";
+            return renderCustomerHeaderNav(ctx, name)
+                    + "<a class=\"btn ghost\" href=\"" + ctx + "/logout\">Thoát</a>";
         } catch (Exception e) {
-            return "<span class=\"account-summary\"><strong>"
-                    + escape(String.valueOf(session.getAttribute("username")))
-                    + "</strong></span><a class=\"btn\" href=\"" + ctx + "/logout\">Ã„ÂÃ„Æ’ng xuÃ¡ÂºÂ¥t</a>";
+            String fallbackName = String.valueOf(session.getAttribute("username"));
+            return renderCustomerHeaderNav(ctx, fallbackName)
+                    + "<a class=\"btn ghost\" href=\"" + ctx + "/logout\">Thoát</a>";
         }
     }
 
@@ -352,7 +511,8 @@ public final class CinemaServlet extends HttpServlet {
         String poster = movie.posterUrl();
         String image = poster == null || poster.isBlank()
                 ? "<div class=\"poster-placeholder\">No poster</div>"
-                : "<img src=\"" + escape(resolveAssetUrl(ctx, poster)) + "\" alt=\"" + title + "\">";
+                : "<img data-poster-fallback=\"poster-placeholder\" loading=\"lazy\" referrerpolicy=\"no-referrer\" src=\""
+                        + escape(resolveAssetUrl(ctx, poster)) + "\" alt=\"" + title + "\">";
         out.println("<article class=\"movie-card\"><div class=\"poster\">" + image
                 + "<span class=\"rating\">Ã¢Ëœâ€¦ " + escape(movie.rating()) + "</span>"
                 + "<a class=\"quick-book\" href=\"" + ctx + "/booking?movieId=" + movie.id()
@@ -365,70 +525,6 @@ public final class CinemaServlet extends HttpServlet {
         if (url == null || url.isBlank()) return "";
         if (url.startsWith("http://") || url.startsWith("https://")) return url;
         return url.startsWith("/") ? ctx + url : ctx + "/" + url;
-    }
-
-    private String formatMoney(long amount) {
-        return String.format(Locale.US, "%,dÃ„â€˜", amount);
-    }
-
-    private void renderProfile(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        String ctx = request.getContextPath();
-        var session = request.getSession(false);
-        if (session == null || !(session.getAttribute("userId") instanceof Long userId)) {
-            response.sendRedirect(ctx + "/login");
-            return;
-        }
-        try {
-            User user = userDao.findById(userId).orElseThrow();
-            CustomerProfile profile = profileDao.findByUserId(userId).orElse(null);
-            walletDao.ensureWallet(userId);
-            Wallet wallet = walletDao.findByUser(userId).orElse(null);
-            String profileForm = "<section class=\"panel\"><h2>Chinh sua ho so</h2>"
-                    + "<form class=\"profile-edit-form\" method=\"post\" action=\"" + ctx + "/profile\">"
-                    + "<label><span>Ho ten</span><input name=\"fullName\" value=\""
-                    + escape(user.fullName()) + "\" required minlength=\"2\"></label>"
-                    + "<label><span>So dien thoai</span><input name=\"phone\" value=\""
-                    + escape(user.phone()) + "\" required pattern=\"0[0-9]{9}\"></label>"
-                    + "<button class=\"btn\" type=\"submit\">Cap nhat ho so</button>"
-                    + "</form></section>";
-            response.setContentType("text/html;charset=UTF-8");
-            response.getWriter().printf("""
-                <!doctype html><html lang="vi"><head><meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width,initial-scale=1">
-                <link rel="stylesheet" href="%s/assets/css/cinema.css">
-                <title>HÃ¡Â»â€œ sÃ†Â¡ - CinemaHub</title></head><body>
-                <header class="nav-wrapper"><div class="nav container">
-                <a class="logo" href="%s/">Cinema<span class="accent">Hub</span></a>
-                <nav><a href="%s/">Trang chÃ¡Â»Â§</a><a href="%s/discover">SuÃ¡ÂºÂ¥t chiÃ¡ÂºÂ¿u</a>
-                <a class="btn" href="%s/logout">Ã„ÂÃ„Æ’ng xuÃ¡ÂºÂ¥t</a></nav></div></header>
-                <main class="container section"><div class="page-heading">
-                <div><span class="eyebrow">MY ACCOUNT</span><h1>HÃ¡Â»â€œ sÃ†Â¡ ngÃ†Â°Ã¡Â»Âi dÃƒÂ¹ng</h1>
-                <p class="muted">ThÃƒÂ´ng tin tÃƒÂ i khoÃ¡ÂºÂ£n, Ã„â€˜iÃ¡Â»Æ’m thÃƒÂ nh viÃƒÂªn vÃƒÂ  vÃƒÂ­ CinemaHub.</p></div>
-                </div><div class="dashboard-grid">
-                <section class="panel"><h2>ThÃƒÂ´ng tin tÃƒÂ i khoÃ¡ÂºÂ£n</h2>
-                <div class="summary-line"><span>HÃ¡Â»Â tÃƒÂªn</span><strong>%s</strong></div>
-                <div class="summary-line"><span>Email</span><strong>%s</strong></div>
-                <div class="summary-line"><span>SÃ¡Â»â€˜ Ã„â€˜iÃ¡Â»â€¡n thoÃ¡ÂºÂ¡i</span><strong>%s</strong></div>
-                <div class="summary-line"><span>Vai trÃƒÂ²</span><strong>%s</strong></div></section>
-                <section class="panel"><h2>ThÃƒÂ nh viÃƒÂªn vÃƒÂ  vÃƒÂ­</h2>
-                <div class="summary-line"><span>HÃ¡ÂºÂ¡ng thÃƒÂ nh viÃƒÂªn</span><strong>%s</strong></div>
-                <div class="summary-line"><span>Ã„ÂiÃ¡Â»Æ’m tÃƒÂ­ch lÃ…Â©y</span><strong>%d Ã„â€˜iÃ¡Â»Æ’m</strong></div>
-                <div class="summary-line total"><span>SÃ¡Â»â€˜ dÃ†Â° vÃƒÂ­</span><strong>%s</strong></div>
-                </section>%s</div></main>
-                <script>window.CINEMA_CONTEXT = '%s';</script>
-                <script src="%s/assets/js/app.js?v=20260914-3" defer></script>
-                </body></html>
-                """, ctx, ctx, ctx, ctx, ctx, escape(user.fullName()), escape(user.email()),
-                    escape(user.phone()), escape(user.role().name()),
-                    profile == null ? "STANDARD" : escape(profile.tier()),
-                    profile == null ? 0 : profile.points(),
-                    formatMoney(wallet == null ? 0 : wallet.balance()),
-                    profileForm, ctx, ctx);
-        } catch (Exception e) {
-            response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "KhÃƒÂ´ng thÃ¡Â»Æ’ tÃ¡ÂºÂ£i hÃ¡Â»â€œ sÃ†Â¡");
-        }
     }
 
     private void updateProfile(HttpServletRequest request, HttpServletResponse response) throws IOException {

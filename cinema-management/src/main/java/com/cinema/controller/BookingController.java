@@ -1,469 +1,770 @@
 package com.cinema.controller;
 
+import com.cinema.dao.movie.MovieDAO;
+import com.cinema.dao.pricing.PricingConfigDAO;
+import com.cinema.dao.screen.ScreenDAO;
+import com.cinema.infrastructure.database.DBContext;
+import com.cinema.model.branch.Branch;
+import com.cinema.util.HmacUtil;
+
+import com.cinema.model.auth.AccessScope;
+import com.cinema.model.auth.Role;
+import com.cinema.model.auth.User;
+import com.cinema.dao.auth.UserDAO;
 import com.cinema.service.booking.BookingService;
 import com.cinema.model.booking.HoldResult;
+import com.cinema.dao.booking.SeatHoldDAO;
 import com.cinema.model.booking.Ticket;
+import com.cinema.dao.booking.TicketDAO;
+import com.cinema.common.ErrorEnvelope;
 import com.cinema.common.SerializationUtil;
 import com.cinema.common.ServiceException;
-import com.cinema.model.branch.Branch;
+import com.cinema.filter.AuthFilter;
+import com.cinema.service.payment.MockGatewayProvider;
+import com.cinema.model.payment.Payment;
+import com.cinema.dao.payment.PaymentDAO;
+import com.cinema.service.payment.PaymentService;
+import com.cinema.model.payment.VnPayConfig;
+import com.cinema.service.payment.VnPayProvider;
+import com.cinema.model.payment.VnPayUtil;
+import com.cinema.dao.notification.NotificationDAO;
+import com.cinema.service.notification.NotificationService;
+import com.cinema.dao.pricing.PriceRuleDAO;
+import com.cinema.service.pricing.PricingService;
+import com.cinema.model.pricing.TicketType;
+import com.cinema.dao.showtime.ShowtimeDAO;
+import com.cinema.service.showtime.ShowtimeService;
+import com.cinema.model.showtime.Showtime;
 import jakarta.servlet.ServletException;
-import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
- * REST API controller cho booking flow (Req 7, 8, 11, 12).
- * Chức năng: Đặt vé xem phim (Booking Flow) — Giữ ghế, xác nhận vé, hủy vé và soát vé.
+ * REST API controller cho booking flow (Req 7, 8, 11).
  *
  * <p>Endpoints:
  * <ul>
- *   <li>POST /booking/quote — Báo giá tạm tính trước khi giữ ghế.</li>
  *   <li>POST /booking/hold — Customer giữ ghế 10 phút (Req 7.1).</li>
- *   <li>POST /booking/release — Customer nhả giữ ghế khi hủy chọn.</li>
- *   <li>POST /booking/confirm — Xác nhận booking trong hold (Req 7.5).</li>
- *   <li>POST /booking/cancel — Hủy vé bậc thang (Customer chủ vé hoặc Staff đúng branch, Req 11).</li>
- *   <li>POST /booking/validate — Branch Staff soát vé một lần (Req 12).</li>
- *   <li>GET /booking/mine — Lịch sử vé của chính Customer (Req 16.5, chặn IDOR).</li>
- *   <li>GET /booking/lookup — Tra cứu nhanh thông tin vé theo mã vé.</li>
+ *   <li>POST /booking/confirm — xác nhận booking trong hold + phương thức thanh toán (Req 7.5).</li>
+ *   <li>POST /booking/counter-sale — Branch Staff bán vé tiền mặt tại quầy (Req 7.7).</li>
+ *   <li>POST /booking/cancel — hủy vé bậc thang (Customer chủ vé hoặc Staff đúng branch, Req 11).</li>
+ *   <li>GET /booking/mine — lịch sử vé của chính Customer (Req 16.5, chặn IDOR).</li>
  * </ul>
  */
-@WebServlet(name = "BookingController", urlPatterns = { "/booking/*" })
 public class BookingController extends HttpServlet {
-    private static final Logger logger = Logger.getLogger(BookingController.class.getName());
+    /** Secret HMAC demo cho mock gateway — production đọc từ cấu hình bảo mật. */
+    private static final String MOCK_HMAC_SECRET = System.getProperty(
+            "cinema.payment.hmacSecret", "cinema-demo-secret");
+
     private BookingService bookingService;
+    private TicketDAO ticketDao;
+    private ShowtimeDAO showtimeDao;
+    private ShowtimeService showtimeService;
+    private PricingService pricingService;
+    private VnPayProvider vnPayProvider;
+    private UserDAO userDao;
 
     @Override
     public void init() throws ServletException {
-        this.bookingService = new BookingService();
+        this.userDao = new UserDAO();
+        this.showtimeDao = new ShowtimeDAO();
+        this.showtimeService = new ShowtimeService(showtimeDao,
+                new com.cinema.dao.screen.ScreenDAO(), new com.cinema.dao.movie.MovieDAO(),
+                new com.cinema.dao.branch.BranchDAO());
+        this.pricingService = new PricingService(new PriceRuleDAO(), showtimeDao,
+                new com.cinema.dao.pricing.PricingConfigDAO());
+        VnPayConfig vnPayConfig = VnPayConfig.load();
+        this.vnPayProvider = new VnPayProvider(vnPayConfig);
+        PaymentService paymentService = new PaymentService(new PaymentDAO(),
+                new MockGatewayProvider(MOCK_HMAC_SECRET, ""), "CinemaHub demo account",
+                vnPayProvider);
+        NotificationService notificationService = new NotificationService(new NotificationDAO());
+        this.ticketDao = new TicketDAO();
+        this.bookingService = new BookingService(new SeatHoldDAO(), ticketDao, showtimeService,
+                pricingService, paymentService, notificationService);
     }
 
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
-        String path = request.getPathInfo();
-        if (path == null) path = "";
-
-        switch (path) {
-            case "", "/", "/mine" -> handleMine(request, response);
-            case "/ticket" -> handleTicketDetail(request, response);
-            case "/lookup" -> handleLookup(request, response);
-            default -> sendError(response, 404, "NOT_FOUND", "Endpoint không tồn tại: " + path);
+        try {
+            String path = request.getPathInfo() == null ? "" : request.getPathInfo();
+            // /booking/list — Admin xem toàn hệ thống; Manager/Staff xem vé trong phạm vi chi nhánh.
+            if ("/list".equals(path)) {
+                AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+                if (scope == null) {
+                    sendError(response, 401, "UNAUTHORIZED", "Yêu cầu đăng nhập");
+                    return;
+                }
+                if (scope.role() != Role.ADMIN && scope.role() != Role.BRANCH_MANAGER
+                        && scope.role() != Role.BRANCH_STAFF) {
+                    sendError(response, 403, "FORBIDDEN", "Chỉ nhân viên, quản lý hoặc Admin xem được danh sách vé");
+                    return;
+                }
+                sendOk(response, listAllTickets(scope, request));
+                return;
+            }
+            // /booking/lookup?code=X — Admin/Manager/Staff tra cứu nhanh một vé theo mã
+            // (Không thay đổi trạng thái, khác với /validate để soát vé tại cửa.)
+            if ("/lookup".equals(path)) {
+                AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+                if (scope == null || scope.isGuest()) {
+                    sendForbidden(response, "Cần đăng nhập");
+                    return;
+                }
+                if (scope.role() == Role.CUSTOMER) {
+                    sendForbidden(response, "Chỉ nhân viên mới tra cứu được");
+                    return;
+                }
+                String code = request.getParameter("code");
+                if (code == null || code.isBlank()) {
+                    sendError(response, 400, "BAD_REQUEST", "Thiếu mã vé");
+                    return;
+                }
+                sendOk(response, lookupTicket(scope, code.trim()));
+                return;
+            }
+            if (!path.isBlank() && !"/mine".equals(path)) {
+                sendError(response, 404, "NOT_FOUND", "Endpoint khong ton tai");
+                return;
+            }
+            AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+            if (scope == null || scope.isGuest() || scope.role() != Role.CUSTOMER) {
+                sendForbidden(response, "Chỉ Customer được xem vé của mình");
+                return;
+            }
+            Long userId = sessionUserId(request);
+            if (userId == null) {
+                sendError(response, 401, "UNAUTHORIZED", "Cần đăng nhập");
+                return;
+            }
+            // Req 16.5/16.6 — chỉ vé của chính tài khoản trong session, không nhận userId từ client
+            sendOk(response, ticketsForUser(userId));
+        } catch (Exception e) {
+            handleException(response, e);
         }
+    }
+
+    private java.util.Map<String, Object> listAllTickets(AccessScope scope, HttpServletRequest request) throws Exception {
+        int limit = parseIntOr(request.getParameter("limit"), 20);
+        if (limit <= 0 || limit > 200) limit = 20;
+        int offset = parseIntOr(request.getParameter("offset"), 0);
+        if (offset < 0) offset = 0;
+        Long branchScope = (scope.role() == Role.ADMIN) ? null : singleBranch(scope);
+        String q = trimOrNull(request.getParameter("q"));
+        String status = trimOrNull(request.getParameter("status"));
+
+        // SELECT thêm total + filter theo q/status; ORDER BY created_at DESC + OFFSET/FETCH NEXT.
+        StringBuilder countSql = new StringBuilder("""
+            SELECT COUNT(*)
+            FROM dbo.ticket t
+            LEFT JOIN dbo.user_account u ON u.id = t.user_id
+            JOIN dbo.showtime s ON s.id = t.showtime_id
+            JOIN dbo.movie m ON m.id = s.movie_id
+            WHERE 1=1
+            """);
+        StringBuilder sql = new StringBuilder("""
+            SELECT t.id, t.ticket_code, COALESCE(u.full_name, N'Khách lẻ') AS customer,
+                   m.title AS movie, s.start_time AS showtime_start,
+                   t.total_amount, t.status, t.created_at
+            FROM dbo.ticket t
+            LEFT JOIN dbo.user_account u ON u.id = t.user_id
+            JOIN dbo.showtime s ON s.id = t.showtime_id
+            JOIN dbo.movie m ON m.id = s.movie_id
+            WHERE 1=1
+            """);
+        java.util.List<Object> filterParams = new java.util.ArrayList<>();
+        if (branchScope != null) {
+            sql.append(" AND t.branch_id = ?");
+            countSql.append(" AND t.branch_id = ?");
+            filterParams.add(branchScope);
+        }
+        if (q != null) {
+            String like = "%" + q + "%";
+            sql.append(" AND (t.ticket_code LIKE ? OR u.full_name LIKE ?)");
+            countSql.append(" AND (t.ticket_code LIKE ? OR u.full_name LIKE ?)");
+            filterParams.add(like);
+            filterParams.add(like);
+        }
+        if (status != null) {
+            sql.append(" AND t.status = ?");
+            countSql.append(" AND t.status = ?");
+            filterParams.add(status);
+        }
+        sql.append(" ORDER BY t.created_at DESC OFFSET ? ROWS FETCH NEXT ? ROWS ONLY");
+
+        long total;
+        java.util.List<java.util.Map<String, Object>> items = new java.util.ArrayList<>();
+        try (java.sql.Connection conn = com.cinema.infrastructure.database.DBContext.getConnection()) {
+            // Count trước (dùng cùng filter) để trả total cho list-page.js.
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(countSql.toString())) {
+                for (int i = 0; i < filterParams.size(); i++) ps.setObject(i + 1, filterParams.get(i));
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    total = rs.next() ? rs.getLong(1) : 0L;
+                }
+            }
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+                int idx = 1;
+                for (Object p : filterParams) ps.setObject(idx++, p);
+                ps.setInt(idx++, offset);
+                ps.setInt(idx, limit);
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+                        m.put("id", rs.getLong("id"));
+                        m.put("ticketCode", rs.getString("ticket_code"));
+                        m.put("customerName", rs.getString("customer"));
+                        m.put("movieTitle", rs.getString("movie"));
+                        java.sql.Timestamp ts = rs.getTimestamp("showtime_start");
+                        m.put("showtimeStart", ts == null ? null : ts.toLocalDateTime().toString());
+                        m.put("totalAmount", rs.getLong("total_amount"));
+                        m.put("status", rs.getString("status"));
+                        items.add(m);
+                    }
+                }
+            }
+        }
+        java.util.Map<String, Object> resp = new java.util.LinkedHashMap<>();
+        resp.put("items", items);
+        resp.put("total", total);
+        resp.put("offset", offset);
+        resp.put("limit", limit);
+        return resp;
+    }
+
+    private static String trimOrNull(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    private long singleBranch(AccessScope scope) {
+        if (scope.branchIds().isEmpty()) {
+            throw new ServiceException.Forbidden("Tài khoản chưa được gán chi nhánh");
+        }
+        return scope.branchIds().iterator().next();
+    }
+
+    private int parseIntOr(String raw, int fallback) {
+        if (raw == null || raw.isBlank()) return fallback;
+        try { return Integer.parseInt(raw.trim()); } catch (Exception e) { return fallback; }
     }
 
     @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
-        String path = request.getPathInfo();
-        if (path == null) path = "";
-
-        switch (path) {
-            case "/quote" -> handleQuote(request, response);
-            case "/hold" -> handleHold(request, response);
-            case "/release" -> handleRelease(request, response);
-            case "/confirm" -> handleConfirm(request, response);
-            case "/cancel" -> handleCancel(request, response);
-            case "/validate" -> handleValidate(request, response);
-            default -> sendError(response, 404, "NOT_FOUND", "Endpoint không tồn tại: " + path);
-        }
-    }
-
-    /** Báo giá trước khi giữ ghế. */
-    private void handleQuote(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        String showtimeParam = request.getParameter("showtimeId");
-        String seatIdsParam = request.getParameter("seatIds");
-
-        if (showtimeParam == null || seatIdsParam == null) {
-            sendError(response, 400, "BAD_REQUEST", "Thiếu showtimeId hoặc seatIds");
-            return;
-        }
-
+        String path = request.getPathInfo() == null ? "" : request.getPathInfo();
         try {
-            long showtimeId = Long.parseLong(showtimeParam);
-            List<Long> seatIds = parseSeatIds(seatIdsParam);
-            Map<String, Object> quote = bookingService.quoteOrder(showtimeId, seatIds);
-            sendOk(response, quote);
-        } catch (NumberFormatException e) {
-            sendError(response, 400, "BAD_REQUEST", "Định dạng ID không hợp lệ");
-        }
-    }
-
-    /** Giữ ghế 10 phút. */
-    private void handleHold(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        var session = request.getSession(false);
-        Long userId = null;
-        if (session != null && session.getAttribute("userId") != null) {
-            Object uid = session.getAttribute("userId");
-            if (uid instanceof Long l) userId = l;
-            else if (uid instanceof Integer i) userId = i.longValue();
-        }
-        if (userId == null) {
-            String uParam = request.getParameter("userId");
-            if (uParam != null && !uParam.isBlank()) {
-                try { userId = Long.parseLong(uParam.trim()); } catch (NumberFormatException ignored) {}
-            }
-        }
-        if (userId == null) {
-            userId = 1L; // Fallback mock user ID cho dev/test
-        }
-
-        String showtimeParam = request.getParameter("showtimeId");
-        String seatIdsParam = request.getParameter("seatIds");
-
-        if (showtimeParam == null || seatIdsParam == null) {
-            sendError(response, 400, "BAD_REQUEST", "Thiếu showtimeId hoặc seatIds");
-            return;
-        }
-
-        try {
-            long showtimeId = Long.parseLong(showtimeParam);
-            List<Long> seatIds = parseSeatIds(seatIdsParam);
-
-            HoldResult result = bookingService.holdSeats(showtimeId, seatIds, userId);
-            if (result.success()) {
-                sendOk(response, Map.of(
-                        "success", true,
-                        "holdId", result.holdId(),
-                        "message", result.message()
-                ));
-            } else {
-                sendError(response, 409, "CONFLICT", result.message());
+            switch (path) {
+                case "/quote" -> quote(request, response);
+                case "/hold" -> hold(request, response);
+                case "/release" -> release(request, response);
+                case "/confirm" -> confirm(request, response);
+                case "/counter-sale" -> counterSale(request, response);
+                case "/cancel" -> cancel(request, response);
+                default -> sendError(response, 400, "BAD_REQUEST", "Endpoint không tồn tại");
             }
         } catch (NumberFormatException e) {
-            sendError(response, 400, "BAD_REQUEST", "Định dạng ID không hợp lệ");
-        }
-    }
-
-    /** Hủy giữ ghế. */
-    private void handleRelease(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        var session = request.getSession(false);
-        Long userId = session != null ? (Long) session.getAttribute("userId") : null;
-
-        String showtimeParam = request.getParameter("showtimeId");
-        String seatIdsParam = request.getParameter("seatIds");
-
-        if (showtimeParam != null && seatIdsParam != null) {
-            try {
-                long showtimeId = Long.parseLong(showtimeParam);
-                List<Long> seatIds = parseSeatIds(seatIdsParam);
-                bookingService.releaseHold(showtimeId, seatIds, userId);
-            } catch (Exception ignored) { }
-        }
-        sendOk(response, Map.of("success", true, "released", true));
-    }
-
-    /** Xác nhận đặt vé PENDING -> CONFIRMED. */
-    private void handleConfirm(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        var session = request.getSession(false);
-        Long userId = null;
-        if (session != null && session.getAttribute("userId") != null) {
-            Object uid = session.getAttribute("userId");
-            if (uid instanceof Long l) userId = l;
-            else if (uid instanceof Integer i) userId = i.longValue();
-        }
-        if (userId == null) {
-            String uParam = request.getParameter("userId");
-            if (uParam != null && !uParam.isBlank()) {
-                try { userId = Long.parseLong(uParam.trim()); } catch (NumberFormatException ignored) {}
-            }
-        }
-        if (userId == null) {
-            sendError(response, 401, "UNAUTHORIZED", "Vui lòng đăng nhập để xác nhận đặt vé");
-            return;
-        }
-
-        String holdIdParam = request.getParameter("holdId");
-        if (holdIdParam == null || holdIdParam.isBlank()) {
-            sendError(response, 400, "BAD_REQUEST", "Thiếu mã phiên giữ ghế (holdId)");
-            return;
-        }
-
-        try {
-            long holdId = Long.parseLong(holdIdParam.trim());
-            Ticket ticket = bookingService.confirmBooking(holdId, userId);
-
-            Map<String, Object> res = new LinkedHashMap<>();
-            res.put("success", true);
-            res.put("ticketId", ticket.getId());
-            res.put("ticketCode", ticket.getTicketCode());
-            res.put("totalAmount", ticket.getTotalAmount());
-            res.put("status", ticket.getStatus());
-            res.put("ticket", ticket);
-            res.put("message", "Xác nhận đặt vé thành công!");
-
-            sendOk(response, res);
-
-        } catch (ServiceException.NotFound e) {
-            sendError(response, 404, "NOT_FOUND", e.getMessage());
-        } catch (ServiceException.Forbidden e) {
-            sendError(response, 403, "FORBIDDEN", e.getMessage());
-        } catch (ServiceException.Conflict e) {
-            sendError(response, 409, "CONFLICT", e.getMessage());
-        } catch (NumberFormatException e) {
-            sendError(response, 400, "BAD_REQUEST", "Mã holdId không hợp lệ");
+            sendError(response, 400, "BAD_REQUEST", "Dữ liệu số không hợp lệ");
         } catch (Exception e) {
-            logger.log(Level.SEVERE, "Lỗi khi xác nhận đặt vé", e);
-            sendError(response, 500, "INTERNAL_ERROR", "Không thể xác nhận đặt vé: " + e.getMessage());
+            handleException(response, e);
         }
+    }
+
+    /** Báo giá chính thức trước khi giữ ghế; dùng cùng pricing/tier logic khi xác nhận vé. */
+    private void quote(HttpServletRequest request, HttpServletResponse response) throws Exception {
+        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+        if (scope == null || scope.isGuest() || scope.role() != Role.CUSTOMER) {
+            sendForbidden(response, "Chỉ Customer đã đăng nhập mới được xem báo giá đặt vé");
+            return;
+        }
+
+        Long userId = sessionUserId(request);
+        if (userId == null) {
+            sendError(response, 401, "UNAUTHORIZED", "Cần đăng nhập");
+            return;
+        }
+        if (!isActiveCustomer(userId)) {
+            var session = request.getSession(false);
+            if (session != null) session.invalidate();
+            sendError(response, 401, "UNAUTHORIZED",
+                    "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+            return;
+        }
+
+        long showtimeId = Long.parseLong(requireParam(request, "showtimeId"));
+        List<Long> seatIds = parseSeatIds(requireParam(request, "seatIds"));
+        if (new java.util.HashSet<>(seatIds).size() != seatIds.size()) {
+            throw new ServiceException.Validation("Danh sách ghế không được trùng");
+        }
+        // Req 11 — ignore client-provided unitPrice; ticketType hợp lệ (Req 9).
+        TicketType ticketType = parseTicketType(request.getParameter("ticketType"));
+
+        showtimeService.requireBookable(showtimeId);
+        var detail = showtimeService.getDetail(showtimeId);
+        Map<Long, ShowtimeDAO.ShowtimeSeat> seatsById = detail.seats().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        ShowtimeDAO.ShowtimeSeat::seatId, seat -> seat));
+        List<String> seatTypes = new ArrayList<>();
+        for (Long seatId : seatIds) {
+            ShowtimeDAO.ShowtimeSeat seat = seatsById.get(seatId);
+            if (seat == null) {
+                throw new ServiceException.Validation("Ghế không thuộc suất chiếu này");
+            }
+            boolean available = "AVAILABLE".equalsIgnoreCase(seat.status());
+            boolean ownHold = seat.holdId() != null && userId.equals(seat.holdUserId());
+            if (!available && !ownHold) {
+                throw new ServiceException.Conflict("Ghế đã được giữ hoặc bán");
+            }
+            seatTypes.add(seat.seatType());
+        }
+
+        sendOk(response, pricingService.calcOrder(showtimeId, seatTypes, userId, ticketType));
+    }
+
+    /** Req 7.1-7.3 — Customer giữ ghế 10 phút. */
+    private void hold(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+        if (scope == null || scope.isGuest() || scope.role() != Role.CUSTOMER) {
+            sendForbidden(response, "Chỉ Customer đã đăng nhập mới được giữ ghế online");
+            return;
+        }
+
+        Long userId = sessionUserId(request);
+        if (userId == null) {
+            sendError(response, 401, "UNAUTHORIZED", "Cần đăng nhập");
+            return;
+        }
+        if (!isActiveCustomer(userId)) {
+            var session = request.getSession(false);
+            if (session != null) {
+                session.invalidate();
+            }
+            sendError(response, 401, "UNAUTHORIZED",
+                    "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+            return;
+        }
+        long showtimeId = Long.parseLong(requireParam(request, "showtimeId"));
+        List<Long> seatIds = parseSeatIds(requireParam(request, "seatIds"));
+        TicketType ticketType = parseTicketType(request.getParameter("ticketType"));
+        java.util.logging.Logger.getLogger(BookingController.class.getName()).info(
+                "[booking-debug] HOLD request userId=" + userId
+                        + " showtimeId=" + showtimeId + " seatIds=" + seatIds
+                        + " ticketType=" + ticketType);
+
+        String existingHoldId = request.getParameter("holdId");
+        HoldResult result;
+        if (existingHoldId == null || existingHoldId.isBlank()) {
+            result = bookingService.holdSeats(showtimeId, seatIds, userId, ticketType);
+        } else {
+            try {
+                result = bookingService.addSeatsToHold(showtimeId, seatIds, userId,
+                        Long.parseLong(existingHoldId), ticketType);
+            } catch (NumberFormatException e) {
+                throw new ServiceException.Validation("Mã lượt giữ ghế không hợp lệ");
+            }
+        }
+        if (result.success()) {
+            sendOk(response, result);
+        } else {
+            // Ghế không còn trống / showtime không mở bán → 409 (Req 7.2, 8.5)
+            sendError(response, 409, "CONFLICT", result.message());
+        }
+    }
+
+    /** Parse optional ticketType — null khi client không gửi (Req 9). */
+    private TicketType parseTicketType(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        TicketType t = TicketType.fromCode(raw);
+        if (t == null) {
+            throw new ServiceException.Validation("Loại vé phải là ADULT/CHILD/STUDENT/VIP");
+        }
+        return t;
+    }
+
+    private boolean isActiveCustomer(Long userId) {
+        try {
+            return userDao.findById(userId)
+                    .filter(User::isActive)
+                    .map(user -> user.role() == Role.CUSTOMER)
+                    .orElse(false);
+        } catch (Exception e) {
+            throw new ServiceException.Unauthorized("Không thể xác thực tài khoản đặt vé");
+        }
+    }
+
+    private void release(HttpServletRequest request, HttpServletResponse response) throws Exception {
+        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+        if (scope == null || scope.isGuest() || scope.role() != Role.CUSTOMER) {
+            sendForbidden(response, "Chỉ Customer đã đăng nhập mới được hủy chỗ");
+            return;
+        }
+        Long userId = sessionUserId(request);
+        if (userId == null) {
+            sendError(response, 401, "UNAUTHORIZED", "Cần đăng nhập");
+            return;
+        }
+        long showtimeId = Long.parseLong(requireParam(request, "showtimeId"));
+        List<Long> seatIds = parseSeatIds(requireParam(request, "seatIds"));
+        String rawHoldId = request.getParameter("holdId");
+        Long holdId = null;
+        if (rawHoldId != null && !rawHoldId.isBlank()) {
+            try {
+                holdId = Long.parseLong(rawHoldId);
+            } catch (NumberFormatException e) {
+                throw new ServiceException.Validation("Mã lượt giữ ghế không hợp lệ");
+            }
+        }
+        bookingService.releaseHold(showtimeId, seatIds, userId, holdId);
+        sendOk(response, Map.of("success", true));
+    }
+
+    /** Req 7.5, 7.6 — xác nhận booking trong thời hạn hold. */
+    private void confirm(HttpServletRequest request, HttpServletResponse response) throws Exception {
+        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+        if (scope == null || scope.isGuest() || scope.role() != Role.CUSTOMER) {
+            sendForbidden(response, "Chỉ Customer đã đăng nhập mới được xác nhận booking online");
+            return;
+        }
+        Long userId = sessionUserId(request);
+        if (userId == null) {
+            sendError(response, 401, "UNAUTHORIZED", "Cần đăng nhập");
+            return;
+        }
+        long holdId = Long.parseLong(requireParam(request, "holdId"));
+        String method = request.getParameter("paymentMethod");
+        java.util.logging.Logger.getLogger(getClass().getName()).info(
+                "[confirm] holdId=" + holdId + " userId=" + userId + " method=" + method);
+        com.cinema.model.booking.Ticket ticket;
+        try {
+            ticket = bookingService.confirmBooking(holdId, method, userId);
+        } catch (RuntimeException ex) {
+            java.util.logging.Logger.getLogger(getClass().getName()).log(
+                    java.util.logging.Level.SEVERE,
+                    "[confirm] confirmBooking failed holdId=" + holdId + " userId=" + userId, ex);
+            throw ex;
+        }
+        String normalizedMethod = method == null ? "" : method.trim().toUpperCase();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("ticket", ticket);
+        // Với VNPay / MOCK_GATEWAY trả về redirect URL chuyển khoản cổng thanh toán.
+        // Với các method còn lại trả về payload thôi.
+        if ("MOCK_GATEWAY".equals(normalizedMethod) || "VNPAY".equals(normalizedMethod)) {
+            Payment payment = new PaymentDAO().findPendingByTicket(ticket.id())
+                    .orElseThrow(() -> new ServiceException.NotFound(
+                            "Không tạo được phiên thanh toán"));
+            String redirect;
+            if ("VNPAY".equals(normalizedMethod)) {
+                // Redirect thẳng sang VNPay Sandbox bằng URL đã ký, không chuyển qua
+                // form demo nội bộ hoặc trang home.
+                Map<String, String> params = new java.util.LinkedHashMap<>();
+                params.put("vnp_Version", "2.1.0");
+                params.put("vnp_Command", "pay");
+                params.put("vnp_TmnCode", vnPayProvider.config().tmnCode());
+                params.put("vnp_Amount", VnPayUtil.toVnpAmount(payment.amount()));
+                params.put("vnp_CurrCode", "VND");
+                params.put("vnp_TxnRef", payment.idempotencyKey());
+                params.put("vnp_OrderInfo", "Thanh toan ve xem phim ticket " + ticket.id());
+                params.put("vnp_OrderType", "other");
+                params.put("vnp_Locale", "vn");
+                params.put("vnp_ReturnUrl", request.getScheme() + "://" + request.getServerName()
+                        + (request.getServerPort() == 80 || request.getServerPort() == 443
+                        ? "" : ":" + request.getServerPort())
+                        + request.getContextPath() + "/vnpay/return");
+                params.put("vnp_IpAddr", request.getRemoteAddr());
+                params.putAll(VnPayUtil.paymentWindow(vnPayProvider.config().expireMinutes()));
+                redirect = VnPayUtil.buildRedirectUrl(vnPayProvider.config().payUrl(), params,
+                        vnPayProvider.config().hashSecret());
+            } else {
+                String hmac = com.cinema.util.HmacUtil.sign(MOCK_HMAC_SECRET,
+                        payment.id() + "" + payment.amount());
+                redirect = request.getContextPath() + "/payment/mock-gateway"
+                        + "?paymentId=" + payment.id()
+                        + "&amount=" + payment.amount()
+                        + "&idempotencyKey=" + URLEncoder.encode(
+                                payment.idempotencyKey(), StandardCharsets.UTF_8)
+                        + "&hmac=" + hmac;
+            }
+            result.put("payment", payment);
+            result.put("redirectUrl", redirect);
+        }
+        sendOk(response, result);
+    }
+
+    /** Req 7.7 — Branch Staff bán vé tiền mặt tại quầy (ép branch scope). */
+    private void counterSale(HttpServletRequest request, HttpServletResponse response) throws Exception {
+        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+        if (scope == null || !scope.can("TICKET_SELL")) {
+            sendForbidden(response, "Chỉ Branch Staff/Branch Manager mới được bán vé tại quầy");
+            return;
+        }
+        Long staffId = sessionUserId(request);
+        long staffBranchId = requireSingleBranch(scope);
+
+        long showtimeId = Long.parseLong(requireParam(request, "showtimeId"));
+        List<Long> seatIds = parseSeatIds(requireParam(request, "seatIds"));
+        Long customerId = parseOptionalLong(request.getParameter("customerId"));
+        TicketType ticketType = parseTicketType(request.getParameter("ticketType"));
+        Ticket ticket = bookingService.sellAtCounter(showtimeId, seatIds,
+                customerId, staffId, staffBranchId, ticketType);
+        sendOk(response, ticket);
     }
 
     /** Req 11 — Customer hủy vé của mình hoặc Staff hủy tại quầy đúng chi nhánh. */
-    private void handleCancel(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        var session = request.getSession(false);
-        Long customerId = null;
-        Long staffBranchId = null;
-
-        if (session != null) {
-            Object uid = session.getAttribute("userId");
-            if (uid instanceof Long l) customerId = l;
-            else if (uid instanceof Integer i) customerId = i.longValue();
-
-            Object bid = session.getAttribute("branchId");
-            if (bid instanceof Long l) staffBranchId = l;
-            else if (bid instanceof Integer i) staffBranchId = i.longValue();
+    private void cancel(HttpServletRequest request, HttpServletResponse response) throws Exception {
+        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+        if (scope == null || scope.isGuest()) {
+            sendError(response, 401, "UNAUTHORIZED", "Cần đăng nhập");
+            return;
         }
+        long ticketId = Long.parseLong(requireParam(request, "ticketId"));
 
-        String userIdParam = request.getParameter("userId");
-        if (userIdParam != null && !userIdParam.isBlank()) {
-            try { customerId = Long.parseLong(userIdParam.trim()); } catch (NumberFormatException ignored) {}
-        }
-        String branchParam = request.getParameter("branchId");
-        if (branchParam != null && !branchParam.isBlank()) {
-            try { staffBranchId = Long.parseLong(branchParam.trim()); } catch (NumberFormatException ignored) {}
-        }
-
-        String ticketIdParam = request.getParameter("ticketId");
-        if (ticketIdParam == null || ticketIdParam.isBlank()) {
-            sendError(response, 400, "BAD_REQUEST", "Thiếu tham số ticketId");
+        Long actorCustomerId = null;
+        Long actorStaffBranchId = null;
+        if (scope.role() == Role.CUSTOMER) {
+            actorCustomerId = sessionUserId(request);
+            if (actorCustomerId == null) {
+                sendError(response, 401, "UNAUTHORIZED", "Cần đăng nhập");
+                return;
+            }
+        } else if (scope.can("TICKET_SELL")) {
+            actorStaffBranchId = requireSingleBranch(scope);
+        } else {
+            sendForbidden(response, "Không có quyền hủy vé");
             return;
         }
 
-        try {
-            long ticketId = Long.parseLong(ticketIdParam.trim());
-            Ticket ticket = bookingService.cancelTicket(ticketId, customerId, staffBranchId);
+        Ticket ticket = bookingService.cancelTicket(ticketId, actorCustomerId, actorStaffBranchId);
+        sendOk(response, ticket);
+    }
 
-            Map<String, Object> res = new LinkedHashMap<>();
-            res.put("success", true);
-            res.put("ticketId", ticket.getId());
-            res.put("ticketCode", ticket.getTicketCode());
-            res.put("status", ticket.getStatus());
-            res.put("totalAmount", ticket.getTotalAmount());
-            res.put("refundAmount", ticket.getRefundAmount());
-            res.put("message", "Hủy vé thành công, hoàn " + ticket.getRefundAmount() + " VNĐ");
+    /**
+     * Tra cứu nhanh một vé theo ticketCode (read-only). Manager xem toàn hệ thống;
+     * Staff bị giới hạn về chi nhánh của mình.
+     */
+    private Map<String, Object> lookupTicket(AccessScope scope, String ticketCode) throws Exception {
+        StringBuilder sql = new StringBuilder("""
+            SELECT TOP 1 t.id, t.ticket_code, COALESCE(u.full_name, N'Khách lẻ') AS customer_name,
+                   u.email AS customer_email, m.title AS movie_title,
+                   sc.name AS screen_name, s.start_time AS showtime_start,
+                   b.name AS branch_name, t.total_amount, t.status,
+                   t.created_at, t.confirmed_at, t.used_at, t.used_by
+            FROM dbo.ticket t
+            LEFT JOIN dbo.user_account u ON u.id = t.user_id
+            JOIN dbo.showtime s ON s.id = t.showtime_id
+            JOIN dbo.movie m ON m.id = s.movie_id
+            JOIN dbo.screen sc ON sc.id = s.screen_id
+            JOIN dbo.branch b ON b.id = t.branch_id
+            WHERE t.ticket_code = ?
+            """);
+        // Staff chỉ xem vé chi nhánh mình; Admin/Manager: không giới hạn.
+        if (scope.role() != Role.ADMIN && !scope.branchIds().isEmpty()) {
+            sql.append(" AND t.branch_id = ?");
+        }
 
-            sendOk(response, res);
-
-        } catch (ServiceException.NotFound e) {
-            sendError(response, 404, "NOT_FOUND", e.getMessage());
-        } catch (ServiceException.Forbidden e) {
-            sendError(response, 403, "FORBIDDEN", e.getMessage());
-        } catch (ServiceException.Conflict e) {
-            sendError(response, 409, "CONFLICT", e.getMessage());
-        } catch (ServiceException.BusinessRule e) {
-            sendError(response, 400, e.code(), e.getMessage());
-        } catch (Exception e) {
-            logger.log(Level.SEVERE, "Lỗi khi hủy vé", e);
-            sendError(response, 500, "INTERNAL_ERROR", "Không thể hủy vé: " + e.getMessage());
+        try (java.sql.Connection conn = com.cinema.infrastructure.database.DBContext.getConnection()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            long ticketId;
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+                ps.setString(1, ticketCode.trim().toUpperCase());
+                if (scope.role() != Role.ADMIN && !scope.branchIds().isEmpty()) {
+                    ps.setLong(2, scope.branchIds().iterator().next());
+                }
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        throw new ServiceException.NotFound("Không tìm thấy vé với mã " + ticketCode);
+                    }
+                    ticketId = rs.getLong("id");
+                    row.put("id", ticketId);
+                    row.put("ticketCode", rs.getString("ticket_code"));
+                    row.put("customerName", rs.getString("customer_name"));
+                    row.put("customerEmail", rs.getString("customer_email"));
+                    row.put("movieTitle", rs.getString("movie_title"));
+                    row.put("screenName", rs.getString("screen_name"));
+                    java.sql.Timestamp ts = rs.getTimestamp("showtime_start");
+                    row.put("showtimeStart", ts == null ? null : ts.toLocalDateTime().toString());
+                    row.put("branchName", rs.getString("branch_name"));
+                    row.put("totalAmount", rs.getLong("total_amount"));
+                    row.put("status", rs.getString("status"));
+                    row.put("createdAt", stringifyTs(rs.getTimestamp("created_at")));
+                    row.put("confirmedAt", stringifyTs(rs.getTimestamp("confirmed_at")));
+                    row.put("usedAt", stringifyTs(rs.getTimestamp("used_at")));
+                    row.put("usedBy", rs.getObject("used_by"));
+                }
+            }
+            List<Map<String, Object>> seats = new ArrayList<>();
+            for (Ticket.TicketSeat seat : ticketDao.findSeats(conn, ticketId)) {
+                Map<String, Object> seatRow = new LinkedHashMap<>();
+                seatRow.put("seatId", seat.seatId());
+                seatRow.put("rowLabel", seat.rowLabel());
+                seatRow.put("colNo", seat.colNo());
+                seatRow.put("seatType", seat.seatType());
+                seatRow.put("price", seat.price());
+                seatRow.put("seatCode", seat.rowLabel() + seat.colNo());
+                seats.add(seatRow);
+            }
+            row.put("seats", seats);
+            return row;
         }
     }
 
-    /** Req 12 — Branch Staff soát vé một lần tại đúng chi nhánh. */
-    private void handleValidate(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        String ticketCode = request.getParameter("ticketCode");
-        if (ticketCode == null || ticketCode.isBlank()) {
-            ticketCode = request.getParameter("code");
-        }
-        if (ticketCode == null || ticketCode.isBlank()) {
-            sendError(response, 400, "BAD_REQUEST", "Thiếu mã vé (ticketCode)");
-            return;
-        }
-
-        var session = request.getSession(false);
-        Long staffId = null;
-        Long staffBranchId = null;
-
-        if (session != null) {
-            Object uid = session.getAttribute("userId");
-            if (uid instanceof Long l) staffId = l;
-            else if (uid instanceof Integer i) staffId = i.longValue();
-
-            Object bid = session.getAttribute("branchId");
-            if (bid instanceof Long l) staffBranchId = l;
-            else if (bid instanceof Integer i) staffBranchId = i.longValue();
-        }
-
-        String staffParam = request.getParameter("staffId");
-        if (staffParam != null && !staffParam.isBlank()) {
-            try { staffId = Long.parseLong(staffParam.trim()); } catch (NumberFormatException ignored) {}
-        }
-        String branchParam = request.getParameter("branchId");
-        if (branchParam != null && !branchParam.isBlank()) {
-            try { staffBranchId = Long.parseLong(branchParam.trim()); } catch (NumberFormatException ignored) {}
-        }
-
-        if (staffId == null) staffId = 1L;
-        if (staffBranchId == null) staffBranchId = 1L;
-
-        try {
-            Ticket ticket = bookingService.validateTicket(ticketCode, staffId, staffBranchId);
-
-            Map<String, Object> res = new LinkedHashMap<>();
-            res.put("success", true);
-            res.put("ticketId", ticket.getId());
-            res.put("ticketCode", ticket.getTicketCode());
-            res.put("status", ticket.getStatus());
-            res.put("usedAt", ticket.getUsedAt());
-            res.put("usedBy", ticket.getUsedBy());
-            res.put("message", "Soát vé thành công — Vé hợp lệ");
-
-            sendOk(response, res);
-
-        } catch (ServiceException.NotFound e) {
-            sendError(response, 404, "NOT_FOUND", e.getMessage());
-        } catch (ServiceException.Forbidden e) {
-            sendError(response, 403, "FORBIDDEN", e.getMessage());
-        } catch (ServiceException.Conflict e) {
-            sendError(response, 409, "CONFLICT", e.getMessage());
-        } catch (ServiceException.BusinessRule e) {
-            sendError(response, 400, e.code(), e.getMessage());
-        } catch (Exception e) {
-            logger.log(Level.SEVERE, "Lỗi khi soát vé", e);
-            sendError(response, 500, "INTERNAL_ERROR", "Lỗi soát vé: " + e.getMessage());
-        }
+    private static String stringifyTs(java.sql.Timestamp ts) {
+        return ts == null ? null : ts.toLocalDateTime().toString();
     }
 
-    /** Tra cứu nhanh một vé theo ticketCode (read-only). */
-    private void handleLookup(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        String ticketCode = request.getParameter("ticketCode");
-        if (ticketCode == null || ticketCode.isBlank()) {
-            ticketCode = request.getParameter("code");
-        }
-        if (ticketCode == null || ticketCode.isBlank()) {
-            sendError(response, 400, "BAD_REQUEST", "Thiếu mã vé (ticketCode)");
-            return;
-        }
+    private List<Map<String, Object>> ticketsForUser(long userId) throws Exception {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try (java.sql.Connection conn = com.cinema.infrastructure.database.DBContext.getConnection()) {
+            List<Ticket> tickets = ticketDao.findByUser(userId);
+            // N+1 fix: batch-load all seats for these tickets in a single query.
+            java.util.Map<Long, List<Ticket.TicketSeat>> seatsByTicket = ticketDao.findSeatsByTickets(
+                    conn,
+                    tickets.stream().map(Ticket::id).toList());
+            for (Ticket ticket : tickets) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", ticket.id());
+                row.put("ticketCode", ticket.ticketCode());
+                row.put("showtimeId", ticket.showtimeId());
+                row.put("branchId", ticket.branchId());
+                row.put("status", ticket.status());
+                row.put("totalAmount", ticket.totalAmount());
+                row.put("createdAt", ticket.createdAt());
+                row.put("confirmedAt", ticket.confirmedAt());
+                row.put("cancelledAt", ticket.cancelledAt());
+                row.put("refundAmount", ticket.refundAmount());
 
-        var session = request.getSession(false);
-        Long staffBranchId = null;
-        if (session != null && session.getAttribute("branchId") != null) {
-            Object bid = session.getAttribute("branchId");
-            if (bid instanceof Long l) staffBranchId = l;
-            else if (bid instanceof Integer i) staffBranchId = i.longValue();
-        }
-        String branchParam = request.getParameter("branchId");
-        if (branchParam != null && !branchParam.isBlank()) {
-            try { staffBranchId = Long.parseLong(branchParam.trim()); } catch (NumberFormatException ignored) {}
-        }
+                List<Map<String, Object>> seats = new ArrayList<>();
+                List<Ticket.TicketSeat> ticketSeats = seatsByTicket.getOrDefault(ticket.id(), List.of());
+                for (Ticket.TicketSeat seat : ticketSeats) {
+                    Map<String, Object> seatMap = new LinkedHashMap<>();
+                    seatMap.put("seatId", seat.seatId());
+                    seatMap.put("rowLabel", seat.rowLabel());
+                    seatMap.put("colNo", seat.colNo());
+                    seatMap.put("seatType", seat.seatType());
+                    seatMap.put("price", seat.price());
+                    seatMap.put("seatCode", seat.rowLabel() + seat.colNo());
+                    seats.add(seatMap);
+                }
+                row.put("seats", seats);
+                Map<String, Object> show = showtimeInfo(conn, ticket.showtimeId());
+                row.putAll(show);
 
-        try {
-            Map<String, Object> details = bookingService.lookupTicket(ticketCode, staffBranchId);
-            sendOk(response, details);
-        } catch (ServiceException.NotFound e) {
-            sendError(response, 404, "NOT_FOUND", e.getMessage());
-        } catch (ServiceException.Forbidden e) {
-            sendError(response, 403, "FORBIDDEN", e.getMessage());
-        } catch (Exception e) {
-            logger.log(Level.SEVERE, "Lỗi khi tra cứu vé", e);
-            sendError(response, 500, "INTERNAL_ERROR", "Lỗi tra cứu vé: " + e.getMessage());
-        }
-    }
-
-    /** Lịch sử vé cá nhân. */
-    private void handleMine(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        var session = request.getSession(false);
-        Long userId = null;
-        if (session != null && session.getAttribute("userId") != null) {
-            Object uid = session.getAttribute("userId");
-            if (uid instanceof Long l) userId = l;
-            else if (uid instanceof Integer i) userId = i.longValue();
-        }
-        if (userId == null) {
-            String uParam = request.getParameter("userId");
-            if (uParam != null && !uParam.isBlank()) {
-                try { userId = Long.parseLong(uParam.trim()); } catch (NumberFormatException ignored) {}
+                // Nghiệp vụ: suất chiếu đã kết thúc thì không cho hoàn — tránh tình trạng
+                // user refund vé sau khi xem phim. UI dùng showtimePassed để disable nút.
+                java.time.LocalDateTime endTime = (java.time.LocalDateTime) show.get("endTime");
+                boolean showtimePassed = endTime != null
+                        && java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).isAfter(endTime);
+                boolean canCancel = Ticket.STATUS_CONFIRMED.equals(ticket.status()) && !showtimePassed;
+                row.put("showtimePassed", showtimePassed);
+                row.put("canCancel", canCancel);
+                row.put("refundable", canCancel);
+                result.add(row);
             }
         }
-        if (userId == null) {
-            sendError(response, 401, "UNAUTHORIZED", "Vui lòng đăng nhập để xem vé");
-            return;
-        }
-
-        try {
-            List<Ticket> tickets = bookingService.listMyTickets(userId);
-            sendOk(response, tickets);
-        } catch (Exception e) {
-            logger.log(Level.SEVERE, "Lỗi khi lấy danh sách vé", e);
-            sendError(response, 500, "INTERNAL_ERROR", "Lỗi khi tải lịch sử vé");
-        }
+        return result;
     }
 
-    /** Chi tiết vé. */
-    private void handleTicketDetail(HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
+    private Map<String, Object> showtimeInfo(java.sql.Connection conn, long showtimeId) throws Exception {
+        String sql = """
+            SELECT s.start_time, s.end_time, m.title AS movie_title,
+                   b.name AS branch_name, sc.name AS screen_name
+            FROM dbo.showtime s
+            JOIN dbo.movie m ON m.id = s.movie_id
+            JOIN dbo.branch b ON b.id = s.branch_id
+            JOIN dbo.screen sc ON sc.id = s.screen_id
+            WHERE s.id = ?
+            """;
+        Map<String, Object> info = new LinkedHashMap<>();
+        try (java.sql.PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, showtimeId);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    java.sql.Timestamp start = rs.getTimestamp("start_time");
+                    java.sql.Timestamp end = rs.getTimestamp("end_time");
+                    info.put("movieTitle", rs.getString("movie_title"));
+                    info.put("branchName", rs.getString("branch_name"));
+                    info.put("screenName", rs.getString("screen_name"));
+                    info.put("startTime", start == null ? null : start.toLocalDateTime());
+                    info.put("endTime", end == null ? null : end.toLocalDateTime());
+                }
+            }
+        }
+        return info;
+    }
+
+    // ---- helpers (mirror MovieController/ScreenController patterns) ----
+
+    private Long sessionUserId(HttpServletRequest request) {
         var session = request.getSession(false);
-        Long userId = session != null ? (Long) session.getAttribute("userId") : null;
-
-        String code = request.getParameter("code");
-        if (code == null || code.isBlank()) {
-            sendError(response, 400, "BAD_REQUEST", "Thiếu tham số mã vé code");
-            return;
-        }
-
-        try {
-            Ticket ticket = bookingService.getTicketByCode(code.trim(), userId);
-            sendOk(response, ticket);
-        } catch (ServiceException.NotFound e) {
-            sendError(response, 404, "NOT_FOUND", e.getMessage());
-        } catch (ServiceException.Forbidden e) {
-            sendError(response, 403, "FORBIDDEN", e.getMessage());
-        } catch (Exception e) {
-            sendError(response, 500, "INTERNAL_ERROR", e.getMessage());
-        }
+        if (session == null) return null;
+        Object userId = session.getAttribute("userId");
+        return userId instanceof Long value ? value : null;
     }
 
-    private List<Long> parseSeatIds(String param) {
-        List<Long> list = new ArrayList<>();
-        if (param == null || param.isBlank()) return list;
-        for (String part : param.split(",")) {
+    /** Manager/Staff phải có đúng một branch trong scope để ép phạm vi. */
+    private long requireSingleBranch(AccessScope scope) {
+        if (scope.branchIds().isEmpty()) {
+            throw new ServiceException.Forbidden("Tài khoản chưa được gán chi nhánh");
+        }
+        return scope.branchIds().iterator().next();
+    }
+
+    private String requireParam(HttpServletRequest request, String name) {
+        String value = request.getParameter(name);
+        if (value == null || value.isBlank()) {
+            throw new ServiceException.Validation("Thiếu tham số bắt buộc: " + name);
+        }
+        return value.trim();
+    }
+
+    /** seatIds nhận dạng "1,2,3". */
+    private List<Long> parseSeatIds(String raw) {
+        List<Long> seatIds = new ArrayList<>();
+        for (String part : raw.split(",")) {
             String trimmed = part.trim();
-            if (!trimmed.isEmpty()) {
-                list.add(Long.parseLong(trimmed));
-            }
+            if (!trimmed.isEmpty()) seatIds.add(Long.parseLong(trimmed));
         }
-        return list;
+        if (seatIds.isEmpty()) {
+            throw new ServiceException.Validation("Danh sách ghế không được rỗng");
+        }
+        return seatIds;
+    }
+
+    private Long parseOptionalLong(String raw) {
+        return raw == null || raw.isBlank() ? null : Long.parseLong(raw.trim());
     }
 
     private void sendOk(HttpServletResponse response, Object data) throws IOException {
-        response.setContentType("application/json;charset=UTF-8");
         response.setStatus(HttpServletResponse.SC_OK);
+        response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write(SerializationUtil.toJson(data));
+    }
+
+    private void sendForbidden(HttpServletResponse response, String message) throws IOException {
+        sendError(response, 403, "FORBIDDEN", message);
     }
 
     private void sendError(HttpServletResponse response, int status, String code, String message)
             throws IOException {
-        response.setContentType("application/json;charset=UTF-8");
         response.setStatus(status);
-        response.getWriter().write(SerializationUtil.toJson(Map.of(
-                "success", false,
-                "code", code,
-                "message", message
-        )));
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write(SerializationUtil.toJson(new ErrorEnvelope(code, message)));
+    }
+
+    private void handleException(HttpServletResponse response, Exception e) throws IOException {
+        if (e instanceof ServiceException service) {
+            sendError(response, service.httpStatus(), service.code(), service.getMessage());
+        } else {
+            java.util.logging.Logger.getLogger(BookingController.class.getName())
+                    .log(java.util.logging.Level.SEVERE, "Booking request failed", e);
+            sendError(response, 500, "INTERNAL_ERROR", "Lỗi hệ thống");
+        }
     }
 }
