@@ -1,11 +1,10 @@
 package com.cinema.dao.movie;
 
-import com.cinema.infrastructure.database.DBContext;
 import com.cinema.model.branch.Branch;
-import com.cinema.model.movie.Genre;
 import com.cinema.model.movie.Movie;
-import com.cinema.model.showtime.Showtime;
 import com.cinema.service.movie.MovieService;
+
+import com.cinema.infrastructure.database.DBContext;
 
 import java.sql.Connection;
 import java.sql.Date;
@@ -234,12 +233,8 @@ public class MovieDAO {
                              WHERE s.movie_id = dbo.movie.id
                                AND s.status <> 'CANCELLED'
                                AND s.branch_id IN (%s))
-                     OR EXISTS (SELECT 1 FROM dbo.showtime_allocation sa
-                                WHERE sa.movie_id = dbo.movie.id
-                                  AND sa.branch_id IN (%s))
                  )
-                """.formatted(placeholders, placeholders));
-        params.addAll(scopedBranches);
+                """.formatted(placeholders));
         params.addAll(scopedBranches);
     }
 
@@ -299,6 +294,33 @@ public class MovieDAO {
                 while (rs.next()) {
                     movies.add(mapRow(rs));
                 }
+            }
+        }
+        return movies;
+    }
+
+    /**
+     * Public landing-page catalog: every PUBLISHED movie (no date filter) so a
+     * newly added title shows up immediately even when its {@code release_date}
+     * is in the future or {@code end_date} already passed. Caller renders
+     * "Sắp chiếu" / "Ngừng chiếu" badges by comparing dates client-side.
+     * Order: newest first by {@code release_date DESC, id DESC}.
+     */
+    public List<Movie> findPublishedAll() throws Exception {
+        String sql = """
+            SELECT id, title, duration_min, genre, rating, release_date, end_date,
+                   poster_url, description, author, status, version
+            FROM dbo.movie
+            WHERE status = 'PUBLISHED'
+            ORDER BY release_date DESC, id DESC
+            """;
+
+        List<Movie> movies = new ArrayList<>();
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                movies.add(mapRow(rs));
             }
         }
         return movies;

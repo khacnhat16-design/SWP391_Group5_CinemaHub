@@ -114,6 +114,22 @@
         <url-pattern>/branch/*</url-pattern>
     </servlet-mapping>
     <servlet>
+        <servlet-name>staffBranchAssignmentController</servlet-name>
+        <servlet-class>com.cinema.controller.StaffBranchAssignmentController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>staffBranchAssignmentController</servlet-name>
+        <url-pattern>/api/staff-assignments/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
+        <servlet-name>adminUsersServlet</servlet-name>
+        <servlet-class>com.cinema.controller.AdminUsersServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>adminUsersServlet</servlet-name>
+        <url-pattern>/api/users/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
         <servlet-name>movieController</servlet-name>
         <servlet-class>com.cinema.controller.MovieController</servlet-class>
     </servlet>
@@ -140,6 +156,26 @@
     <servlet-mapping>
         <servlet-name>screenController</servlet-name>
         <url-pattern>/screen/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
+        <servlet-name>pricingController</servlet-name>
+        <servlet-class>com.cinema.controller.PricingController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>pricingController</servlet-name>
+        <url-pattern>/pricing/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
+        <servlet-name>priceTemplateController</servlet-name>
+        <servlet-class>com.cinema.controller.PriceTemplateController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>priceTemplateController</servlet-name>
+        <url-pattern>/pricing-templates</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>priceTemplateController</servlet-name>
+        <url-pattern>/pricing-templates/*</url-pattern>
     </servlet-mapping>
     <servlet>
         <servlet-name>showtimeController</servlet-name>
@@ -172,6 +208,14 @@
     <servlet-mapping>
         <servlet-name>bookingController</servlet-name>
         <url-pattern>/booking/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
+        <servlet-name>refundController</servlet-name>
+        <servlet-class>com.cinema.controller.RefundController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>refundController</servlet-name>
+        <url-pattern>/api/refunds/*</url-pattern>
     </servlet-mapping>
     <servlet>
         <servlet-name>concessionController</servlet-name>
@@ -265,9 +309,17 @@
         <servlet-name>pageController</servlet-name>
         <url-pattern>/console/*</url-pattern>
     </servlet-mapping>
+    <servlet>
+        <servlet-name>inventoryController</servlet-name>
+        <servlet-class>com.cinema.controller.InventoryController</servlet-class>
+    </servlet>
     <servlet-mapping>
-        <servlet-name>pageController</servlet-name>
-        <url-pattern>/console/*</url-pattern>
+        <servlet-name>inventoryController</servlet-name>
+        <url-pattern>/inventory</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>inventoryController</servlet-name>
+        <url-pattern>/inventory/*</url-pattern>
     </servlet-mapping>
 
 </web-app>

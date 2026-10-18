@@ -1,15 +1,17 @@
 package com.cinema.service.auth;
 
-import com.cinema.common.ServiceException;
 import com.cinema.dao.auth.BranchDAO;
 import com.cinema.dao.auth.RoleDAO;
 import com.cinema.dao.auth.StaffBranchAssignmentDAO;
 import com.cinema.dao.auth.UserDAO;
+import com.cinema.model.auth.AccessScope;
 import com.cinema.model.auth.Role;
 import com.cinema.model.auth.StaffBranchAssignment;
 import com.cinema.model.auth.User;
-import com.cinema.model.branch.Branch;
 import com.cinema.service.audit.AuditService;
+import com.cinema.service.audit.AuditService;
+
+import com.cinema.common.ServiceException;
 
 /** Service for role and branch scope assignment. */
 public class AccessAssignmentService {
@@ -36,69 +38,95 @@ public class AccessAssignmentService {
     /**
      * Assign a branch to a staff member.
      * Validates user, branch, and role; prevents duplicate ACTIVE assignments.
+     *
+     * @deprecated Use {@link #assignBranchWithScope(Long, Long, Long, AccessScope)} — old
+     *     method assumes actor is Admin. Kept for backward compat với admin-only code path.
      */
+    @Deprecated
     public StaffBranchAssignment assignBranch(Long staffUserId, Long branchId, Long adminUserId) throws Exception {
+        User admin = userDao.findById(adminUserId)
+            .orElseThrow(() -> new ServiceException.NotFound("Admin không tồn tại"));
+        return assignBranchWithScope(staffUserId, branchId, adminUserId,
+                AccessScope.forRole(Role.ADMIN, java.util.Set.of()));
+    }
+
+    /**
+     * Assign branch theo scope — Admin hoặc BRM cùng chi nhánh.
+     * - Admin: gán được BRM + STAFF cho bất kỳ chi nhánh.
+     * - BRM: chỉ gán STAFF (không được gán BRM khác vào chi nhánh của mình).
+     */
+    public StaffBranchAssignment assignBranchWithScope(Long staffUserId, Long branchId,
+                                                      Long actorUserId, AccessScope scope) throws Exception {
+        if (!scope.includesBranch(branchId)) {
+            throw new ServiceException.Forbidden("Không thuộc chi nhánh " + branchId);
+        }
         User staffUser = userDao.findById(staffUserId)
             .orElseThrow(() -> new ServiceException.NotFound("Người dùng không tồn tại"));
-
-        // Chỉ Manager/Staff cần scope chi nhánh; Admin xem toàn hệ thống,
-        // Customer thì không gán vào staff_branch_assignment được.
         if (staffUser.role != Role.BRANCH_MANAGER && staffUser.role != Role.BRANCH_STAFF) {
             throw new ServiceException.Validation(
                 "Chỉ có thể gán chi nhánh cho Branch Manager hoặc Branch Staff");
         }
-
-        User admin = userDao.findById(adminUserId)
-            .orElseThrow(() -> new ServiceException.NotFound("Admin không tồn tại"));
-
-        if (admin.role != Role.ADMIN) {
-            throw new ServiceException.Forbidden("Chỉ Admin mới có thể gán chi nhánh");
+        // BRM không được gán BRM khác
+        if (scope.role() == Role.BRANCH_MANAGER && staffUser.role == Role.BRANCH_MANAGER) {
+            throw new ServiceException.Forbidden(
+                "Bạn không thể thay đổi Branch Manager. Liên hệ Admin.");
         }
-
         if (branchDao == null) {
-            // Fallback lazy-init khi constructor gặp lỗi (vd. thiếu DB config).
             branchDao = new BranchDAO();
         }
         if (!branchDao.exists(branchId)) {
             throw new ServiceException.NotFound("Chi nhánh không tồn tại");
         }
-
-        // DB có UNIQUE(partial) cho assignment ACTIVE nhưng check trước ở service
-        // để trả 409 rõ ràng thay vì 500 do SQL exception.
         if (assignmentDao.hasActiveAssignment(staffUserId, branchId)) {
-            throw new ServiceException.Conflict(
-                "Người dùng đã được gán chi nhánh này");
+            throw new ServiceException.Conflict("Người dùng đã được gán chi nhánh này");
         }
-
         StaffBranchAssignment assignment = new StaffBranchAssignment(
-            staffUserId, branchId, adminUserId);
+            staffUserId, branchId, actorUserId);
         assignmentDao.insert(assignment);
-
-        // Req 13.4/15.3 — thay đổi scope có hiệu lực ở request kế tiếp, ghi audit
-        audit.recordSafely(adminUserId, "ASSIGN_BRANCH", "STAFF_ASSIGNMENT", assignment.id(),
+        audit.recordSafely(actorUserId, "ASSIGN_BRANCH", "STAFF_ASSIGNMENT", assignment.id(),
             null, "{\"staffUserId\":" + staffUserId + ",\"branchId\":" + branchId
                 + ",\"status\":\"ACTIVE\"}",
             com.cinema.service.audit.AuditService.SUCCESS);
-
         return assignment;
     }
 
     /**
      * End a staff assignment to a branch.
+     *
+     * @deprecated Use {@link #endAssignmentWithScope} for scope-aware checks.
      */
+    @Deprecated
     public void endAssignment(Long assignmentId, Long adminUserId) throws Exception {
         User admin = userDao.findById(adminUserId)
             .orElseThrow(() -> new ServiceException.NotFound("Admin không tồn tại"));
+        endAssignmentWithScope(assignmentId, adminUserId,
+                AccessScope.forRole(Role.ADMIN, java.util.Set.of()));
+    }
 
-        if (admin.role != Role.ADMIN) {
-            throw new ServiceException.Forbidden("Chỉ Admin mới có thể kết thúc assignment");
+    /**
+     * End assignment theo scope — Admin hoặc BRM cùng chi nhánh.
+     * BRM không được kết thúc assignment BRM (chỉ Admin).
+     */
+    public void endAssignmentWithScope(Long assignmentId, Long actorUserId, AccessScope scope)
+            throws Exception {
+        // Tìm assignment để check branch + role.
+        var ctxOpt = assignmentDao.findAssignmentContext(assignmentId);
+        if (ctxOpt.isEmpty()) {
+            throw new ServiceException.NotFound("Phân công không tồn tại");
         }
-
-        // DAO endAssignment() đã set status=ENDED + ended_at=NOW() trong cùng
-        // transaction; service chỉ audit thêm diff cũ → mới.
+        var ctx = ctxOpt.get();
+        long branchId = ((Number) ctx.get("branchId")).longValue();
+        String roleCode = (String) ctx.get("roleCode");
+        if (!scope.includesBranch(branchId)) {
+            throw new ServiceException.Forbidden(
+                    "Bạn chỉ có thể thao tác trên chi nhánh của mình");
+        }
+        if (scope.role() == Role.BRANCH_MANAGER && "BRANCH_MANAGER".equals(roleCode)) {
+            throw new ServiceException.Forbidden(
+                    "Bạn không thể bỏ gán Branch Manager. Liên hệ Admin.");
+        }
         assignmentDao.endAssignment(assignmentId);
-
-        audit.recordSafely(adminUserId, "END_ASSIGNMENT", "STAFF_ASSIGNMENT", assignmentId,
+        audit.recordSafely(actorUserId, "END_ASSIGNMENT", "STAFF_ASSIGNMENT", assignmentId,
             "{\"status\":\"ACTIVE\"}", "{\"status\":\"ENDED\"}",
             com.cinema.service.audit.AuditService.SUCCESS);
     }

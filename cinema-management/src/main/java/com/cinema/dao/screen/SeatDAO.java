@@ -1,8 +1,9 @@
 package com.cinema.dao.screen;
 
-import com.cinema.infrastructure.database.DBContext;
 import com.cinema.model.screen.Seat;
-import com.cinema.model.showtime.Showtime;
+import com.cinema.service.screen.ScreenService;
+
+import com.cinema.infrastructure.database.DBContext;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;

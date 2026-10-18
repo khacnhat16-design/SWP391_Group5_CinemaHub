@@ -1,15 +1,15 @@
 package com.cinema.service.screen;
 
-import com.cinema.dao.branch.BranchDAO;
-import com.cinema.common.ServiceException;
-import com.cinema.infrastructure.database.DBContext;
 import com.cinema.dao.screen.ScreenDAO;
 import com.cinema.dao.screen.SeatDAO;
 import com.cinema.model.branch.Branch;
 import com.cinema.model.screen.Screen;
 import com.cinema.model.screen.Seat;
-import com.cinema.model.showtime.Showtime;
 import com.cinema.service.audit.AuditService;
+
+import com.cinema.dao.branch.BranchDAO;
+import com.cinema.common.ServiceException;
+import com.cinema.infrastructure.database.DBContext;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -281,6 +281,23 @@ public class ScreenService {
         logger.info("Deactivated screen " + screenId);
         audit.recordSafely(null, "DEACTIVATE_SCREEN", "SCREEN", screenId,
                 "{\"status\":\"ACTIVE\"}", "{\"status\":\"INACTIVE\"}",
+                com.cinema.service.audit.AuditService.SUCCESS);
+        return screen;
+    }
+
+    /** Restore a previously deactivated screen. */
+    public Screen restore(Long actorBranchScope, long screenId) throws Exception {
+        Screen screen = requireScreenInScope(actorBranchScope, screenId);
+        if (!"INACTIVE".equalsIgnoreCase(screen.status())) {
+            throw new ServiceException.BusinessRule("SCREEN_NOT_INACTIVE",
+                    "Phòng chiếu không ở trạng thái ngưng hoạt động");
+        }
+
+        screen.setStatus("ACTIVE");
+        screenDao.update(screen);
+        logger.info("Restored screen " + screenId);
+        audit.recordSafely(null, "RESTORE_SCREEN", "SCREEN", screenId,
+                "{\"status\":\"INACTIVE\"}", "{\"status\":\"ACTIVE\"}",
                 com.cinema.service.audit.AuditService.SUCCESS);
         return screen;
     }

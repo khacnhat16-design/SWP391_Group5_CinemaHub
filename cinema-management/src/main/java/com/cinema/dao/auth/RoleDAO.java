@@ -1,7 +1,8 @@
 package com.cinema.dao.auth;
 
-import com.cinema.infrastructure.database.DBContext;
 import com.cinema.model.auth.Role;
+
+import com.cinema.infrastructure.database.DBContext;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;

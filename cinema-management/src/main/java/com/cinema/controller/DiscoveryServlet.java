@@ -14,7 +14,9 @@ import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,7 +40,7 @@ public final class DiscoveryServlet extends HttpServlet {
         out.printf("""
             <!doctype html><html lang="vi"><head><meta charset="UTF-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
-            <link rel="stylesheet" href="%s/assets/css/cinema.css">
+            <link rel="stylesheet" href="%s/assets/css/cinema.css?v=20261003-discovery-group-1">
             <title>Khám phá suất chiếu - CinemaHub</title></head><body>
             <header class="nav-wrapper"><div class="nav container">
             <a class="logo" href="%s/">Cinema<span class="accent">Hub</span></a>
@@ -52,7 +54,7 @@ public final class DiscoveryServlet extends HttpServlet {
             """, ctx, ctx, renderAccountNav(request, ctx), ctx);
 
         try {
-            List<Movie> movies = movieDao.findPublished(LocalDate.now());
+            List<Movie> movies = movieDao.findPublished(LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh")));
             Map<Long, Movie> movieById = new HashMap<>();
             for (Movie movie : movies) {
                 movieById.put(movie.id(), movie);
@@ -84,25 +86,67 @@ public final class DiscoveryServlet extends HttpServlet {
                     <p>Hãy chọn ngày, phim hoặc chi nhánh khác.</p></div>
                     """);
             } else {
+                Map<Long, List<Showtime>> showtimesByMovie = new LinkedHashMap<>();
+                // Index movies in the same order as MovieDAO.findPublished
+                // (release_date DESC, id DESC) so newest film appears first even
+                // when its earliest showtime is later than older titles.
+                Map<Long, Integer> movieOrder = new HashMap<>();
+                int order = 0;
+                for (Movie m : movies) {
+                    movieOrder.put(m.id(), order++);
+                }
                 for (Showtime showtime : showtimes) {
-                    Movie movie = movieById.get(showtime.movieId());
+                    showtimesByMovie.computeIfAbsent(showtime.movieId(), ignored -> new java.util.ArrayList<>())
+                            .add(showtime);
+                }
+                List<Map.Entry<Long, List<Showtime>>> ordered = new java.util.ArrayList<>(
+                        showtimesByMovie.entrySet());
+                ordered.sort((a, b) -> {
+                    int ai = movieOrder.getOrDefault(a.getKey(), Integer.MAX_VALUE);
+                    int bi = movieOrder.getOrDefault(b.getKey(), Integer.MAX_VALUE);
+                    return Integer.compare(ai, bi);
+                });
+                for (Map.Entry<Long, List<Showtime>> movieEntry : ordered) {
+                    // Defensive: đảm bảo các suất chiếu trong cùng nhóm phim LUÔN
+                    // hiển thị theo thứ tự thời gian chiếu gần nhất → xa nhất
+                    // (start_time ASC). DAO đã ORDER BY s.start_time, nhưng sort
+                    // lại ở đây để tránh phụ thuộc vào câu SQL và chống regression
+                    // nếu ai đó thêm/dời ORDER BY trong tương lai.
+                    List<Showtime> sortedShowtimes = new java.util.ArrayList<>(movieEntry.getValue());
+                    sortedShowtimes.sort(java.util.Comparator.comparing(Showtime::startTime));
+                    Showtime firstShowtime = sortedShowtimes.get(0);
+                    Movie movie = movieById.get(movieEntry.getKey());
                     String poster = movie == null ? null : movie.posterUrl();
-                    String bookingUrl = ctx + "/booking?movieId=" + showtime.movieId();
+                    String detailUrl = ctx + "/movie-detail?movieId=" + movieEntry.getKey();
                     String image = poster == null || poster.isBlank()
                             ? "<div class=\"show-poster-placeholder\">NO POSTER</div>"
-                            : "<img src=\"" + escape(poster) + "\" alt=\""
-                                    + escape(showtime.movieTitle()) + "\">";
+                            : "<img data-poster-fallback=\"show-poster-placeholder\" loading=\"lazy\" referrerpolicy=\"no-referrer\" src=\""
+                                    + escape(poster) + "\" alt=\"" + escape(firstShowtime.movieTitle()) + "\">";
                     out.printf("""
-                        <article class="panel show-row">
-                          <div class="show-poster">%s</div>
-                          <div class="show-details"><a href="%s"><b>%s</b></a>
-                            <span>%s · %s · %s</span>
+                        <article class="panel discovery-movie">
+                          <div class="discovery-movie-heading">
+                            <a class="discovery-movie-poster" href="%s">%s</a>
+                            <div class="show-details">
+                              <a class="discovery-movie-title" href="%s"><b>%s</b></a>
+                              <span>%d suất chiếu</span>
+                            </div>
                           </div>
-                          <strong>%d ghế trống</strong>
-                        </article>
-                        """, image, escape(bookingUrl), escape(showtime.movieTitle()),
-                            escape(showtime.branchName()), escape(showtime.screenName()),
-                            showtime.startTime(), showtime.availableSeats());
+                          <div class="discovery-movie-showtimes">
+                        """, escape(detailUrl), image, escape(detailUrl), escape(firstShowtime.movieTitle()),
+                            sortedShowtimes.size());
+                    for (Showtime showtime : sortedShowtimes) {
+                    String bookingUrl = ctx + "/booking?movieId=" + showtime.movieId();
+                    out.printf("""
+                        <div class="discovery-showtime">
+                          <span><b>%s</b><small>%s · %s</small></span>
+                          <span class="discovery-seat-count">%d ghế trống</span>
+                          <a class="btn small" href="%s">Đặt vé</a>
+                        </div>
+                        """, escape(showtime.branchName()), escape(showtime.screenName()),
+                              escape(String.valueOf(showtime.startTime()).replace('T', ' ')),
+                              showtime.availableSeats(), escape(bookingUrl));
+                    }
+                    out.print("</div></article>");
                 }
             }
         } catch (Exception e) {
@@ -111,7 +155,7 @@ public final class DiscoveryServlet extends HttpServlet {
                 <p>Vui lòng thử lại sau.</p></div>
                 """);
         }
-        out.print("</section></main></body></html>");
+        out.printf("</section></main><script src=\"%s/assets/js/app.js?v=20261003-notification-time-2\" defer></script></body></html>", ctx);
     }
 
     private Long parseLong(String value) {

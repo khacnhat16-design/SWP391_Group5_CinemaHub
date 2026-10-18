@@ -1,5 +1,7 @@
 package com.cinema.controller;
 
+import com.cinema.model.branch.Branch;
+
 import com.cinema.model.auth.AccessScope;
 import com.cinema.model.auth.Role;
 import com.cinema.dao.branch.BranchDAO;
@@ -14,7 +16,6 @@ import com.cinema.service.screen.ScreenService;
 import com.cinema.model.screen.Seat;
 import com.cinema.dao.screen.SeatDAO;
 import com.cinema.service.screen.ScreenService.SeatLayoutInput;
-import com.cinema.model.branch.Branch;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,8 +27,8 @@ import java.util.List;
 /**
  * REST API controller cho phòng chiếu & sơ đồ ghế (Req 3.1-3.6).
  *
- * <p>Access model: Branch Manager quản lý screen của branch mình (Admin toàn chuỗi);
- * Branch Staff/Customer/Guest không có quyền quản lý — chỉ Manager/Admin (Req 3.6).
+ * <p>Access model: Branch Manager quản lý screen của branch mình;
+ * Admin, Branch Staff/Customer/Guest không có quyền quản lý (Req 3.6).
  */
 public class ScreenController extends HttpServlet {
     private ScreenService screenService;
@@ -41,13 +42,14 @@ public class ScreenController extends HttpServlet {
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
         try {
-            AccessScope scope = requireManager(request, response);
+            AccessScope scope = requireReadAccess(request, response);
             if (scope == null) return;
 
             String pathInfo = request.getPathInfo();
             if (pathInfo != null && pathInfo.matches("/\\d+/seats")) {
                 long screenId = Long.parseLong(pathInfo.substring(1, pathInfo.length() - "/seats".length()));
-                List<Seat> seats = screenService.seatMap(scopeBranch(scope), screenId);
+                Long scopeBranch = scopeBranchOrZero(scope);
+                List<Seat> seats = screenService.seatMap(scopeBranch, screenId);
                 sendOk(response, seats);
             } else {
                 String branchIdRaw = request.getParameter("branchId");
@@ -132,6 +134,8 @@ public class ScreenController extends HttpServlet {
 
             if ("deactivate".equals(action)) {
                 sendOk(response, screenService.deactivate(scopeBranch(scope), screenId));
+            } else if ("restore".equals(action)) {
+                sendOk(response, screenService.restore(scopeBranch(scope), screenId));
             } else {
                 int rowCount = parseIntParam(parameters, "rowCount");
                 int colCount = parseIntParam(parameters, "colCount");
@@ -153,19 +157,45 @@ public class ScreenController extends HttpServlet {
 
     // ---- helpers (mirror MovieController/BranchController patterns) ----
 
-    /** Trả scope nếu là Branch Manager/Admin có quyền SCREEN_MANAGE; ngược lại gửi 403 và trả null. */
+    /** Trả scope nếu là Branch Manager có quyền SCREEN_MANAGE; ngược lại gửi 403 và trả null. */
     private AccessScope requireManager(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
-        if (scope == null || scope.isGuest() || !scope.can("SCREEN_MANAGE")) {
-            sendForbidden(response, "Chỉ Branch Manager hoặc Admin mới có thể quản lý phòng chiếu");
+        if (scope == null || scope.role() != Role.BRANCH_MANAGER || !scope.can("SCREEN_MANAGE")) {
+            sendForbidden(response, "Chỉ Branch Manager mới có thể quản lý phòng chiếu");
             return null;
         }
         return scope;
     }
 
-    /** Admin không bị ép scope (null); Manager ép đúng branch duy nhất trong scope. */
+    /**
+     * GET /screen — Admin xem toàn hệ thống; Manager xem trong phạm vi chi nhánh mình.
+     * Trước đây dùng {@link #requireManager} nên Admin cũng bị từ chối xem screen,
+     * nhưng theo yêu cầu "toàn bộ luồng CRUD" Admin cần xem được danh sách + seat map
+     * để giám sát.
+     */
+    private AccessScope requireReadAccess(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+        if (scope == null || scope.isGuest()) {
+            sendForbidden(response, "Cần đăng nhập");
+            return null;
+        }
+        if (scope.role() != Role.ADMIN && scope.role() != Role.BRANCH_MANAGER) {
+            sendForbidden(response, "Chỉ Admin hoặc Manager xem phòng chiếu");
+            return null;
+        }
+        return scope;
+    }
+
+    /** Manager ép đúng branch duy nhất trong scope. */
     private Long scopeBranch(AccessScope scope) {
+        if (scope.role() == Role.ADMIN) return null;
+        return scope.branchIds().isEmpty() ? -1L : scope.branchIds().iterator().next();
+    }
+
+    /** Cho read API: Admin = null (xem tất cả), Manager = branchId đầu tiên trong scope. */
+    private Long scopeBranchOrZero(AccessScope scope) {
         if (scope.role() == Role.ADMIN) return null;
         return scope.branchIds().isEmpty() ? -1L : scope.branchIds().iterator().next();
     }

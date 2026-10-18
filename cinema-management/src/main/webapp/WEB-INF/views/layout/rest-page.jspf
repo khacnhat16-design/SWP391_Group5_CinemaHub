@@ -1,0 +1,50 @@
+<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
+<%@ taglib prefix="c" uri="jakarta.tags.core" %>
+<%--
+  Shell dung chung cho cac trang danh muc presentation-only.
+
+  Trang con (views/{domain}/list.jsp) chi can set:
+    restPage     -- ten module khop window.CinemaHubPages (branch|movie|screen|...)
+    activeNav    -- key active state cho sidebar.jsp
+    pageTitle / pageSubtitle -- tieu de hien thi o topbar (appshell-open.jsp doc)
+
+  Du lieu KHONG render o day: assets/js/rest-page.js goi REST API co san
+  (GET /branch, /movie, /screen, /booking, /notification) roi dung DOM vao #viewRoot.
+  Khong scriptlet, khong business logic, khong EL truy cap Service/DAO.
+--%>
+<c:set var="ctx" value="${pageContext.request.contextPath}" scope="request"/>
+<c:set var="useWorkspaceCss" value="true" scope="page"/>
+
+<%@ include file="/WEB-INF/views/layout/header.jsp" %>
+
+<c:choose>
+    <c:when test="${empty sessionScope.username}">
+        <div class="container auth-page">
+            <div class="auth-card">
+                <span class="eyebrow">CINEMAHUB WORKSPACE</span>
+                <h1>Can dang nhap</h1>
+                <p class="muted">Trang nay yeu cau tai khoan da dang nhap.</p>
+                <div class="actions">
+                    <a class="btn" href="${ctx}/login">Dang nhap</a>
+                    <a class="btn ghost" href="${ctx}/register">Tao tai khoan</a>
+                </div>
+            </div>
+        </div>
+        <%@ include file="/WEB-INF/views/layout/footer.jsp" %>
+    </c:when>
+    <c:otherwise>
+        <%@ include file="/WEB-INF/views/layout/appshell-open.jsp" %>
+        <%@ include file="/WEB-INF/views/layout/appshell-close.jsp" %>
+
+        <meta name="rest-page" content="${restPage}">
+<script src="${ctx}/assets/js/app.js?v=20261004-showtime-reminders-1" defer></script>
+<script src="${ctx}/assets/js/rest-page.js?v=20260924-1" defer></script>
+<script src="${ctx}/assets/js/page-router.js?v=20260925-1" defer></script>
+<script src="${ctx}/assets/js/modules-form-pages.js?v=20261013-bsap-6" defer></script>
+<script src="${ctx}/assets/js/modules-schedule.js?v=20260927-2" defer></script>
+<link rel="stylesheet" href="${ctx}/assets/css/schedule-week.css?v=20260921-1">
+<script src="${ctx}/assets/js/modules-rsc.js?v=20260927-2" defer></script>
+
+        <%@ include file="/WEB-INF/views/layout/footer.jsp" %>
+    </c:otherwise>
+</c:choose>

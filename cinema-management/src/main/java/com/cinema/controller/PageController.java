@@ -24,7 +24,7 @@ public class PageController extends HttpServlet {
 
     /** Domain có trang danh mục tại /console/{domain}/list (whitelist chống path traversal). */
     private static final Set<String> LIST_PAGES = Set.of(
-            "branch", "movie", "screen", "booking", "notification");
+            "branch", "movie", "screen", "booking", "notification", "inventory");
 
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
@@ -43,6 +43,10 @@ public class PageController extends HttpServlet {
         // để giữ URL quen thuộc cho các module quản lý (movie, screen, branch...).
         if (path.matches("/[^/]+/list")) {
             String domain = path.substring(1, path.length() - "/list".length());
+            if ("inventory".equals(domain)) {
+                response.sendRedirect(request.getContextPath() + "/console?module=inventory&tab=product");
+                return;
+            }
             if (LIST_PAGES.contains(domain)) {
                 request.getRequestDispatcher("/WEB-INF/views/" + domain + "/list.jsp")
                         .forward(request, response);

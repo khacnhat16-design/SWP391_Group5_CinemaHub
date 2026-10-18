@@ -1,12 +1,14 @@
 package com.cinema.service.movie;
 
-import com.cinema.common.ServiceException;
+import com.cinema.common.SerializationUtil;
 import com.cinema.dao.movie.GenreDAO;
 import com.cinema.dao.movie.MovieDAO;
 import com.cinema.model.branch.Branch;
 import com.cinema.model.movie.Genre;
 import com.cinema.model.movie.Movie;
 import com.cinema.service.audit.AuditService;
+
+import com.cinema.common.ServiceException;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -174,11 +176,34 @@ public class MovieService {
         return movie;
     }
 
+    /** Restore an archived movie to the published catalog. */
+    public Movie restoreMovie(Long movieId) throws Exception {
+        Movie movie = movieDao.findById(movieId)
+            .orElseThrow(() -> new ServiceException.NotFound("Phim không tồn tại"));
+        if (!Movie.STATUS_ARCHIVED.equals(movie.status())) {
+            throw new ServiceException.BusinessRule("MOVIE_NOT_ARCHIVED",
+                    "Chỉ có thể mở lại phim đã lưu trữ");
+        }
+
+        movieDao.updateStatus(movieId, Movie.STATUS_PUBLISHED);
+        movie.setStatus(Movie.STATUS_PUBLISHED);
+
+        logger.info("Restored movie: " + movieId);
+        audit.recordSafely(null, "RESTORE_MOVIE", "MOVIE", movieId, null,
+                "{\"status\":\"PUBLISHED\"}", com.cinema.service.audit.AuditService.SUCCESS);
+        return movie;
+    }
+
     /**
      * Full catalog for Admin and Branch Manager management screens.
      */
     public List<Movie> listAll() throws Exception {
         return movieDao.findAll();
+    }
+
+    /** Public catalog for the home page, including upcoming and recently ended releases. */
+    public List<Movie> listPublishedAll() throws Exception {
+        return movieDao.findPublishedAll();
     }
 
     /**

@@ -1,9 +1,9 @@
 package com.cinema.dao.movie;
 
+import com.cinema.model.movie.Genre;
+
 import com.cinema.common.ServiceException;
 import com.cinema.infrastructure.database.DBContext;
-import com.cinema.model.movie.Genre;
-import com.cinema.model.movie.Movie;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;

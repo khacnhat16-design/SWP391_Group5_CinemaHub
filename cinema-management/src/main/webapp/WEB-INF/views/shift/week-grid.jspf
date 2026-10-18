@@ -1,0 +1,16 @@
+<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
+<%@ taglib prefix="c" uri="jakarta.tags.core" %>
+<%--
+  Lịch tuần cho Manager — Work Scheduling (REQ-WS-010..015).
+  Skeleton (toolbar + grid container) do server render;
+  nội dung chi tiết (staff rows + day cells) do
+  assets/js/modules-schedule.js → /shift-assignments API render client-side.
+  CSS: assets/css/schedule-week.css
+
+  Route: GET /console/schedule/week
+--%>
+<c:set var="restPage" value="schedule-week" scope="page"/>
+<c:set var="activeNav" value="schedule-week" scope="request"/>
+<c:set var="pageTitle" value="Lịch tuần" scope="request"/>
+<c:set var="pageSubtitle" value="Phân công ca làm việc cho nhân viên trong tuần" scope="request"/>
+<%@ include file="/WEB-INF/views/layout/rest-page.jspf" %>

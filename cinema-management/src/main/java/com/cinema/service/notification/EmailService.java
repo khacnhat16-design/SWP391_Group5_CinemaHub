@@ -142,6 +142,21 @@ public final class EmailService {
         send(toEmail, subject, body);
     }
 
+    /**
+     * Sends a transactional HTML email without logging its body when SMTP is unavailable.
+     * Refund messages can contain customer bank-account details.
+     */
+    public void sendHtml(String toEmail, String subject, String htmlBody) {
+        if (toEmail == null || toEmail.isBlank()) {
+            throw new ServiceException.Validation("Địa chỉ email người nhận không hợp lệ");
+        }
+        if (gmailSmtp == null || !gmailSmtp.isConfigured()) {
+            throw new ServiceException.BusinessRule("EMAIL_NOT_CONFIGURED",
+                    "Email chưa được cấu hình. Kiểm tra GMAIL_SMTP_USER và GMAIL_SMTP_PASSWORD.");
+        }
+        send(toEmail, subject, htmlBody);
+    }
+
     private void send(String to, String subject, String htmlBody) {
         // 1) Gmail SMTP — provider duy nhất. Nếu fail thì log warning nhưng KHÔNG crash.
         if (gmailSmtp != null && gmailSmtp.isConfigured()) {

@@ -1,7 +1,9 @@
 package com.cinema.dao.branch;
 
-import com.cinema.infrastructure.database.DBContext;
+import com.cinema.common.ServiceException;
 import com.cinema.model.branch.Branch;
+
+import com.cinema.infrastructure.database.DBContext;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -21,14 +23,18 @@ public class BranchDAO {
      * Insert new branch.
      */
     public void insert(Branch branch) throws Exception {
+        try (Connection conn = DBContext.getConnection()) {
+            insert(conn, branch);
+        }
+    }
+
+    public void insert(Connection conn, Branch branch) throws Exception {
         String sql = """
             INSERT INTO dbo.branch
                 (name, address, phone, status, created_at)
             VALUES (UPPER(LTRIM(RTRIM(?))), ?, ?, ?, SYSUTCDATETIME())
             """;
-
-        try (Connection conn = DBContext.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, branch.name());
             ps.setString(2, branch.address());
             ps.setString(3, branch.phone());
@@ -252,6 +258,15 @@ public class BranchDAO {
         }
     }
 
+    public void updateStatus(Connection conn, Long branchId, String status) throws Exception {
+        String sql = "UPDATE dbo.branch SET status = ?, updated_at = SYSUTCDATETIME() WHERE id = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, status);
+            ps.setLong(2, branchId);
+            ps.executeUpdate();
+        }
+    }
+
     private Branch mapRow(ResultSet rs) throws Exception {
         Branch branch = new Branch(
             rs.getString("name"),
@@ -275,5 +290,4 @@ public class BranchDAO {
 
         return branch;
     }
-
 }
