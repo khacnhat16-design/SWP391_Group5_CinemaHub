@@ -18,7 +18,7 @@
     var role = (document.querySelector('meta[name="user-role"]') || {}).content || 'GUEST';
     var defaultModule = role === 'ADMIN' ? 'users'
         : role === 'BRANCH_MANAGER' ? 'showtime'
-        : role === 'BRANCH_STAFF' ? 'pos-ticket' : 'discovery';
+        : role === 'BRANCH_STAFF' ? 'ticket' : 'discovery';
     var currentModule = params.get('module') || defaultModule;
     if (role === 'ADMIN' && !params.has('module')) {
         params.set('module', defaultModule);
@@ -306,12 +306,6 @@
         });
     }
 
-    // ============ POS (delegate to pos-staff.js) ============
-    function modulePosTicket() {
-        if (window.modulePosTicket) return window.modulePosTicket();
-        emptyModule('Ban ve tai quay', 'Module POS chua san sang.');
-    }
-
     // ============ MODULE DISPATCH MAP ============
     var MODULES = {
         profile: function () {
@@ -337,7 +331,6 @@
         },
         pricing: function () { var h = dispatchBusiness('pricing'); return (h && h()) || emptyModule('Khung gia', 'Chuc nang chua sang'); },
         notification: function () { var h = dispatchBusiness('notification'); return (h && h()) || emptyModule('Thong bao', 'Chuc nang chua sang'); },
-        'pos-ticket': modulePosTicket,
         seat: moduleSeat,
         'my-tickets': function () {
             // Customer tickets are registered as a form-page renderer, not in the

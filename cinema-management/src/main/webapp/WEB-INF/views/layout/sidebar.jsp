@@ -47,10 +47,10 @@
         </c:when>
         <c:when test="${role == 'BRANCH_STAFF'}">
             <div class="sb-section">
-                <div class="sb-title">Bán hàng</div>
-                <a class="sb-link ${activeNav == 'pos-ticket' ? 'active' : ''}" href="${ctx}/console?module=pos-ticket">
+                <div class="sb-title">Vé</div>
+                <a class="sb-link ${activeNav == 'ticket' ? 'active' : ''}" href="${ctx}/console?module=ticket">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v4"/><path d="M2 12h20"/><path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/></svg>
-                    Bán vé tại quầy
+                    Lịch sử vé
                 </a>
             </div>
         </c:when>

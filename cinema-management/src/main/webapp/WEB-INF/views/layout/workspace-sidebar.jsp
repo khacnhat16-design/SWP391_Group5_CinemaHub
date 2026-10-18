@@ -276,10 +276,10 @@
                  ============================================================ --%>
             <c:when test="${wsRole == 'BRANCH_STAFF'}">
                 <div class="ws-menu-group">
-                    <div class="ws-menu-group-label">Bán hàng</div>
-                    <a class="ws-menu-link ${wsActive == 'pos-ticket' ? 'active' : ''}" href="${wsCtx}/console?module=pos-ticket">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v4"/><path d="M2 12h20"/><path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/></svg>
-                        Bán vé
+                    <div class="ws-menu-group-label">Vé</div>
+                    <a class="ws-menu-link ${wsActive == 'ticket' ? 'active' : ''}" href="${wsCtx}/console?module=ticket">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v4H4z"/><path d="M4 8v12h16V8"/></svg>
+                        Lịch sử vé
                     </a>
                     <a class="ws-menu-link ${wsActive == 'pos-concession' ? 'active' : ''}" href="${wsCtx}/console?module=pos-concession">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/></svg>

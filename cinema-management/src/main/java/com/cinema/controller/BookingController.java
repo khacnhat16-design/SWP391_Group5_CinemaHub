@@ -55,7 +55,6 @@ import java.util.Map;
  * <ul>
  *   <li>POST /booking/hold — Customer giữ ghế 10 phút (Req 7.1).</li>
  *   <li>POST /booking/confirm — xác nhận booking trong hold + phương thức thanh toán (Req 7.5).</li>
- *   <li>POST /booking/counter-sale — Branch Staff bán vé tiền mặt tại quầy (Req 7.7).</li>
  *   <li>POST /booking/cancel — hủy vé bậc thang (Customer chủ vé hoặc Staff đúng branch, Req 11).</li>
  *   <li>GET /booking/mine — lịch sử vé của chính Customer (Req 16.5, chặn IDOR).</li>
  * </ul>
@@ -267,7 +266,6 @@ public class BookingController extends HttpServlet {
                 case "/hold" -> hold(request, response);
                 case "/release" -> release(request, response);
                 case "/confirm" -> confirm(request, response);
-                case "/counter-sale" -> counterSale(request, response);
                 case "/cancel" -> cancel(request, response);
                 default -> sendError(response, 400, "BAD_REQUEST", "Endpoint không tồn tại");
             }
@@ -498,25 +496,6 @@ public class BookingController extends HttpServlet {
         sendOk(response, result);
     }
 
-    /** Req 7.7 — Branch Staff bán vé tiền mặt tại quầy (ép branch scope). */
-    private void counterSale(HttpServletRequest request, HttpServletResponse response) throws Exception {
-        AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
-        if (scope == null || !scope.can("TICKET_SELL")) {
-            sendForbidden(response, "Chỉ Branch Staff/Branch Manager mới được bán vé tại quầy");
-            return;
-        }
-        Long staffId = sessionUserId(request);
-        long staffBranchId = requireSingleBranch(scope);
-
-        long showtimeId = Long.parseLong(requireParam(request, "showtimeId"));
-        List<Long> seatIds = parseSeatIds(requireParam(request, "seatIds"));
-        Long customerId = parseOptionalLong(request.getParameter("customerId"));
-        TicketType ticketType = parseTicketType(request.getParameter("ticketType"));
-        Ticket ticket = bookingService.sellAtCounter(showtimeId, seatIds,
-                customerId, staffId, staffBranchId, ticketType);
-        sendOk(response, ticket);
-    }
-
     /** Req 11 — Customer hủy vé của mình hoặc Staff hủy tại quầy đúng chi nhánh. */
     private void cancel(HttpServletRequest request, HttpServletResponse response) throws Exception {
         AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
@@ -534,7 +513,7 @@ public class BookingController extends HttpServlet {
                 sendError(response, 401, "UNAUTHORIZED", "Cần đăng nhập");
                 return;
             }
-        } else if (scope.can("TICKET_SELL")) {
+        } else if (scope.can("TICKET_CANCEL_BRANCH")) {
             actorStaffBranchId = requireSingleBranch(scope);
         } else {
             sendForbidden(response, "Không có quyền hủy vé");
@@ -735,10 +714,6 @@ public class BookingController extends HttpServlet {
             throw new ServiceException.Validation("Danh sách ghế không được rỗng");
         }
         return seatIds;
-    }
-
-    private Long parseOptionalLong(String raw) {
-        return raw == null || raw.isBlank() ? null : Long.parseLong(raw.trim());
     }
 
     private void sendOk(HttpServletResponse response, Object data) throws IOException {

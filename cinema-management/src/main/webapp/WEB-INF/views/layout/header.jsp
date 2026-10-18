@@ -48,7 +48,7 @@
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
                 </c:when>
                 <c:when test="${currentRole == 'BRANCH_STAFF'}">
-                    <a href="${ctx}/console?module=pos-ticket">Bán vé</a>
+                    <a href="${ctx}/console?module=ticket">Lịch sử vé</a>
                 </c:when>
                 <c:when test="${currentRole == 'CUSTOMER'}">
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>

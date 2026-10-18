@@ -91,7 +91,7 @@
 
         // Trang dashboard và các module đặc biệt không có form-page → console.js dispatch
         const noFormPage = ['dashboard', 'discovery', 'seat',
-            'pos-ticket', 'ticket', 'my-tickets',
+            'ticket', 'my-tickets',
             // Reviews use the console.js module registry.
             'reviews',
             // Profile — route tới console.js moduleProfile() để hỗ trợ mọi role

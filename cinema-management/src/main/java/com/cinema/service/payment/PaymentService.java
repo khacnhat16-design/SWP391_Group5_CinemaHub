@@ -53,7 +53,6 @@ public class PaymentService {
                           VnPayProvider vnPay) {
         this.paymentDao = paymentDao;
         this.walletService = walletService;
-        register(new CashProvider());
         register(mockGateway);
         register(new WalletProvider());
         register(new BankTransferProvider(bankAccountInfo));
@@ -73,7 +72,7 @@ public class PaymentService {
         PaymentProvider provider = providers.get(normalizeMethod(method));
         if (provider == null) {
             throw new ServiceException.Validation(
-                    "Phương thức thanh toán phải là CASH, MOCK_GATEWAY, BANK_TRANSFER hoặc WALLET");
+                    "Phương thức thanh toán không được hỗ trợ");
         }
         if (amount <= 0) {
             throw new ServiceException.Validation("Số tiền thanh toán phải là số dương");
@@ -259,39 +258,6 @@ public class PaymentService {
                     + vnpParams.get("vnp_TxnRef"));
             throw new ServiceException.Forbidden("Checksum VNPay không hợp lệ");
         }
-    }
-
-    /**
-     * Branch Staff xác nhận thu tiền mặt (Req 9.1, 9.7, 9.8): PENDING → SUCCESS,
-     * vé CONFIRMED. Xác nhận lần hai → 409 ALREADY_PROCESSED.
-     *
-     * @param staffBranchId chi nhánh của staff — phải khớp chi nhánh của vé (Req 9.1)
-     */
-    public Payment confirmCash(long ticketId, long staffId, long staffBranchId) throws Exception {
-        return tx.execute(conn -> {
-            requireTicketBranch(conn, ticketId, staffBranchId);
-            Payment payment = lockPendingPaymentForTicket(conn, ticketId, Payment.METHOD_CASH);
-
-            boolean ticketConfirmed = confirmTicket(conn, ticketId, payment.amount());
-            String resultStatus = ticketConfirmed ? Payment.STATUS_SUCCESS
-                    : Payment.STATUS_REVIEW_REQUIRED;
-            boolean transitioned = markPayment(conn, payment.id(), resultStatus,
-                    "CASH-STAFF-" + staffId, null);
-            if (!transitioned) {
-                throw alreadyProcessed(payment);
-            }
-            // Req 22.2 — gán giao dịch tiền mặt vào ca đang mở của staff để đối soát
-            attachToOpenShift(conn, payment.id(), staffId);
-
-            payment.setStatus(resultStatus);
-            if (!ticketConfirmed) {
-                logger.warning("Cash payment " + payment.id()
-                        + " collected after ticket hold expired; manual review required");
-            }
-            logger.info("Cash payment " + payment.id() + " confirmed by staff " + staffId
-                    + " → " + resultStatus);
-            return payment;
-        });
     }
 
     /**
@@ -524,4 +490,3 @@ public class PaymentService {
     /** Kết quả tạo phiên: payment + redirect URL (mock gateway) nếu có. */
     public record PaymentOutcome(Payment payment, String redirectUrl) { }
 }
-
