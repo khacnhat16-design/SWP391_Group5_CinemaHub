@@ -1,5 +1,6 @@
 package com.cinema.filter;
 
+import com.cinema.model.auth.Role;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.FilterConfig;

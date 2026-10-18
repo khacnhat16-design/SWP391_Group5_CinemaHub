@@ -1,0 +1,150 @@
+/* ============================================================
+   inventory.css — Module Quản lý tồn kho CinemaHub
+   Styles cho Giai đoạn 1: Màn 1 (M-P1 Danh sách tồn kho bắp nước)
+   ============================================================ */
+
+.inv-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+
+.inv-toolbar {
+    padding: 16px 20px;
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.inv-filters {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.inv-select {
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    background: #ffffff;
+    color: #1e293b;
+    outline: none;
+    min-width: 140px;
+}
+
+.inv-select:focus {
+    border-color: #2563eb;
+}
+
+.inv-search-input {
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    background: #ffffff;
+    color: #1e293b;
+    outline: none;
+    min-width: 220px;
+}
+
+.inv-search-input:focus {
+    border-color: #2563eb;
+}
+
+/* Thẻ thống kê */
+.inv-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.inv-stat-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.inv-stat-card h6 {
+    margin: 0;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    color: #64748b;
+    font-weight: 700;
+}
+
+.inv-stat-card .inv-stat-val {
+    margin-top: 6px;
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+/* Bảng */
+.inv-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    text-align: left;
+}
+
+.inv-table th {
+    background: #f8fafc;
+    color: #475569;
+    padding: 12px 16px;
+    font-weight: 700;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+}
+
+.inv-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #1e293b;
+    vertical-align: middle;
+}
+
+.inv-table tr:hover td {
+    background: #f8fafc;
+}
+
+/* Huy hiệu trạng thái */
+.inv-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.inv-badge-green {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.inv-badge-orange {
+    background: #ffedd5;
+    color: #9a3412;
+}
+
+.inv-badge-red {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.inv-badge-gray {
+    background: #f1f5f9;
+    color: #475569;
+}

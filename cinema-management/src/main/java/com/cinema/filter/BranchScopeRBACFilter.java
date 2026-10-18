@@ -1,10 +1,12 @@
 package com.cinema.filter;
 
-import com.cinema.audit.AuditService;
-import com.cinema.auth.AccessScope;
-import com.cinema.auth.Role;
+import com.cinema.service.audit.AuditService;
+import com.cinema.model.auth.AccessScope;
+import com.cinema.model.auth.Role;
 import com.cinema.common.ErrorEnvelope;
 import com.cinema.common.SerializationUtil;
+import com.cinema.infrastructure.database.DBContext;
+import com.cinema.model.branch.Branch;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -62,6 +64,7 @@ public final class BranchScopeRBACFilter implements Filter {
             "/booking",
             // Reviews / Support / Complaints (RSC-2..4) — Customer submits, Manager reads via own role.
             "/api/reviews", "/api/support-requests", "/api/complaints"
+            , "/api/refunds"
     );
 
     // Staff/Manager endpoint prefixes (controller-level will further enforce branch scope)
@@ -95,8 +98,6 @@ public final class BranchScopeRBACFilter implements Filter {
             "/admin/wallet",
             // Payroll self-service and complaint endpoints; handlers enforce role and branch access.
             "/payroll", "/api/payroll-complaints",
-            // Showtime allocation (Admin: all; Manager: own branch only — enforced in controller).
-            "/api/showtime-allocations",
             // Voucher CRUD (Admin/Manager per scope; Staff can read holiday for context)
             "/voucher", "/holiday",
             // Work Scheduling
@@ -106,6 +107,7 @@ public final class BranchScopeRBACFilter implements Filter {
             "/shift-attendance",
             // Reviews — public read; Staff allowed too (controller lets any logged-in read).
             "/api/reviews"
+            , "/api/refunds"
     );
 
     // Admin-only endpoint prefixes (controller-level will re-check, this filter is just first line)
@@ -164,6 +166,10 @@ public final class BranchScopeRBACFilter implements Filter {
     private boolean isAuthorized(AccessScope scope, String path, String method) {
         // 1. Public endpoints (guest-allowed)
         if (isPublicEndpoint(path)) {
+            return true;
+        }
+
+        if (scope.isGuest() && "GET".equalsIgnoreCase(method) && "/movie".equals(path)) {
             return true;
         }
 
@@ -250,7 +256,7 @@ public final class BranchScopeRBACFilter implements Filter {
     private void auditUnauthorizedAccess(AccessScope scope, String path, String method) {
         try {
             String roleStr = scope.isGuest() ? "GUEST" : scope.role().toString();
-            try (var conn = dal.DBContext.getConnection()) {
+            try (var conn = com.cinema.infrastructure.database.DBContext.getConnection()) {
                 auditService.record(conn, null, "UNAUTHORIZED_ACCESS", "REQUEST",
                         null, null,
                         String.format("role=%s method=%s path=%s", roleStr, method, path),

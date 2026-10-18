@@ -106,7 +106,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.5.0</version>
                 <configuration>
-                    <mainClass>com.cinema.web.CinemaApplication</mainClass>
+                    <mainClass>com.cinema.controller.CinemaApplication</mainClass>
                     <systemPropertyVariables>
                         <cinema.port>${cinema.port}</cinema.port>
                     </systemPropertyVariables>

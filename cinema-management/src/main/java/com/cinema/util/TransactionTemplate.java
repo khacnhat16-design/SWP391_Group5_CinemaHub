@@ -1,6 +1,7 @@
 package com.cinema.util;
 
-import dal.DBContext;
+import com.cinema.infrastructure.database.DBContext;
+import com.cinema.model.auth.Transaction;
 
 import java.sql.Connection;
 import java.sql.SQLException;
