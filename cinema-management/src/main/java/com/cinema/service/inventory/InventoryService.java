@@ -156,41 +156,6 @@ public class InventoryService {
                 + deltaQty + " at branch " + branchId + " (" + reason + ")");
     }
 
-    // ================================================================
-    // MÀN 3: CÔNG THỨC CHẾ BIẾN (M-X1 -> M-X3, M-R4)
-    // ================================================================
-
-    /** Lấy toàn bộ công thức định mức (M-X1). */
-    public List<InventoryDAO.RecipeItemRow> allRecipes() throws Exception {
-        return inventoryDao.findAllRecipes();
-    }
-
-    /** Chế biến bắp nước từ nguyên liệu thô (M-R4). */
-    public void produce(Long actorBranchScope, long branchId, long productId,
-                        int productQty, long actorId, String note) throws Exception {
-        requireBranchScope(actorBranchScope, branchId);
-        if (productQty <= 0) {
-            throw new ServiceException.Validation("Số lượng thành phẩm chế biến phải lớn hơn 0");
-        }
-        requireActiveBranch(branchId);
-        requireActiveProduct(productId);
-
-        try {
-            tx.executeVoid(conn -> {
-                inventoryDao.produceProduct(conn, branchId, productId, productQty, actorId, note);
-            });
-        } catch (IllegalStateException e) {
-            throw new ServiceException.BusinessRule("INVENTORY_INSUFFICIENT", e.getMessage());
-        }
-        logger.info("Produced product " + productId + " qty=" + productQty + " at branch " + branchId);
-    }
-
-    /** Lưu toàn bộ công thức định mức cho một sản phẩm (M-X2). */
-    public void saveRecipe(long productId, List<InventoryDAO.RecipeItemInput> items) throws Exception {
-        requireActiveProduct(productId);
-        inventoryDao.saveRecipe(productId, items);
-        logger.info("Saved recipe for product " + productId + " with " + (items != null ? items.size() : 0) + " items");
-    }
 
     // ================================================================
     // HELPER GUARDS

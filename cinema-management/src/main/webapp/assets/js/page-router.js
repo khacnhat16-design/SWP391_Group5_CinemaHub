@@ -91,9 +91,13 @@
 
         // Trang dashboard và các module đặc biệt không có form-page → console.js dispatch
         const noFormPage = ['dashboard', 'discovery', 'seat',
-            'ticket', 'my-tickets',
+            'validate', 'pos-ticket', 'pos-concession', 'pickup', 'fnb-cart',
+            'fnb-checkout', 'ticket', 'fnb-catalog', 'fnb-orders', 'my-tickets', 'my-orders',
+            'concession',
             // Reviews use the console.js module registry.
             'reviews',
+            // Reviews / Support / Complaints (RSC-2..4) — own renderer in console.js MODULES.
+            'support', 'support-inbox', 'complaints',
             // Profile — route tới console.js moduleProfile() để hỗ trợ mọi role
             // (form-pages profile chỉ dành cho CUSTOMER, các role khác sẽ bị 403
             // từ ProfileController.requireCustomer).
@@ -151,7 +155,6 @@
             renderNotConfigured(route.module, 'assign');
             return true;
         }
-
         // VIEW (read-only)
         if (route.action === 'view') {
             if (typeof pages.view === 'function') {

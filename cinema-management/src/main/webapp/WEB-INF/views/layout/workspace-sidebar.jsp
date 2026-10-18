@@ -106,11 +106,6 @@
                                data-tab="material">
                                 Kho nguyên liệu
                             </a>
-                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'recipe' ? 'active' : ''}" 
-                               href="${wsCtx}/console?module=inventory&tab=recipe"
-                               data-tab="recipe">
-                                Công thức chế biến
-                            </a>
                         </div>
                     </div>
                 </div>
@@ -212,11 +207,6 @@
                                href="${wsCtx}/console?module=inventory&tab=material"
                                data-tab="material">
                                 Kho nguyên liệu
-                            </a>
-                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'recipe' ? 'active' : ''}" 
-                               href="${wsCtx}/console?module=inventory&tab=recipe"
-                               data-tab="recipe">
-                                Công thức chế biến
                             </a>
                         </div>
                     </div>

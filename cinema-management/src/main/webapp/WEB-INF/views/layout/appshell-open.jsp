@@ -3,7 +3,11 @@
 <%--
   Mở app shell cho khu vực quản trị. Include SAU header.jsp.
   Request attrs tùy chọn: pageTitle, breadcrumb, activeNav, branchScopeName.
+<<<<<<< HEAD
   Yêu cầu: app-shell styles được thêm trong header.jsp.
+=======
+  Yêu cầu: <link> tới dashboard.css được thêm trong header.jsp.
+>>>>>>> nhatnk
 --%>
 <div class="app-shell">
     <%@ include file="/WEB-INF/views/layout/workspace-sidebar.jsp" %>

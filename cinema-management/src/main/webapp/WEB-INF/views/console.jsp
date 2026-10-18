@@ -29,7 +29,7 @@
             <meta name="csrf-token" content="${sessionScope.csrfToken}">
             <title><c:out value="${pageTitle}"/> | Khu vực quản lý CinemaHub</title>
             <link rel="stylesheet" href="${ctx}/assets/css/cinema.css">
-            <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261004-branch-pricing-templates-1">
+            <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261016-inv-accordion-1">
         </head>
         <body class="workspace-page">
             <%@ include file="/WEB-INF/views/layout/workspace-sidebar.jsp" %>
@@ -44,8 +44,8 @@
             <script src="${ctx}/assets/js/list-page.js?v=20261003-pricing-target-1" defer></script>
             <script src="${ctx}/assets/js/form-page.js?v=20261004-movie-author-validation-1" defer></script>
             <script src="${ctx}/assets/js/pricing-templates.js?v=20261004-branch-pricing-templates-1" defer></script>
-            <script src="${ctx}/assets/js/modules-form-pages.js?v=20261004-movie-author-validation-1" defer></script>
-            <script src="${ctx}/assets/js/console.js?v=20261004-sidebar-active-1" defer></script>
+            <script src="${ctx}/assets/js/modules-form-pages.js?v=20261018-no-export-2" defer></script>
+            <script src="${ctx}/assets/js/console.js?v=20261017-inv-fix-1" defer></script>
         </body>
         </html>
     </c:when>

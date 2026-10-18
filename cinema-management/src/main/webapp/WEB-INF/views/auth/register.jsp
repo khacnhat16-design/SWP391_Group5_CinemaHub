@@ -7,7 +7,7 @@
         <div>
             <span class="eyebrow">CINEMAHUB ACCOUNT</span>
             <h1>Đăng ký tài khoản khách hàng</h1>
-            <p class="muted">Tạo tài khoản để quản lý hồ sơ và vé đã đặt.</p>
+            <p class="muted">Tạo tài khoản để quản lý hồ sơ, tích điểm và nhận ưu đãi.</p>
         </div>
     </div>
 

@@ -26,6 +26,7 @@
              làm sidebar admin bị include — chỉ load rsc.css vừa đủ. --%>
         <link rel="stylesheet" href="${ctx}/assets/css/rsc.css?v=20261012-review-ui-2">
     </c:if>
+    </c:if>
 </head>
 <body>
 <c:set var="currentRole" value="${sessionScope.role}"/>
@@ -36,21 +37,27 @@
             <a href="${ctx}/">Trang chủ</a>
             <%--
               Nav trỏ về các trang JSP thực sự tồn tại (PageController /console/{domain}/list
-              hoặc /console?module=...). Không trỏ vào endpoint REST trả JSON như /branch,
+              hoặc /console?module=...). Không trỏ vào endpoint REST trả JSON như /branch, /report,
               /booking… vì chúng trả application/json thô, không phải HTML.
             --%>
             <c:choose>
                 <c:when test="${currentRole == 'ADMIN'}">
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
                     <a href="${ctx}/console/branch/list">Chi nhánh</a>
+                    <a href="${ctx}/console/report/list">Báo cáo</a>
                 </c:when>
                 <c:when test="${currentRole == 'BRANCH_MANAGER'}">
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
+                    <a href="${ctx}/console/shift/list">Ca làm việc</a>
+                    <a href="${ctx}/console/report/list">Báo cáo</a>
                 </c:when>
                 <c:when test="${currentRole == 'BRANCH_STAFF'}">
+                    <a href="${ctx}/console?module=pos-ticket">Bán vé</a>
                     <a href="${ctx}/console?module=ticket">Lịch sử vé</a>
+                    <a href="${ctx}/console/shift/list">Ca làm việc</a>
                 </c:when>
                 <c:when test="${currentRole == 'CUSTOMER'}">
+                    <a href="${ctx}/console?module=dashboard">Bảng điều khiển</a>
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
                 </c:when>
                 <c:otherwise>
