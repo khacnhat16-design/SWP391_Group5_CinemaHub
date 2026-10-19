@@ -21,14 +21,12 @@ import com.cinema.common.SerializationUtil;
 import com.cinema.common.ServiceException;
 import com.cinema.filter.AuthFilter;
 import com.cinema.service.payment.MockGatewayProvider;
-import com.cinema.model.payment.Payment;
-import com.cinema.dao.payment.PaymentDAO;
 import com.cinema.service.payment.PaymentService;
+import com.cinema.dao.wallet.WalletDAO;
+import com.cinema.service.wallet.WalletService;
 import com.cinema.model.payment.VnPayConfig;
 import com.cinema.service.payment.VnPayProvider;
-import com.cinema.model.payment.VnPayUtil;
-import com.cinema.dao.notification.NotificationDAO;
-import com.cinema.service.notification.NotificationService;
+import com.cinema.model.payment.Payment;
 import com.cinema.dao.pricing.PriceRuleDAO;
 import com.cinema.service.pricing.PricingService;
 import com.cinema.model.pricing.TicketType;
@@ -41,8 +39,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -69,6 +65,7 @@ public class BookingController extends HttpServlet {
     private ShowtimeDAO showtimeDao;
     private ShowtimeService showtimeService;
     private PricingService pricingService;
+    private PaymentService paymentService;
     private VnPayProvider vnPayProvider;
     private UserDAO userDao;
 
@@ -80,16 +77,16 @@ public class BookingController extends HttpServlet {
                 new com.cinema.dao.screen.ScreenDAO(), new com.cinema.dao.movie.MovieDAO(),
                 new com.cinema.dao.branch.BranchDAO());
         this.pricingService = new PricingService(new PriceRuleDAO(), showtimeDao,
+                new com.cinema.dao.pricing.HolidayDAO(),
                 new com.cinema.dao.pricing.PricingConfigDAO());
         VnPayConfig vnPayConfig = VnPayConfig.load();
         this.vnPayProvider = new VnPayProvider(vnPayConfig);
-        PaymentService paymentService = new PaymentService(new PaymentDAO(),
+        this.paymentService = new PaymentService(new com.cinema.dao.payment.PaymentDAO(),
+                new WalletService(new WalletDAO()),
                 new MockGatewayProvider(MOCK_HMAC_SECRET, ""), "CinemaHub demo account",
                 vnPayProvider);
-        NotificationService notificationService = new NotificationService(new NotificationDAO());
         this.ticketDao = new TicketDAO();
-        this.bookingService = new BookingService(new SeatHoldDAO(), ticketDao, showtimeService,
-                pricingService, paymentService, notificationService);
+        this.bookingService = new BookingService(new SeatHoldDAO(), ticketDao);
     }
 
     @Override
@@ -324,7 +321,7 @@ public class BookingController extends HttpServlet {
             seatTypes.add(seat.seatType());
         }
 
-        sendOk(response, pricingService.calcOrder(showtimeId, seatTypes, userId, ticketType));
+        sendOk(response, pricingService.calcOrder(showtimeId, seatTypes, ticketType));
     }
 
     /** Req 7.1-7.3 — Customer giữ ghế 10 phút. */
@@ -358,17 +355,11 @@ public class BookingController extends HttpServlet {
                         + " ticketType=" + ticketType);
 
         String existingHoldId = request.getParameter("holdId");
-        HoldResult result;
-        if (existingHoldId == null || existingHoldId.isBlank()) {
-            result = bookingService.holdSeats(showtimeId, seatIds, userId, ticketType);
-        } else {
-            try {
-                result = bookingService.addSeatsToHold(showtimeId, seatIds, userId,
-                        Long.parseLong(existingHoldId), ticketType);
-            } catch (NumberFormatException e) {
-                throw new ServiceException.Validation("Mã lượt giữ ghế không hợp lệ");
-            }
+        if (existingHoldId != null && !existingHoldId.isBlank()) {
+            throw new ServiceException.Validation(
+                    "Không thể thêm ghế vào lượt giữ hiện tại; vui lòng tạo lượt giữ mới");
         }
+        HoldResult result = bookingService.holdSeats(showtimeId, seatIds, userId);
         if (result.success()) {
             sendOk(response, result);
         } else {
@@ -411,16 +402,7 @@ public class BookingController extends HttpServlet {
         }
         long showtimeId = Long.parseLong(requireParam(request, "showtimeId"));
         List<Long> seatIds = parseSeatIds(requireParam(request, "seatIds"));
-        String rawHoldId = request.getParameter("holdId");
-        Long holdId = null;
-        if (rawHoldId != null && !rawHoldId.isBlank()) {
-            try {
-                holdId = Long.parseLong(rawHoldId);
-            } catch (NumberFormatException e) {
-                throw new ServiceException.Validation("Mã lượt giữ ghế không hợp lệ");
-            }
-        }
-        bookingService.releaseHold(showtimeId, seatIds, userId, holdId);
+        bookingService.releaseHold(showtimeId, seatIds, userId);
         sendOk(response, Map.of("success", true));
     }
 
@@ -437,61 +419,21 @@ public class BookingController extends HttpServlet {
             return;
         }
         long holdId = Long.parseLong(requireParam(request, "holdId"));
-        String method = request.getParameter("paymentMethod");
-        java.util.logging.Logger.getLogger(getClass().getName()).info(
-                "[confirm] holdId=" + holdId + " userId=" + userId + " method=" + method);
-        com.cinema.model.booking.Ticket ticket;
-        try {
-            ticket = bookingService.confirmBooking(holdId, method, userId);
-        } catch (RuntimeException ex) {
-            java.util.logging.Logger.getLogger(getClass().getName()).log(
-                    java.util.logging.Level.SEVERE,
-                    "[confirm] confirmBooking failed holdId=" + holdId + " userId=" + userId, ex);
-            throw ex;
+        String method = requireParam(request, "paymentMethod").trim().toUpperCase();
+        Ticket ticket = bookingService.pendingTicketForPayment(holdId, userId);
+        PaymentService.PaymentOutcome outcome;
+        if (Payment.METHOD_WALLET.equals(method)) {
+            outcome = paymentService.payByWallet(ticket.getId(), ticket.getTotalAmount(), userId);
+            ticket = ticketDao.findById(ticket.getId()).orElse(ticket);
+        } else {
+            outcome = paymentService.createSession(
+                    ticket.getId(), method, ticket.getTotalAmount(), userId);
         }
-        String normalizedMethod = method == null ? "" : method.trim().toUpperCase();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("ticket", ticket);
-        // Với VNPay / MOCK_GATEWAY trả về redirect URL chuyển khoản cổng thanh toán.
-        // Với các method còn lại trả về payload thôi.
-        if ("MOCK_GATEWAY".equals(normalizedMethod) || "VNPAY".equals(normalizedMethod)) {
-            Payment payment = new PaymentDAO().findPendingByTicket(ticket.id())
-                    .orElseThrow(() -> new ServiceException.NotFound(
-                            "Không tạo được phiên thanh toán"));
-            String redirect;
-            if ("VNPAY".equals(normalizedMethod)) {
-                // Redirect thẳng sang VNPay Sandbox bằng URL đã ký, không chuyển qua
-                // form demo nội bộ hoặc trang home.
-                Map<String, String> params = new java.util.LinkedHashMap<>();
-                params.put("vnp_Version", "2.1.0");
-                params.put("vnp_Command", "pay");
-                params.put("vnp_TmnCode", vnPayProvider.config().tmnCode());
-                params.put("vnp_Amount", VnPayUtil.toVnpAmount(payment.amount()));
-                params.put("vnp_CurrCode", "VND");
-                params.put("vnp_TxnRef", payment.idempotencyKey());
-                params.put("vnp_OrderInfo", "Thanh toan ve xem phim ticket " + ticket.id());
-                params.put("vnp_OrderType", "other");
-                params.put("vnp_Locale", "vn");
-                params.put("vnp_ReturnUrl", request.getScheme() + "://" + request.getServerName()
-                        + (request.getServerPort() == 80 || request.getServerPort() == 443
-                        ? "" : ":" + request.getServerPort())
-                        + request.getContextPath() + "/vnpay/return");
-                params.put("vnp_IpAddr", request.getRemoteAddr());
-                params.putAll(VnPayUtil.paymentWindow(vnPayProvider.config().expireMinutes()));
-                redirect = VnPayUtil.buildRedirectUrl(vnPayProvider.config().payUrl(), params,
-                        vnPayProvider.config().hashSecret());
-            } else {
-                String hmac = com.cinema.util.HmacUtil.sign(MOCK_HMAC_SECRET,
-                        payment.id() + "" + payment.amount());
-                redirect = request.getContextPath() + "/payment/mock-gateway"
-                        + "?paymentId=" + payment.id()
-                        + "&amount=" + payment.amount()
-                        + "&idempotencyKey=" + URLEncoder.encode(
-                                payment.idempotencyKey(), StandardCharsets.UTF_8)
-                        + "&hmac=" + hmac;
-            }
-            result.put("payment", payment);
-            result.put("redirectUrl", redirect);
+        result.put("payment", outcome.payment());
+        if (outcome.redirectUrl() != null && !outcome.redirectUrl().isBlank()) {
+            result.put("redirectUrl", outcome.redirectUrl());
         }
         sendOk(response, result);
     }

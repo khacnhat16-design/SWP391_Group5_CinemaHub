@@ -242,6 +242,49 @@ public class BookingService {
     }
 
     /**
+     * Validate an active hold and return its pending ticket before a payment session
+     * is created. The payment callback performs the final guarded confirmation.
+     */
+    public Ticket pendingTicketForPayment(long holdId, Long actorUserId) throws Exception {
+        sweepExpiredHolds();
+
+        try (Connection conn = DBContext.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
+                if (hold == null) {
+                    throw new ServiceException.NotFound("Không tìm thấy thông tin giữ ghế");
+                }
+                if (actorUserId == null || hold.userId == null || !actorUserId.equals(hold.userId)) {
+                    throw new ServiceException.Forbidden("Bạn không có quyền thanh toán phiên đặt vé này");
+                }
+                if (!"ACTIVE".equalsIgnoreCase(hold.status)
+                        || hold.expiresAt == null
+                        || !LocalDateTime.now(ZoneOffset.UTC).isBefore(hold.expiresAt)) {
+                    throw new ServiceException.Conflict(
+                            "Thời hạn giữ ghế 10 phút đã hết hạn, vui lòng chọn lại ghế");
+                }
+
+                Ticket ticket = ticketDao.findByHoldIdLocked(conn, holdId)
+                        .orElseThrow(() -> new ServiceException.NotFound(
+                                "Không tìm thấy thông tin vé tương ứng"));
+                if (!Ticket.STATUS_PENDING.equalsIgnoreCase(ticket.getStatus())
+                        || !actorUserId.equals(ticket.getUserId())
+                        || ticket.getShowtimeId() != hold.showtimeId) {
+                    throw new ServiceException.Conflict(
+                            "Vé không còn ở trạng thái chờ thanh toán");
+                }
+                ticket.setSeats(ticketDao.findSeats(conn, ticket.getId()));
+                conn.commit();
+                return ticket;
+            } catch (Exception ex) {
+                conn.rollback();
+                throw ex;
+            }
+        }
+    }
+
+    /**
      * Req 11 — Hủy vé kèm chính sách hoàn tiền bậc thang (Tiered Refund Policy).
      * >= 24h: hoàn 100%
      * 2h - 24h: hoàn 50%

@@ -13,6 +13,8 @@ import com.cinema.service.payment.MockGatewayProvider;
 import com.cinema.model.payment.Payment;
 import com.cinema.dao.payment.PaymentDAO;
 import com.cinema.service.payment.PaymentService;
+import com.cinema.dao.wallet.WalletDAO;
+import com.cinema.service.wallet.WalletService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,7 +41,7 @@ public final class PaymentController extends HttpServlet {
         paymentDao = new PaymentDAO();
         ticketDao = new TicketDAO();
         notificationService = new NotificationService(new NotificationDAO());
-        paymentService = new PaymentService(paymentDao,
+        paymentService = new PaymentService(paymentDao, new WalletService(new WalletDAO()),
                 new MockGatewayProvider(HMAC_SECRET, ""), "CinemaHub demo account");
     }
 

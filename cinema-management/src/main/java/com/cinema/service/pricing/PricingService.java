@@ -74,6 +74,11 @@ public class PricingService {
     }
 
     public PricingService(PriceRuleDAO priceRuleDao, ShowtimeDAO showtimeDao,
+                          PricingConfigDAO pricingConfigDao) {
+        this(priceRuleDao, showtimeDao, null, pricingConfigDao);
+    }
+
+    public PricingService(PriceRuleDAO priceRuleDao, ShowtimeDAO showtimeDao,
                           com.cinema.dao.pricing.HolidayDAO holidayDao,
                           PricingConfigDAO pricingConfigDao) {
         this.priceRuleDao = priceRuleDao;
@@ -99,6 +104,11 @@ public class PricingService {
         }
 
         return new PricedOrder(showtimeId, baseTotal, 0, 0, baseTotal);
+    }
+
+    public PricedOrder calcOrder(long showtimeId, List<String> seatTypes,
+                                 Long userId, TicketType ticketType) throws Exception {
+        return calcOrder(showtimeId, seatTypes, ticketType);
     }
 
     /** KÃ¡ÂºÂ¿t quÃ¡ÂºÂ£ bÃƒÂ¡o giÃƒÂ¡ Ã„â€˜Ã†Â¡n vÃƒÂ©. */
