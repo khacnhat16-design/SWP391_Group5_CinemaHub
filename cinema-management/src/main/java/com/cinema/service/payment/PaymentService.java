@@ -6,7 +6,6 @@ import com.cinema.dao.booking.TicketDAO;
 import com.cinema.common.ServiceException;
 import com.cinema.infrastructure.database.DBContext;
 import com.cinema.util.TransactionTemplate;
-import com.cinema.service.wallet.WalletService;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -26,11 +25,10 @@ import com.cinema.model.auth.Transaction;
 import com.cinema.model.branch.Branch;
 import com.cinema.model.payment.Payment;
 import com.cinema.model.screen.Seat;
-import com.cinema.model.wallet.Wallet;
 
 /**
  * Payment orchestration for core booking flow.
- * Simplified to VNPAY and WALLET methods only.
+ * Simplified to VNPAY and BANK_TRANSFER methods only (wallet feature removed).
  */
 public class PaymentService {
     private static final Logger logger = Logger.getLogger(PaymentService.class.getName());
@@ -39,22 +37,19 @@ public class PaymentService {
     private final PaymentDAO paymentDao;
     private final TicketDAO ticketDao = new TicketDAO();
     private final SeatHoldDAO seatHoldDao = new SeatHoldDAO();
-    private final WalletService walletService;
     private final Map<String, PaymentProvider> providers = new HashMap<>();
     private final TransactionTemplate tx = new TransactionTemplate();
 
-    public PaymentService(PaymentDAO paymentDao, WalletService walletService,
+    public PaymentService(PaymentDAO paymentDao,
                           MockGatewayProvider mockGateway, String bankAccountInfo) {
-        this(paymentDao, walletService, mockGateway, bankAccountInfo, null);
+        this(paymentDao, mockGateway, bankAccountInfo, null);
     }
 
-    public PaymentService(PaymentDAO paymentDao, WalletService walletService,
+    public PaymentService(PaymentDAO paymentDao,
                           MockGatewayProvider mockGateway, String bankAccountInfo,
                           VnPayProvider vnPay) {
         this.paymentDao = paymentDao;
-        this.walletService = walletService;
         register(mockGateway);
-        register(new WalletProvider());
         register(new BankTransferProvider(bankAccountInfo));
         if (vnPay != null) register(vnPay);
     }
@@ -101,35 +96,6 @@ public class PaymentService {
         logger.info("Created payment " + payment.id() + " (" + provider.method()
                 + ", " + amount + "đ) for ticket " + ticketId);
         return new PaymentOutcome(payment, result.redirectUrl());
-    }
-
-    /**
-     * Thanh toán ví (Req 18.3): trừ ví guarded + payment SUCCESS + vé CONFIRMED
-     * nguyên tử trong MỘT transaction.
-     */
-    public PaymentOutcome payByWallet(long ticketId, long amount, long userId) throws Exception {
-        requireTicketPending(ticketId);
-        return tx.execute(conn -> {
-            Payment payment = insertPayment(conn, ticketId, Payment.METHOD_WALLET, amount);
-
-            // walletService.spend() thực hiện UPDATE với WHERE balance >= amount
-            // (guarded) — nếu số dư không đủ sẽ trả về 0 row affected và ném
-            // WALLET_INSUFFICIENT_BALANCE; toàn bộ transaction (insert payment +
-            // insert ticket) sẽ rollback để tránh charge nhưng không phát hành vé.
-            walletService.spend(conn, userId, amount, "TICKET", ticketId,
-                    payment.idempotencyKey());
-
-            if (!confirmTicket(conn, ticketId, amount)) {
-                throw new ServiceException.Conflict(
-                        "Suất giữ ghế đã hết hạn — giao dịch ví chưa được ghi nhận");
-            }
-            markPayment(conn, payment.id(), Payment.STATUS_SUCCESS,
-                    "WALLET-" + payment.id(), null);
-
-            payment.setStatus(Payment.STATUS_SUCCESS);
-            logger.info("Wallet payment " + payment.id() + " succeeded for ticket " + ticketId);
-            return new PaymentOutcome(payment, null);
-        });
     }
 
     /**
@@ -200,9 +166,7 @@ public class PaymentService {
 
             Payment payment = paymentDao.findByIdempotencyKeyLocked(conn, txnRef)
                     .orElseThrow(() -> new ServiceException.NotFound("Không tìm thấy giao dịch VNPAY"));
-            boolean walletTopUp = Payment.METHOD_WALLET.equals(payment.method())
-                    && txnRef.startsWith("TOPUP-");
-            if (!VnPayProvider.METHOD.equals(payment.method()) && !walletTopUp) {
+            if (!VnPayProvider.METHOD.equals(payment.method())) {
                 throw new ServiceException.Validation("Giao dịch không phải VNPAY");
             }
 
@@ -216,7 +180,7 @@ public class PaymentService {
                 }
 
                 boolean success = "00".equals(responseCode);
-                boolean reviewRequired = success && !walletTopUp && payment.ticketId() != null
+                boolean reviewRequired = success && payment.ticketId() != null
                         && !confirmTicket(conn, payment.ticketId(), payment.amount());
                 String resultStatus = reviewRequired ? Payment.STATUS_REVIEW_REQUIRED
                         : success ? Payment.STATUS_SUCCESS : Payment.STATUS_FAILED;
@@ -224,10 +188,6 @@ public class PaymentService {
                         vnpTransactionNo == null ? ("VNPAY-" + payment.id()) : vnpTransactionNo,
                         vnpParams.get("vnp_SecureHash"));
                 if (transitioned) {
-                    if (success && walletTopUp) {
-                        walletService.creditTopUpFromVnPay(conn, txnRef, payment.id(),
-                                payment.amount(), vnpTransactionNo, vnpParams.get("vnp_SecureHash"));
-                    }
                     payment.setStatus(resultStatus);
                     if (reviewRequired) {
                         logger.warning("[VNPAY] payment " + payment.id()
