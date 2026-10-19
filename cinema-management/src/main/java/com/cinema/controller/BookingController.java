@@ -22,8 +22,6 @@ import com.cinema.common.ServiceException;
 import com.cinema.filter.AuthFilter;
 import com.cinema.service.payment.MockGatewayProvider;
 import com.cinema.service.payment.PaymentService;
-import com.cinema.dao.wallet.WalletDAO;
-import com.cinema.service.wallet.WalletService;
 import com.cinema.model.payment.VnPayConfig;
 import com.cinema.service.payment.VnPayProvider;
 import com.cinema.model.payment.Payment;
@@ -82,7 +80,6 @@ public class BookingController extends HttpServlet {
         VnPayConfig vnPayConfig = VnPayConfig.load();
         this.vnPayProvider = new VnPayProvider(vnPayConfig);
         this.paymentService = new PaymentService(new com.cinema.dao.payment.PaymentDAO(),
-                new WalletService(new WalletDAO()),
                 new MockGatewayProvider(MOCK_HMAC_SECRET, ""), "CinemaHub demo account",
                 vnPayProvider);
         this.ticketDao = new TicketDAO();
@@ -422,13 +419,8 @@ public class BookingController extends HttpServlet {
         String method = requireParam(request, "paymentMethod").trim().toUpperCase();
         Ticket ticket = bookingService.pendingTicketForPayment(holdId, userId);
         PaymentService.PaymentOutcome outcome;
-        if (Payment.METHOD_WALLET.equals(method)) {
-            outcome = paymentService.payByWallet(ticket.getId(), ticket.getTotalAmount(), userId);
-            ticket = ticketDao.findById(ticket.getId()).orElse(ticket);
-        } else {
-            outcome = paymentService.createSession(
+        outcome = paymentService.createSession(
                     ticket.getId(), method, ticket.getTotalAmount(), userId);
-        }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("ticket", ticket);
         result.put("payment", outcome.payment());

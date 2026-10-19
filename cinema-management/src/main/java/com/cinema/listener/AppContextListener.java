@@ -77,7 +77,7 @@ public class AppContextListener implements ServletContextListener {
      * <p>Đã loại bỏ PricingService/PaymentService so với bản aws gốc vì:
      * <ul>
      *   <li>PricingService chưa được refactor sang cấu trúc swp (thiếu dao.pricing.*).</li>
-     *   <li>PaymentService constructor swp yêu cầu WalletService — không cần cho sweep.</li>
+     *   <li>PaymentService constructor swp có thêm payment provider layer — không cần cho sweep.</li>
      *   <li>BookingService swp dùng 2-arg constructor cho scope expiry (chỉ DAO).</li>
      * </ul>
      */

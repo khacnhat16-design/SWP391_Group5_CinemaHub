@@ -83,7 +83,7 @@ public class AuthService {
         userDao.insert(user);
 
         // Mỗi customer luôn có một customer_profile rỗng đi kèm để các service khác
-        // (loyalty, wallet, purchase history) có thể JOIN mà không phải null-check.
+        // (loyalty, purchase history) có thể JOIN mà không phải null-check.
         CustomerProfile profile = new CustomerProfile(user.id());
         profileDao.insert(profile);
 

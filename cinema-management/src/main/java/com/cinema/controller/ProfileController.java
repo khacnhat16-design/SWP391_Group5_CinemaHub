@@ -10,9 +10,6 @@ import com.cinema.common.ErrorEnvelope;
 import com.cinema.common.SerializationUtil;
 import com.cinema.common.ServiceException;
 import com.cinema.filter.AuthFilter;
-import com.cinema.model.wallet.Wallet;
-import com.cinema.dao.wallet.WalletDAO;
-import com.cinema.service.wallet.WalletService;
 import com.cinema.model.auth.AccessScope;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
@@ -32,14 +29,12 @@ public final class ProfileController extends HttpServlet {
     private UserDAO userDao;
     private CustomerProfileDAO profileDao;
     private AuthService authService;
-    private WalletService walletService;
 
     @Override
     public void init() throws ServletException {
         this.userDao = new UserDAO();
         this.profileDao = new CustomerProfileDAO();
         this.authService = new AuthService(userDao, profileDao);
-        this.walletService = new WalletService(new WalletDAO());
     }
 
     @Override
@@ -73,7 +68,6 @@ public final class ProfileController extends HttpServlet {
     private Map<String, Object> profilePayload(long userId) throws Exception {
         Map<String, Object> account = new LinkedHashMap<>();
         Map<String, Object> membership = new LinkedHashMap<>();
-        Map<String, Object> walletData = new LinkedHashMap<>();
 
         User user = userDao.findById(userId)
                 .orElseThrow(() -> new ServiceException.NotFound("Tài khoản không tồn tại"));
@@ -89,14 +83,9 @@ public final class ProfileController extends HttpServlet {
         membership.put("tier", profile.tier());
         membership.put("points", profile.points());
 
-        Wallet wallet = walletService.getWallet(userId);
-        walletData.put("balance", wallet.balance());
-        walletData.put("version", wallet.version());
-
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("user", account);
         result.put("profile", membership);
-        result.put("wallet", walletData);
         return result;
     }
 

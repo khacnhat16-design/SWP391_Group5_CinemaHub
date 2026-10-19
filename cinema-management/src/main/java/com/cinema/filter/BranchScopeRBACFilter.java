@@ -50,7 +50,7 @@ public final class BranchScopeRBACFilter implements Filter {
 
     // Customer-only protected endpoint prefixes
     private static final Set<String> CUSTOMER_PREFIXES = Set.of(
-            "/api/profile", "/wallet", "/notification", "/booking/mine", "/booking/validate-own",
+            "/api/profile", "/notification", "/booking/mine", "/booking/validate-own",
             "/api/bookings", "/api/transaction-history", "/concession/orders/mine",
             "/concession/products", "/concession/order", "/concession/orders/",
             "/movie",
@@ -94,9 +94,7 @@ public final class BranchScopeRBACFilter implements Filter {
             // Users (Admin CRUD)
             "/api/users",
             "/api/staff-assignments",
-            // Wallet admin view
-            "/admin/wallet",
-            // Payroll self-service and complaint endpoints; handlers enforce role and branch access.
+            // Admin/Manager CRM-style paths
             "/payroll", "/api/payroll-complaints",
             // Voucher CRUD (Admin/Manager per scope; Staff can read holiday for context)
             "/voucher", "/holiday",

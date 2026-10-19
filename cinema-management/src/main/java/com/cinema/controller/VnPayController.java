@@ -11,10 +11,7 @@ import com.cinema.service.payment.PaymentService;
 import com.cinema.model.payment.VnPayConfig;
 import com.cinema.service.payment.VnPayProvider;
 import com.cinema.model.payment.VnPayUtil;
-import com.cinema.dao.wallet.WalletDAO;
-import com.cinema.model.wallet.Wallet;
 import com.cinema.service.payment.MockGatewayProvider;
-import com.cinema.service.wallet.WalletService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -52,9 +49,7 @@ public final class VnPayController extends HttpServlet {
         this.provider = new VnPayProvider(config);
         this.paymentDao = new PaymentDAO();
         this.ticketDao = new TicketDAO();
-        com.cinema.service.wallet.WalletService walletService =
-                new com.cinema.service.wallet.WalletService(new com.cinema.dao.wallet.WalletDAO());
-        this.paymentService = new PaymentService(paymentDao, walletService,
+        this.paymentService = new PaymentService(paymentDao,
                 new com.cinema.service.payment.MockGatewayProvider("unused-for-vnpay", ""),
                 "CinemaHub demo account",
                 provider);
@@ -100,13 +95,8 @@ public final class VnPayController extends HttpServlet {
 
         String successUrl;
         String failedUrl;
-        if (txnRef != null && txnRef.startsWith("TOPUP-")) {
-            successUrl = ctx + "/console?module=wallet&topup=success";
-            failedUrl = ctx + "/console?module=wallet&topup=failed";
-        } else {
-            successUrl = ctx + "/booking?payment=success";
-            failedUrl = ctx + "/booking?payment=failed";
-        }
+        successUrl = ctx + "/booking?payment=success";
+        failedUrl = ctx + "/booking?payment=failed";
 
         try {
             paymentService.ensureChecksumValid(params, provider, "RETURN");
@@ -114,12 +104,6 @@ public final class VnPayController extends HttpServlet {
             Payment payment = paymentDao.findByIdempotencyKey(txnRef)
                     .orElseThrow(() -> new ServiceException.NotFound("Không tìm thấy giao dịch"));
 
-            if (Payment.METHOD_WALLET.equals(payment.method())
-                    && txnRef != null && txnRef.startsWith("TOPUP-")) {
-                response.sendRedirect(ctx + "/console?module=wallet&topup="
-                        + (Payment.STATUS_SUCCESS.equals(payment.status()) ? "success" : "failed"));
-                return;
-            }
             if (Payment.STATUS_REVIEW_REQUIRED.equals(payment.status())) {
                 response.sendRedirect(ctx + "/console?module=my-tickets&payment=review&paymentId="
                         + payment.id());
