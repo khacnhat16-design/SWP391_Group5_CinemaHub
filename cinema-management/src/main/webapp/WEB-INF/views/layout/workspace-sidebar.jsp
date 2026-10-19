@@ -73,14 +73,6 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v2a3 3 0 0 0 0 6v2a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-2a3 3 0 0 0 0-6z"/><line x1="13" y1="6" x2="13" y2="12"/></svg>
                         Đặt vé
                     </a>
-                    <a class="ws-menu-link ${wsActive == 'ticket' ? 'active' : ''}" href="${wsCtx}/console?module=ticket">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v4H4z"/><path d="M4 8v12h16V8"/></svg>
-                        Vé
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'product' ? 'active' : ''}" href="${wsCtx}/console?module=product">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/></svg>
-                        Đồ ăn và thức uống
-                    </a>
                     <%-- Cụm Kho hàng có menu con (collapsible accordion) --%>
                     <div class="ws-menu-accordion ${wsActive == 'inventory' ? 'open' : ''}">
                         <button type="button" 
@@ -119,14 +111,6 @@
                     <a class="ws-menu-link ${wsActive == 'pricing-templates' ? 'active' : ''}" href="${wsCtx}/console?module=pricing-templates">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h6M7 16h4"/></svg>
                         Mẫu giá vé
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'wallet' ? 'active' : ''}" href="${wsCtx}/console?module=wallet">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v4"/><path d="M2 12h20v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><circle cx="17" cy="15" r="1.5"/></svg>
-                        Giao dịch ví
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'report' ? 'active' : ''}" href="${wsCtx}/console?module=report">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                        Báo cáo
                     </a>
                 </div>
 
@@ -175,14 +159,6 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v2a3 3 0 0 0 0 6v2a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-2a3 3 0 0 0 0-6z"/></svg>
                         Đặt vé
                     </a>
-                    <a class="ws-menu-link ${wsActive == 'ticket' ? 'active' : ''}" href="${wsCtx}/console?module=ticket">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v4H4z"/><path d="M4 8v12h16V8"/></svg>
-                        Vé
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'product' ? 'active' : ''}" href="${wsCtx}/console?module=product">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/></svg>
-                        Đồ ăn và thức uống
-                    </a>
                     <%-- Cụm Kho hàng có menu con (collapsible accordion) --%>
                     <div class="ws-menu-accordion ${wsActive == 'inventory' ? 'open' : ''}">
                         <button type="button" 
@@ -210,26 +186,6 @@
                             </a>
                         </div>
                     </div>
-                    <a class="ws-menu-link ${wsActive == 'shift' ? 'active' : ''}" href="${wsCtx}/console?module=shift">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        Ca làm việc của nhân viên
-                    </a>
-                </div>
-
-                <div class="ws-menu-group">
-                    <div class="ws-menu-group-label">Quản lý F&B</div>
-                    <a class="ws-menu-link ${wsActive == 'concession-orders' ? 'active' : ''}" href="${wsCtx}/console?module=concession-orders">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
-                        Đơn F&amp;B
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'concession-pickup' ? 'active' : ''}" href="${wsCtx}/console?module=concession-pickup">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h3v3H7z"/><path d="M14 7h3v3h-3z"/><path d="M7 14h3v3H7z"/><path d="M14 14h3v3h-3z"/></svg>
-                        Quét mã F&amp;B
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'customer-points' ? 'active' : ''}" href="${wsCtx}/console?module=customer-points">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                        Điều chỉnh điểm
-                    </a>
                 </div>
 
                 <div class="ws-menu-group">
@@ -237,10 +193,6 @@
                     <a class="ws-menu-link ${wsActive == 'pricing-templates' ? 'active' : ''}" href="${wsCtx}/console?module=pricing-templates">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h6M7 16h4"/></svg>
                         Mẫu giá vé
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'report' ? 'active' : ''}" href="${wsCtx}/console?module=report">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                        Báo cáo
                     </a>
                 </div>
 
@@ -265,91 +217,14 @@
                  BRANCH_STAFF
                  ============================================================ --%>
             <c:when test="${wsRole == 'BRANCH_STAFF'}">
-                <div class="ws-menu-group">
-                    <div class="ws-menu-group-label">Vé</div>
-                    <a class="ws-menu-link ${wsActive == 'ticket' ? 'active' : ''}" href="${wsCtx}/console?module=ticket">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v4H4z"/><path d="M4 8v12h16V8"/></svg>
-                        Lịch sử vé
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'pos-concession' ? 'active' : ''}" href="${wsCtx}/console?module=pos-concession">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/></svg>
-                        Đồ ăn và thức uống
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'pickup' ? 'active' : ''}" href="${wsCtx}/console?module=pickup">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                        Nhận đơn trực tuyến
-                    </a>
-                </div>
+                </c:when>
 
+            <%-- ============================================================
+                 CUSTOMER (không nên thấy nhưng fallback)
+                 ============================================================ --%>
+            <c:otherwise>
                 <div class="ws-menu-group">
-                    <div class="ws-menu-group-label">Quản lý F&B</div>
-                    <a class="ws-menu-link ${wsActive == 'concession-orders' ? 'active' : ''}" href="${wsCtx}/console?module=concession-orders">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
-                        Đơn F&amp;B
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'concession-pickup' ? 'active' : ''}" href="${wsCtx}/console?module=concession-pickup">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h3v3H7z"/><path d="M14 7h3v3h-3z"/><path d="M7 14h3v3H7z"/><path d="M14 14h3v3h-3z"/></svg>
-                        Quét mã F&amp;B
-                    </a>
-                    <%-- Cụm Kho hàng cho Staff (Xem tồn kho & Xem lịch sử biến động) --%>
-                    <div class="ws-menu-accordion ${wsActive == 'inventory' ? 'open' : ''}">
-                        <button type="button" 
-                                class="ws-menu-accordion-toggle ${wsActive == 'inventory' ? 'active' : ''}" 
-                                aria-expanded="${wsActive == 'inventory' ? 'true' : 'false'}"
-                                onclick="toggleWsMenuAccordion(this, event)">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                            </svg>
-                            <span class="ws-menu-title">Kho hàng</span>
-                            <svg class="ws-accordion-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <polyline points="9 18 15 12 9 6"></polyline>
-                            </svg>
-                        </button>
-                        <div class="ws-menu-sub" role="region" aria-label="Menu con Kho hàng">
-                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and (wsTab == 'product' or empty param.tab) ? 'active' : ''}" 
-                               href="${wsCtx}/console?module=inventory&tab=product"
-                               data-tab="product">
-                                Kho thành phẩm
-                            </a>
-                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'material' ? 'active' : ''}" 
-                               href="${wsCtx}/console?module=inventory&tab=material"
-                               data-tab="material">
-                                Kho nguyên liệu
-                            </a>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="ws-menu-group">
-                    <div class="ws-menu-group-label">Khách hàng</div>
-                    <a class="ws-menu-link ${wsActive == 'customer-points' ? 'active' : ''}" href="${wsCtx}/console?module=customer-points">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                        Điều chỉnh điểm
-                    </a>
-                </div>
-
-                <div class="ws-menu-group">
-                    <div class="ws-menu-group-label">Vé</div>
-                    <a class="ws-menu-link ${wsActive == 'validate' ? 'active' : ''}" href="${wsCtx}/console?module=validate">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                        Kiểm tra vé
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'ticket' ? 'active' : ''}" href="${wsCtx}/console?module=ticket">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v4H4z"/><path d="M4 8v12h16V8"/></svg>
-                        Lịch sử vé
-                    </a>
-                </div>
-
-                <div class="ws-menu-group">
-                    <div class="ws-menu-group-label">Ca làm việc</div>
-                    <a class="ws-menu-link ${wsActive == 'shift' ? 'active' : ''}" href="${wsCtx}/console?module=shift">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        Ca hiện tại
-                    </a>
-                </div>
-
-                <div class="ws-menu-group">
-                    <div class="ws-menu-group-label">Hệ thống</div>
+                    <div class="ws-menu-group-label">Bắp & Nước</div>
                     <a class="ws-menu-link ${wsActive == 'notification' ? 'active' : ''}" href="${wsCtx}/console?module=notification">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                         Thông báo
@@ -370,30 +245,38 @@
                  ============================================================ --%>
             <c:otherwise>
                 <div class="ws-menu-group">
-                    <div class="ws-menu-group-label">Bắp & Nước</div>
-                    <a class="ws-menu-link ${wsActive == 'fnb-catalog' ? 'active' : ''}" href="${wsCtx}/console?module=fnb-catalog">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/></svg>
-                        Thực đơn F&amp;B
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'fnb-cart' ? 'active' : ''}" href="${wsCtx}/console?module=fnb-cart">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/></svg>
-                        Giỏ hàng
-                        <span id="fnb-cart-badge" class="ws-badge ws-badge-red" hidden>0</span>
-                    </a>
-                    <a class="ws-menu-link ${wsActive == 'fnb-orders' ? 'active' : ''}" href="${wsCtx}/console?module=fnb-orders">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
-                        Đơn F&amp;B của tôi
-                    </a>
-                </div>
-
-                <div class="ws-menu-group">
                     <div class="ws-menu-group-label">Tài khoản</div>
+                    <a class="ws-menu-link ${wsActive == 'my-tickets' ? 'active' : ''}" href="${wsCtx}/console?module=my-tickets">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v2a3 3 0 0 0 0 6v2a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-2a3 3 0 0 0 0-6z"/><line x1="13" y1="6" x2="13" y2="12"/></svg>
+                        Vé của tôi
+                    </a>
                     <a class="ws-menu-link ${wsActive == 'profile' ? 'active' : ''}" href="${wsCtx}/console?module=profile">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
                         Hồ sơ
                     </a>
                     <a class="ws-menu-link" href="${wsCtx}/logout">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                        Đăng xuất
+                    </a>
+                </div>
+            </c:otherwise>
+
+            <%-- ============================================================
+                 CUSTOMER (không nên thấy nhưng fallback)
+                 ============================================================ --%>
+            <c:otherwise>
+                <div class="ws-menu-group">
+                    <div class="ws-menu-group-label">Tài khoản</div>
+                    <a class="ws-menu-link ${wsActive == 'my-tickets' ? 'active' : ''}" href="${wsCtx}/console?module=my-tickets">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v2a3 3 0 0 0 0 6v2a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-2a3 3 0 0 0 0-6z"/><line x1="13" y1="6" x2="13" y2="12"/></svg>
+                        Vé của tôi
+                    </a>
+                    <a class="ws-menu-link ${wsActive == 'profile' ? 'active' : ''}" href="${wsCtx}/console?module=profile">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+                        Hồ sơ
+                    </a>
+                    <a class="ws-menu-link" href="${wsCtx}/logout">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                         Đăng xuất
                     </a>
                 </div>

@@ -23,28 +23,6 @@
             Lịch chiếu
         </a>
 
-        <div class="sb-title">Bắp &amp; nước</div>
-        <a class="sb-link ${customerActive == 'fnb-catalog' ? 'active' : ''}" href="${customerCtx}/console?module=fnb-catalog">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/>
-            </svg>
-            Thực đơn F&amp;B
-        </a>
-        <a class="sb-link ${customerActive == 'fnb-cart' ? 'active' : ''}" href="${customerCtx}/console?module=fnb-cart">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.7a2 2 0 0 0 1.9-1.4L22 8H6"/>
-                <circle cx="10" cy="19" r="1.4"/><circle cx="18" cy="19" r="1.4"/>
-            </svg>
-            Giỏ hàng
-            <span id="fnb-cart-badge" class="cart-count" hidden>0</span>
-        </a>
-        <a class="sb-link ${customerActive == 'fnb-orders' ? 'active' : ''}" href="${customerCtx}/console?module=fnb-orders">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
-                <rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/>
-            </svg>
-            Đơn F&amp;B của tôi
-        </a>
         <div class="sb-title">Tài khoản</div>
         <a class="sb-link ${customerActive == 'profile' ? 'active' : ''}" href="${customerCtx}/console?module=profile">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">

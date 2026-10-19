@@ -43,12 +43,10 @@
                 <c:when test="${currentRole == 'ADMIN'}">
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
                     <a href="${ctx}/console/branch/list">Chi nhánh</a>
-                    <a href="${ctx}/console/report/list">Báo cáo</a>
                 </c:when>
                 <c:when test="${currentRole == 'BRANCH_MANAGER'}">
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
                     <a href="${ctx}/console/shift/list">Ca làm việc</a>
-                    <a href="${ctx}/console/report/list">Báo cáo</a>
                 </c:when>
                 <c:when test="${currentRole == 'BRANCH_STAFF'}">
                     <a href="${ctx}/console?module=pos-ticket">Bán vé</a>
