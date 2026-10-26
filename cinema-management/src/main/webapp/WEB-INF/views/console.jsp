@@ -1,4 +1,4 @@
-<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
+﻿<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
 <%@ taglib prefix="c" uri="jakarta.tags.core" %>
 <%--
   Khu vực quản lý CinemaHub.
@@ -30,6 +30,7 @@
             <title><c:out value="${pageTitle}"/> | Khu vực quản lý CinemaHub</title>
             <link rel="stylesheet" href="${ctx}/assets/css/cinema.css">
             <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261016-inv-accordion-1">
+            <link rel="stylesheet" href="${ctx}/assets/css/inventory.css?v=20261026-mod-6">
         </head>
         <body class="workspace-page">
             <%@ include file="/WEB-INF/views/layout/workspace-sidebar.jsp" %>
@@ -46,6 +47,12 @@
             <script src="${ctx}/assets/js/pricing-templates.js?v=20261004-branch-pricing-templates-1" defer></script>
             <script src="${ctx}/assets/js/modules-form-pages.js?v=20261019-hist-fix-v3" defer></script>
             <script src="${ctx}/assets/js/console.js?v=20261017-inv-fix-1" defer></script>
+            <%-- Module Kho Hàng (Modular: Shared -> Product -> Material -> Recipe -> Main Router) --%>
+            <script src="${ctx}/assets/js/inventory/inventory-shared.js?v=20261026-mod-6" defer></script>
+            <script src="${ctx}/assets/js/inventory/inventory-product.js?v=20261026-mod-6" defer></script>
+            <script src="${ctx}/assets/js/inventory/inventory-material.js?v=20261026-mod-6" defer></script>
+            <%-- <script src="${ctx}/assets/js/inventory/inventory-recipe.js?v=20261026-mod-6" defer></script> --%>
+            <script src="${ctx}/assets/js/inventory/inventory-main.js?v=20261026-mod-6" defer></script>
         </body>
         </html>
     </c:when>

@@ -56,7 +56,7 @@ public class BranchController extends HttpServlet {
                 return;
             }
             if ("/my-location".equals(pathInfo)) {
-                if (scope.role() != Role.BRANCH_MANAGER && scope.role() != Role.ADMIN) {
+                if (scope.role() != Role.BRANCH_MANAGER && scope.role() != Role.BRANCH_STAFF && scope.role() != Role.ADMIN) {
                     sendForbidden(response, "Chỉ Quản lý/Admin được xem chi nhánh được phân công");
                     return;
                 }
@@ -73,6 +73,9 @@ public class BranchController extends HttpServlet {
                                 })
                                 .filter(java.util.Objects::nonNull)
                                 .toList();
+                if (branches.isEmpty() && (scope.role() == Role.BRANCH_STAFF || scope.role() == Role.BRANCH_MANAGER)) {
+                    branches = dao.findAllActive();
+                }
                 sendOk(response, branches);
                 return;
             }

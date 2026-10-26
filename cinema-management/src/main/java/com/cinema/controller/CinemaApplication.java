@@ -79,7 +79,8 @@ public final class CinemaApplication {
         if (!webRootDir.isDirectory()) {
             webRootDir = new File("cinema-management/src/main/webapp");
         }
-        String webRoot = webRootDir.getAbsoluteFile().toString();
+        webRootDir = webRootDir.getAbsoluteFile();
+        String webRoot = webRootDir.toString();
 
         Tomcat tomcat = new Tomcat();
         tomcat.setPort(port);

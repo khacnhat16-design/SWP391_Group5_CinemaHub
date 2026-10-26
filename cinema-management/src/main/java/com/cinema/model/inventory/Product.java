@@ -32,20 +32,28 @@ public class Product {
     }
 
     public Long id() { return id; }
+    public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String name() { return name; }
+    public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public String description() { return description; }
+    public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
     public long price() { return price; }
+    public long getPrice() { return price; }
     public void setPrice(long price) { this.price = price; }
     public String unit() { return unit; }
+    public String getUnit() { return unit; }
     public void setUnit(String unit) { this.unit = unit; }
     public String type() { return type; }
+    public String getType() { return type; }
     public void setType(String type) { this.type = type; }
     public String status() { return status; }
+    public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public int version() { return version; }
+    public int getVersion() { return version; }
     public void setVersion(int version) { this.version = version; }
 
     public boolean isCombo() { return TYPE_COMBO.equals(type); }

@@ -1,5 +1,414 @@
 /* ============================================================
    inventory.css — Module Quản lý tồn kho CinemaHub
+   Styles cho Giao diện Kho hàng (Thành phẩm & Nguyên liệu)
+   ============================================================ */
+
+/* ============================================================ */
+/*  KHO HÀNG (INVENTORY) - MODAL & COMPONENT STYLES             */
+/* ============================================================ */
+
+.ws-inv-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(3px);
+    display: flex;          
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.ws-inv-modal-panel {
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 20px 45px rgba(0, 0, 0, 0.28);
+    max-height: 90vh;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Modal Headers */
+.ws-inv-modal-head {
+    padding: 14px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+    color: #ffffff;
+}
+.ws-inv-modal-head.blue {
+    background: #1d4ed8;
+}
+.ws-inv-modal-head.cyan {
+    background: #0284c7;
+}
+.ws-inv-modal-head.green {
+    background: #16a34a;
+}
+.ws-inv-modal-head.slate {
+    background: #475569;
+}
+.ws-inv-modal-head h3,
+.ws-inv-modal-head h2 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #ffffff;
+}
+.ws-inv-modal-head small {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.88);
+}
+.ws-inv-modal-close {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    font-size: 18px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.ws-inv-modal-close:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+
+/* Modal Body & Footer */
+.ws-inv-modal-body {
+    padding: 20px;
+    background: #ffffff;
+    overflow-y: auto;
+    flex: 1;
+}
+.ws-inv-modal-footer {
+    padding: 14px 20px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* Info Cards */
+.ws-inv-info-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+}
+.ws-inv-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+.ws-inv-avatar.blue {
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+.ws-inv-avatar.cyan {
+    background: #e0f2fe;
+    color: #0369a1;
+}
+
+/* History Table */
+.ws-inv-history-wrap {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 10px;
+}
+.ws-inv-history-table {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+}
+.ws-inv-history-table th {
+    background: #f8fafc;
+    color: #475569;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid #e2e8f0;
+}
+.ws-inv-history-table td {
+    padding: 10px 14px;
+    font-size: 0.86rem;
+    color: #1e293b;
+    border-bottom: 1px solid #f1f5f9;
+}
+.ws-inv-history-table tr:last-child td {
+    border-bottom: none;
+}
+.ws-inv-badge-sign {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #ffffff;
+    text-align: center;
+}
+.ws-inv-badge-sign.plus {
+    background: #16a34a;
+}
+.ws-inv-badge-sign.minus {
+    background: #dc2626;
+}
+
+/* Buttons in Modal */
+.ws-inv-btn {
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+.ws-inv-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.ws-inv-btn-primary {
+    background: #1d4ed8;
+    color: #ffffff;
+}
+.ws-inv-btn-primary:hover:not(:disabled) {
+    background: #1e40af;
+}
+.ws-inv-btn-primary.cyan {
+    background: #0284c7;
+}
+.ws-inv-btn-primary.cyan:hover:not(:disabled) {
+    background: #0369a1;
+}
+.ws-inv-btn-primary.green {
+    background: #16a34a;
+}
+.ws-inv-btn-primary.green:hover:not(:disabled) {
+    background: #15803d;
+}
+.ws-inv-btn-primary.slate {
+    background: #475569;
+}
+.ws-inv-btn-primary.slate:hover:not(:disabled) {
+    background: #334155;
+}
+.ws-inv-btn-primary.red {
+    background: #dc2626;
+}
+.ws-inv-btn-primary.red:hover:not(:disabled) {
+    background: #b91c1c;
+}
+.ws-inv-btn-secondary {
+    background: #ffffff;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+}
+.ws-inv-btn-secondary:hover:not(:disabled) {
+    background: #f8fafc;
+    border-color: #94a3b8;
+}
+
+/* Preview / Realtime Box */
+.ws-inv-preview-box {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 0.88rem;
+    color: #166534;
+    line-height: 1.5;
+}
+.ws-inv-warn-box {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 0.88rem;
+    color: #b45309;
+    line-height: 1.5;
+}
+
+/* Form Groups & Labels */
+.ws-inv-group {
+    margin-bottom: 14px;
+}
+.ws-inv-label {
+    display: block;
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 6px;
+}
+.ws-inv-req {
+    color: #ef4444;
+}
+.ws-inv-hint {
+    font-size: 0.88rem;
+    color: #475569;
+    margin-bottom: 14px;
+}
+.ws-inv-hint strong {
+    font-size: 1.05rem;
+    color: #0f172a;
+}
+.ws-inv-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.ws-inv-radio-group {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+}
+.ws-inv-radio-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+.ws-inv-radio-opt.minus { color: #dc2626; }
+.ws-inv-radio-opt.plus { color: #16a34a; }
+.ws-inv-radio-opt.set { color: #0284c7; }
+.ws-inv-radio-opt input {
+    width: 17px;
+    height: 17px;
+    cursor: pointer;
+}
+
+/* Summary Cards */
+.ws-inv-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+@media (max-width: 900px) {
+    .ws-inv-cards {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+@media (max-width: 500px) {
+    .ws-inv-cards {
+        grid-template-columns: 1fr;
+    }
+}
+.ws-inv-card {
+    padding: 16px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 2px solid #e2e8f0;
+    background: #ffffff;
+}
+.ws-inv-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+.ws-inv-card.total { border-color: #e2e8f0; }
+.ws-inv-card.in-stock { border-color: #bbf7d0; background: #f0fdf4; }
+.ws-inv-card.low-stock { border-color: #fed7aa; background: #fff7ed; }
+.ws-inv-card.out-stock { border-color: #fecaca; background: #fef2f2; }
+.ws-inv-card .card-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+.ws-inv-card.total .card-title { color: #64748b; }
+.ws-inv-card.in-stock .card-title { color: #16a34a; }
+.ws-inv-card.low-stock .card-title { color: #ea580c; }
+.ws-inv-card.out-stock .card-title { color: #dc2626; }
+.ws-inv-card .card-num {
+    font-size: 2rem;
+    font-weight: 800;
+    margin-top: 4px;
+}
+.ws-inv-card.total .card-num { color: #0f172a; }
+.ws-inv-card.in-stock .card-num { color: #16a34a; }
+.ws-inv-card.low-stock .card-num { color: #ea580c; }
+.ws-inv-card.out-stock .card-num { color: #dc2626; }
+
+/* Info Card Helpers */
+.ws-inv-info-card .info-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+.ws-inv-info-card .info-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.ws-inv-info-card .info-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+.ws-inv-info-card .info-sub {
+    font-size: 0.85rem;
+    color: #64748b;
+    font-weight: 600;
+    margin-top: 2px;
+}
+.ws-inv-info-card .info-meta {
+    font-size: 0.86rem;
+    color: #64748b;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 6px;
+}
+.ws-inv-info-card .info-meta strong {
+    color: #0f172a;
+}
+.ws-inv-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+
+
+
+/* ============================================================
+   Legacy / Prototype Helper Classes
+   ============================================================ */
+/* ============================================================
+   inventory.css — Module Quản lý tồn kho CinemaHub
    Styles cho Giai đoạn 1: Màn 1 (M-P1 Danh sách tồn kho bắp nước)
    ============================================================ */
 
@@ -148,3 +557,217 @@
     background: #f1f5f9;
     color: #475569;
 }
+
+/* ============================================================ */
+/*  GIAI ĐOẠN 3: CÔNG THỨC & LUỒNG SẢN XUẤT (RECIPE & PRODUCTION)*/
+/* ============================================================ */
+
+/* Modal Header Themes */
+.ws-inv-modal-head.purple {
+    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+}
+
+/* Stat Cards */
+.ws-inv-card.purple {
+    border-left: 4px solid #7c3aed;
+}
+.ws-inv-card.purple .card-title {
+    color: #6d28d9;
+}
+.ws-inv-card.purple .card-num {
+    color: #5b21b6;
+}
+
+/* Recipe Ingredient Tags */
+.ws-recipe-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    background: #f8fafc;
+    color: #334155;
+    border: 1px solid #e2e8f0;
+    margin: 2px 4px 2px 0;
+    line-height: 1.4;
+}
+.ws-recipe-tag strong {
+    color: #0f172a;
+    font-weight: 600;
+}
+.ws-recipe-pill-loss {
+    font-size: 0.7rem;
+    color: #c2410c;
+    background: #ffedd5;
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+/* Food Cost Indicator */
+.ws-food-cost-box {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.ws-food-cost-val {
+    font-weight: 700;
+    color: #0f172a;
+    font-size: 0.92rem;
+}
+.ws-food-cost-pct {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    width: fit-content;
+}
+.ws-food-cost-pct.good {
+    background: #dcfce7;
+    color: #166534;
+}
+.ws-food-cost-pct.warn {
+    background: #fef3c7;
+    color: #92400e;
+}
+.ws-food-cost-pct.danger {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+/* Cost & Economics Summary Box in Recipe Editor */
+.ws-recipe-summary-box {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 14px;
+}
+.ws-recipe-summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.ws-recipe-summary-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.ws-recipe-summary-val {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+.ws-recipe-summary-val.cost {
+    color: #7c3aed;
+}
+.ws-recipe-summary-val.profit {
+    color: #16a34a;
+}
+
+/* Recipe Dynamic Table */
+.ws-recipe-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin-top: 10px;
+}
+.ws-recipe-table th {
+    background: #f1f5f9;
+    color: #475569;
+    padding: 10px 12px;
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-align: left;
+    border-bottom: 2px solid #cbd5e1;
+}
+.ws-recipe-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #e2e8f0;
+    vertical-align: middle;
+}
+.ws-recipe-table tr:hover td {
+    background: #f8fafc;
+}
+
+/* Production BOM Check Table */
+.ws-bom-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin-top: 12px;
+}
+.ws-bom-table th {
+    background: #f8fafc;
+    color: #475569;
+    padding: 10px 12px;
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-align: left;
+    border-bottom: 2px solid #e2e8f0;
+}
+.ws-bom-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: middle;
+}
+.ws-bom-row-short {
+    background: #fef2f2 !important;
+}
+.ws-bom-badge-ok {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    background: #dcfce7;
+    color: #166534;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+.ws-bom-badge-short {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    background: #fee2e2;
+    color: #991b1b;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+/* Alert Banners */
+.ws-alert-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    margin: 14px 0;
+}
+.ws-alert-banner.danger {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+}
+.ws-alert-banner.success {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    color: #166534;
+}
+.ws-alert-banner.info {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e40af;
+}
+

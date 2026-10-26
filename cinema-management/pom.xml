@@ -107,9 +107,12 @@
                 <version>3.5.0</version>
                 <configuration>
                     <mainClass>com.cinema.controller.CinemaApplication</mainClass>
-                    <systemPropertyVariables>
-                        <cinema.port>${cinema.port}</cinema.port>
-                    </systemPropertyVariables>
+                    <systemProperties>
+                        <systemProperty>
+                            <key>cinema.port</key>
+                            <value>${cinema.port}</value>
+                        </systemProperty>
+                    </systemProperties>
                 </configuration>
             </plugin>
         </plugins>
