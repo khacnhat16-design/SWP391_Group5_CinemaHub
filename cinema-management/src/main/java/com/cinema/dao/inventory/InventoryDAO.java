@@ -73,6 +73,77 @@ public class InventoryDAO {
             String createdAt
     ) {}
 
+    public static record RecipeItemRow(
+            long id,
+            long productId,
+            String productName,
+            String productType,
+            long productPrice,
+            long materialId,
+            String materialCode,
+            String materialName,
+            String materialUnit,
+            long materialCostPrice,
+            double dosage,
+            double lossRate,
+            double effectiveDosage,
+            String note,
+            boolean isActive
+    ) {
+        public static double calcEffectiveDosage(double dosage, double lossRate, String materialUnit) {
+            double rate = lossRate > 0 ? (lossRate > 1.0 ? lossRate / 100.0 : lossRate) : 0.0;
+            double eff = dosage * (1.0 + rate);
+            String u = materialUnit != null ? materialUnit.trim().toLowerCase() : "";
+            if (u.equals("cái") || u.equals("cai") || u.equals("ly") || u.equals("hộp") || u.equals("hop") || u.equals("ống") || u.equals("ong")) {
+                return Math.max(1.0, Math.ceil(dosage));
+            }
+            return Math.round(eff * 10000.0) / 10000.0;
+        }
+
+        public double estimatedCost() {
+            return effectiveDosage * (materialCostPrice > 0 ? materialCostPrice : 0);
+        }
+        public String name() { return materialName; }
+        public String code() { return materialCode; }
+        public String unit() { return materialUnit; }
+        public long costPrice() { return materialCostPrice; }
+    }
+
+    public static record RecipeProductSummary(
+            long productId,
+            String name,
+            String type,
+            long price,
+            String unit,
+            String status,
+            int itemCount,
+            double totalEstimatedCost,
+            boolean hasRecipe,
+            String cookingTime,
+            List<RecipeItemRow> items
+    ) {
+        public static String resolveCookingTime(String type) {
+            if ("POPCORN".equalsIgnoreCase(type)) return "2.5 phút/mẻ";
+            if ("DRINK".equalsIgnoreCase(type)) return "30 giây/ly";
+            if ("COMBO".equalsIgnoreCase(type)) return "Đóng gói combo (1 phút)";
+            return "2.0 phút/phần";
+        }
+        public long id() { return productId; }
+        public String productName() { return name; }
+        public String productType() { return type; }
+        public long productPrice() { return price; }
+        public String productUnit() { return unit; }
+        public String productStatus() { return status; }
+        public int materialCount() { return itemCount; }
+    }
+
+    public static record RecipeItemInput(
+            long materialId,
+            double dosage,
+            double lossRate,
+            String note
+    ) {}
+
 
     // ================================================================
     // MÀN 1: TỒN KHO THÀNH PHẨM (M-P1 -> M-P4)
@@ -185,6 +256,12 @@ public class InventoryDAO {
             ps.setLong(5, actorId);
             ps.executeUpdate();
         }
+    }
+
+    public void insertAdjustment(Connection conn, long branchId, long productId,
+                                 int deltaQty, String reason, String note, long actorId) throws SQLException {
+        String fullReason = reason + (note != null && !note.isBlank() ? " - " + note.trim() : "");
+        insertAdjustment(conn, branchId, productId, deltaQty, fullReason, actorId);
     }
 
     /** Lấy lịch sử biến động của 1 sản phẩm tại chi nhánh (M-P2). */
@@ -410,4 +487,221 @@ public class InventoryDAO {
         return true;
     }
 
+
+    /** Cập nhật định mức tồn tối thiểu cho nguyên liệu (Dòng 78: Configure low-stock thresholds). */
+    public boolean updateMaterialMinStock(long materialId, double minStock) throws Exception {
+        String sql = "UPDATE dbo.material SET min_stock = ? WHERE id = ?";
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setDouble(1, minStock);
+            ps.setLong(2, materialId);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
+    // ================================================================
+    // GIAI ĐOẠN 3: CÔNG THỨC & SẢN XUẤT (M-X1, M-X2, M-R4)
+    // ================================================================
+
+    /** Lấy công thức chi tiết của 1 sản phẩm. */
+    public List<RecipeItemRow> findRecipesByProduct(long productId) throws Exception {
+        String sql = """
+                SELECT r.id, r.product_id, p.name AS product_name, p.type AS product_type, p.price AS product_price,
+                       r.material_id, m.code AS material_code, m.name AS material_name, m.unit AS material_unit,
+                       ISNULL(m.cost_price, 0) AS material_cost_price,
+                       CAST(r.dosage AS FLOAT) AS dosage,
+                       CAST(ISNULL(r.loss_rate, 0) AS FLOAT) AS loss_rate,
+                       r.note, ISNULL(r.is_active, 1) AS is_active
+                FROM dbo.recipe_item r
+                JOIN dbo.product p ON p.id = r.product_id
+                JOIN dbo.material m ON m.id = r.material_id
+                WHERE r.product_id = ? AND (r.is_active = 1 OR r.is_active IS NULL)
+                ORDER BY r.id ASC
+                """;
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, productId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<RecipeItemRow> list = new ArrayList<>();
+                while (rs.next()) {
+                    double dosage = rs.getDouble("dosage");
+                    double lossRate = rs.getDouble("loss_rate");
+                    String unit = rs.getString("material_unit");
+                    double eff = RecipeItemRow.calcEffectiveDosage(dosage, lossRate, unit);
+                    list.add(new RecipeItemRow(
+                            rs.getLong("id"),
+                            rs.getLong("product_id"),
+                            rs.getString("product_name"),
+                            rs.getString("product_type"),
+                            rs.getLong("product_price"),
+                            rs.getLong("material_id"),
+                            rs.getString("material_code"),
+                            rs.getString("material_name"),
+                            unit,
+                            rs.getLong("material_cost_price"),
+                            dosage,
+                            lossRate,
+                            eff,
+                            rs.getString("note"),
+                            rs.getBoolean("is_active")
+                    ));
+                }
+                return list;
+            }
+        }
+    }
+
+    /** Lấy danh sách toàn bộ sản phẩm kèm trạng thái công thức (M-X1). */
+    public List<RecipeProductSummary> findAllRecipeSummaries() throws Exception {
+        String sql = """
+                SELECT p.id AS product_id, p.name AS product_name, p.type AS product_type,
+                       p.price AS product_price, p.unit AS product_unit, p.status AS product_status
+                FROM dbo.product p
+                WHERE p.status = 'ACTIVE' OR p.status IS NULL
+                ORDER BY p.type ASC, p.name ASC
+                """;
+
+        String recipeSql = """
+                SELECT r.id, r.product_id, p.name AS product_name, p.type AS product_type, p.price AS product_price,
+                       r.material_id, m.code AS material_code, m.name AS material_name, m.unit AS material_unit,
+                       ISNULL(m.cost_price, 0) AS material_cost_price,
+                       CAST(r.dosage AS FLOAT) AS dosage,
+                       CAST(ISNULL(r.loss_rate, 0) AS FLOAT) AS loss_rate,
+                       r.note, ISNULL(r.is_active, 1) AS is_active
+                FROM dbo.recipe_item r
+                JOIN dbo.product p ON p.id = r.product_id
+                JOIN dbo.material m ON m.id = r.material_id
+                WHERE r.is_active = 1 OR r.is_active IS NULL
+                ORDER BY r.id ASC
+                """;
+
+        try (Connection conn = DBContext.getConnection()) {
+            java.util.Map<Long, List<RecipeItemRow>> recipeMap = new java.util.HashMap<>();
+            try (PreparedStatement ps = conn.prepareStatement(recipeSql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    long pId = rs.getLong("product_id");
+                    double dosage = rs.getDouble("dosage");
+                    double lossRate = rs.getDouble("loss_rate");
+                    String unit = rs.getString("material_unit");
+                    double eff = RecipeItemRow.calcEffectiveDosage(dosage, lossRate, unit);
+                    recipeMap.computeIfAbsent(pId, k -> new ArrayList<>()).add(new RecipeItemRow(
+                            rs.getLong("id"),
+                            pId,
+                            rs.getString("product_name"),
+                            rs.getString("product_type"),
+                            rs.getLong("product_price"),
+                            rs.getLong("material_id"),
+                            rs.getString("material_code"),
+                            rs.getString("material_name"),
+                            unit,
+                            rs.getLong("material_cost_price"),
+                            dosage,
+                            lossRate,
+                            eff,
+                            rs.getString("note"),
+                            rs.getBoolean("is_active")
+                    ));
+                }
+            }
+
+            List<RecipeProductSummary> summaries = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(sql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    long pId = rs.getLong("product_id");
+                    String pType = rs.getString("product_type");
+                    List<RecipeItemRow> items = recipeMap.getOrDefault(pId, List.of());
+                    double totalCost = 0;
+                    for (RecipeItemRow it : items) {
+                        totalCost += it.estimatedCost();
+                    }
+                    summaries.add(new RecipeProductSummary(
+                            pId,
+                            rs.getString("product_name"),
+                            pType,
+                            rs.getLong("product_price"),
+                            rs.getString("product_unit"),
+                            rs.getString("product_status"),
+                            items.size(),
+                            totalCost,
+                            !items.isEmpty(),
+                            RecipeProductSummary.resolveCookingTime(pType),
+                            items
+                    ));
+                }
+            }
+            return summaries;
+        }
+    }
+
+    /** Lưu công thức cho 1 sản phẩm (M-X2 Editor: Xóa cũ và Insert mới). */
+    public void saveRecipe(Connection conn, long productId, List<RecipeItemInput> items) throws Exception {
+        String deleteSql = "DELETE FROM dbo.recipe_item WHERE product_id = ?";
+        try (PreparedStatement ps = conn.prepareStatement(deleteSql)) {
+            ps.setLong(1, productId);
+            ps.executeUpdate();
+        }
+
+        if (items != null && !items.isEmpty()) {
+            String insertSql = """
+                    INSERT INTO dbo.recipe_item (product_id, material_id, dosage, loss_rate, note, is_active)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                    """;
+            try (PreparedStatement ps = conn.prepareStatement(insertSql)) {
+                for (RecipeItemInput item : items) {
+                    ps.setLong(1, productId);
+                    ps.setLong(2, item.materialId());
+                    ps.setDouble(3, item.dosage());
+                    ps.setDouble(4, item.lossRate());
+                    ps.setString(5, item.note());
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+        }
+    }
+
+    /** Xóa công thức của 1 sản phẩm. */
+    public void deleteRecipe(Connection conn, long productId) throws Exception {
+        String deleteSql = "DELETE FROM dbo.recipe_item WHERE product_id = ?";
+        try (PreparedStatement ps = conn.prepareStatement(deleteSql)) {
+            ps.setLong(1, productId);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Trừ nguyên liệu kho thô có chốt chặn chống âm kho (Atomic Deduct). */
+    public boolean tryDeductMaterial(Connection conn, long branchId, long materialId, double qty) throws Exception {
+        String sql = """
+                UPDATE dbo.branch_material_inventory
+                SET qty = qty - ?, updated_at = SYSUTCDATETIME()
+                WHERE branch_id = ? AND material_id = ? AND qty >= ?
+                """;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setDouble(1, qty);
+            ps.setLong(2, branchId);
+            ps.setLong(3, materialId);
+            ps.setDouble(4, qty);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
+    /** Ghi log biến động kho nguyên liệu trong transaction. */
+    public void insertMaterialAdjustment(Connection conn, long branchId, long materialId,
+                                         double deltaQty, String reason, String note, long actorId) throws Exception {
+        String sql = """
+                INSERT INTO dbo.material_adjustment (branch_id, material_id, delta_qty, reason, note, actor_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, SYSUTCDATETIME())
+                """;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, branchId);
+            ps.setLong(2, materialId);
+            ps.setDouble(3, deltaQty);
+            ps.setString(4, reason);
+            ps.setString(5, note);
+            ps.setLong(6, actorId);
+            ps.executeUpdate();
+        }
+    }
 }

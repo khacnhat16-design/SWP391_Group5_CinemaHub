@@ -16,7 +16,7 @@ public final class AccessScope {
             "CONCESSION_PICKUP", "SHIFT_OPEN", "SHIFT_CLOSE", "INVENTORY_VIEW",
             "LOYALTY_ADJUST", "SHIFT_ASSIGNMENT_VIEW_OWN", "SHIFT_REQUEST_SUBMIT");
     private static final Set<String> MANAGER_PERMISSIONS = Set.of(
-            "SHOWTIME_BROWSE", "SCREEN_MANAGE", "SHOWTIME_MANAGE", "INVENTORY_MANAGE",
+            "SHOWTIME_BROWSE", "SCREEN_MANAGE", "SHOWTIME_MANAGE", "INVENTORY_VIEW", "INVENTORY_MANAGE",
             "SHIFT_APPROVE", "REPORT_VIEW", "REFUND_APPROVE", "TICKET_CANCEL_BRANCH", "TICKET_VALIDATE",
             "CONCESSION_SELL", "LOYALTY_ADJUST", "VOUCHER_MANAGE", "HOLIDAY_MANAGE",
             "PRICING_MANAGE",
@@ -80,6 +80,10 @@ public final class AccessScope {
             return PUBLIC_PERMISSIONS.contains(permission);
         }
         if (role == Role.ADMIN) {
+            // Admin khÃ´ng liÃªn quan Ä‘áº¿n kho hÃ ng chi nhÃ¡nh
+            if ("INVENTORY_VIEW".equals(permission) || "INVENTORY_MANAGE".equals(permission)) {
+                return false;
+            }
             return true;
         }
         return permissionsFor(role).contains(permission);
