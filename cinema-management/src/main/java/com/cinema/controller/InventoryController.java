@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * REST API Controller cho Tồn kho thành phẩm, Kho nguyên liệu và Công thức chế biến (Giai đoạn 1).
+ * REST API Controller cho Tồn kho thành phẩm, Kho nguyên liệu, Công thức chế biến và Cảnh báo kho/hạn sử dụng.
  */
 @WebServlet(name = "inventoryController", urlPatterns = { "/inventory", "/inventory/*" })
 public class InventoryController extends HttpServlet {
@@ -40,14 +40,11 @@ public class InventoryController extends HttpServlet {
             return;
         }
 
-        // Admin không liên quan đến kho hàng chi nhánh
-        if (scope.role() == com.cinema.model.auth.Role.ADMIN) {
-            sendError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "Admin không quản lý kho hàng.");
-            return;
-        }
+        boolean isHqAdmin = scope.role() == com.cinema.model.auth.Role.ADMIN;
+        boolean canManage = scope.can("INVENTORY_MANAGE") || isHqAdmin;
+        boolean canView = scope.can("INVENTORY_VIEW") || canManage;
 
-        // Chỉ Manager (INVENTORY_MANAGE) và Staff (INVENTORY_VIEW) mới được xem kho
-        if (!scope.can("INVENTORY_VIEW") && !scope.can("INVENTORY_MANAGE")) {
+        if (!canView) {
             sendError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "Bạn không có quyền xem dữ liệu kho hàng.");
             return;
         }
@@ -55,18 +52,31 @@ public class InventoryController extends HttpServlet {
         try {
             String action = request.getParameter("action");
 
-            // 1. Quản lý công thức định mức -> Chỉ Quản lý chi nhánh (Manager) mới có quyền
+            // 1. Cấu hình số ngày cảnh báo cận hạn (Row 62)
+            if ("expiry-config".equalsIgnoreCase(action)) {
+                sendOk(response, Map.of("warningDays", inventoryService.getExpiryWarningDays()));
+                return;
+            }
+
+            // 2. Danh sách cảnh báo tồn kho và hạn sử dụng (Row 61, 63, 64)
+            if ("alerts".equalsIgnoreCase(action)) {
+                long branchId = branchId(scope, request);
+                sendOk(response, inventoryService.getAlerts(scopeBranch(scope), branchId));
+                return;
+            }
+
+            // 3. Quản lý công thức định mức -> HQ Admin hoặc Quản lý chi nhánh
             if ("recipes".equalsIgnoreCase(action)) {
-                if (!scope.can("INVENTORY_MANAGE")) {
-                    sendError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "Chỉ Quản lý chi nhánh mới có quyền xem công thức.");
+                if (!canManage) {
+                    sendError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "Chỉ Quản trị viên hoặc Quản lý chi nhánh mới có quyền xem công thức.");
                     return;
                 }
                 sendOk(response, inventoryService.recipeSummaries());
                 return;
             }
             if ("recipe".equalsIgnoreCase(action)) {
-                if (!scope.can("INVENTORY_MANAGE")) {
-                    sendError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "Chỉ Quản lý chi nhánh mới có quyền xem công thức.");
+                if (!canManage) {
+                    sendError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "Chỉ Quản trị viên hoặc Quản lý chi nhánh mới có quyền xem công thức.");
                     return;
                 }
                 long productId = Long.parseLong(required(request, "productId"));
@@ -74,7 +84,7 @@ public class InventoryController extends HttpServlet {
                 return;
             }
 
-            // 2. Tồn kho và lịch sử chi nhánh (Staff & Manager đều được xem)
+            // 4. Tồn kho và lịch sử chi nhánh (Staff, Manager & Admin)
             long branchId = branchId(scope, request);
             String type = request.getParameter("type");
 
@@ -109,17 +119,12 @@ public class InventoryController extends HttpServlet {
             return;
         }
 
-        // Admin không liên quan đến kho hàng chi nhánh
-        if (scope.role() == com.cinema.model.auth.Role.ADMIN) {
-            sendError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN",
-                    "Admin không quản lý thao tác kho hàng.");
-            return;
-        }
+        boolean isHqAdmin = scope.role() == com.cinema.model.auth.Role.ADMIN;
+        boolean canManage = scope.can("INVENTORY_MANAGE") || isHqAdmin;
 
-        // Bắt buộc phải có quyền INVENTORY_MANAGE (Chỉ Quản lý chi nhánh)
-        if (!scope.can("INVENTORY_MANAGE")) {
+        if (!canManage) {
             sendError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN",
-                    "Chỉ Quản lý chi nhánh mới có quyền thực hiện thao tác kho hàng (Nhập kho, Điều chỉnh, Sản xuất, Thiết lập công thức).");
+                    "Chỉ Quản trị viên hoặc Quản lý chi nhánh mới có quyền thực hiện thao tác kho hàng.");
             return;
         }
 
@@ -127,7 +132,23 @@ public class InventoryController extends HttpServlet {
             String action = request.getParameter("action");
             long actorId = sessionUserId(request);
 
-            // 1. Quản lý công thức định mức (cấp hệ thống) -> Không bắt buộc branchId
+            // 1. Cấu hình số ngày cảnh báo cận hạn (Row 62: Configure expiry date alerts)
+            if ("update-expiry-config".equalsIgnoreCase(action)) {
+                int days = Integer.parseInt(required(request, "warningDays"));
+                inventoryService.updateExpiryWarningDays(days, actorId);
+                sendOk(response, Map.of("success", true, "warningDays", days));
+                return;
+            }
+
+            // 2. Kích hoạt quét và phát sinh thông báo cảnh báo (Row 61 & 63: Generate low-stock & expiry alerts)
+            if ("generate-alerts".equalsIgnoreCase(action)) {
+                long branchId = branchId(scope, request);
+                Map<String, Object> result = inventoryService.generateAlertNotifications(scopeBranch(scope), branchId);
+                sendOk(response, result);
+                return;
+            }
+
+            // 3. Quản lý công thức định mức (cấp hệ thống)
             if ("save-recipe".equalsIgnoreCase(action)) {
                 long productId = Long.parseLong(required(request, "productId"));
                 String itemsJson = required(request, "items");
@@ -144,9 +165,17 @@ public class InventoryController extends HttpServlet {
                 return;
             }
 
-            // 2. Thao tác kho chi nhánh (Sản xuất / Điều chỉnh / Nhập kho)
+            // 4. Thao tác kho chi nhánh (Sản xuất / Điều chỉnh / Nhập kho / Định mức tồn)
             long branchId = branchId(scope, request);
             String type = request.getParameter("type");
+
+            if ("update-product-min-stock".equalsIgnoreCase(action)) {
+                long productId = Long.parseLong(required(request, "productId"));
+                int minStock = Integer.parseInt(required(request, "minStock"));
+                inventoryService.updateProductMinStock(scopeBranch(scope), branchId, productId, minStock);
+                sendOk(response, Map.of("success", true, "productId", productId, "minStock", minStock));
+                return;
+            }
 
             if ("produce".equalsIgnoreCase(action)) {
                 long productId = Long.parseLong(required(request, "productId"));
@@ -173,9 +202,11 @@ public class InventoryController extends HttpServlet {
                 double quantity = Double.parseDouble(required(request, "quantity"));
                 String reason = required(request, "reason");
                 String note = request.getParameter("note");
+                String expiryDate = request.getParameter("expiryDate");
+                String batchNo = request.getParameter("batchNo");
 
                 if ("adjust".equalsIgnoreCase(action)) {
-                    inventoryService.adjustMaterial(scopeBranch(scope), branchId, materialId, quantity, reason, note, actorId);
+                    inventoryService.adjustMaterial(scopeBranch(scope), branchId, materialId, quantity, reason, note, expiryDate, batchNo, actorId);
                 } else {
                     String costPriceRaw = request.getParameter("costPrice");
                     Long costPrice = (costPriceRaw != null && !costPriceRaw.isBlank())
@@ -184,7 +215,7 @@ public class InventoryController extends HttpServlet {
                     String supplier = request.getParameter("supplier");
                     String poNumber = request.getParameter("poNumber");
                     inventoryService.restockMaterial(scopeBranch(scope), branchId, materialId, quantity, reason,
-                            costPrice, supplier, poNumber, note, actorId);
+                            costPrice, supplier, poNumber, note, expiryDate, batchNo, actorId);
                 }
                 sendOk(response, inventoryService.materialsOfBranch(scopeBranch(scope), branchId));
                 return;
@@ -193,10 +224,12 @@ public class InventoryController extends HttpServlet {
             long productId = Long.parseLong(required(request, "productId"));
             int quantity = Integer.parseInt(required(request, "quantity"));
             String reason = request.getParameter("reason");
+            String expiryDate = request.getParameter("expiryDate");
+            String batchNo = request.getParameter("batchNo");
             if ("adjust".equalsIgnoreCase(action)) {
-                inventoryService.adjust(scopeBranch(scope), branchId, productId, quantity, reason, actorId);
+                inventoryService.adjust(scopeBranch(scope), branchId, productId, quantity, reason, expiryDate, batchNo, actorId);
             } else {
-                inventoryService.restock(scopeBranch(scope), branchId, productId, quantity, reason, actorId);
+                inventoryService.restock(scopeBranch(scope), branchId, productId, quantity, reason, expiryDate, batchNo, actorId);
             }
             sendOk(response, inventoryService.stockOfBranch(scopeBranch(scope), branchId));
         } catch (Throwable e) {

@@ -32,57 +32,59 @@
     position: relative;
 }
 
-/* Modal Headers */
+/* Modal Headers - Harmonized Clean Light Theme */
 .ws-inv-modal-head {
-    padding: 14px 20px;
+    padding: 16px 20px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-shrink: 0;
-    color: #ffffff;
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    color: #0f172a;
 }
-.ws-inv-modal-head.blue {
-    background: #1d4ed8;
-}
-.ws-inv-modal-head.cyan {
-    background: #0284c7;
-}
-.ws-inv-modal-head.green {
-    background: #16a34a;
-}
-.ws-inv-modal-head.slate {
-    background: #475569;
+.ws-inv-modal-head.blue,
+.ws-inv-modal-head.cyan,
+.ws-inv-modal-head.green,
+.ws-inv-modal-head.slate,
+.ws-inv-modal-head.purple {
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    color: #0f172a;
 }
 .ws-inv-modal-head h3,
 .ws-inv-modal-head h2 {
     margin: 0;
     font-size: 1.15rem;
     font-weight: 700;
-    color: #ffffff;
+    color: #0f172a;
 }
 .ws-inv-modal-head small {
     display: block;
-    margin-top: 2px;
+    margin-top: 3px;
     font-size: 0.82rem;
-    color: rgba(255, 255, 255, 0.88);
+    color: #64748b;
+    font-weight: 400;
 }
 .ws-inv-modal-close {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255, 255, 255, 0.2);
-    color: #ffffff;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    color: #64748b;
     font-size: 18px;
     line-height: 1;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: all 0.15s ease;
 }
 .ws-inv-modal-close:hover {
-    background: rgba(255, 255, 255, 0.35);
+    background: #f1f5f9;
+    color: #0f172a;
+    border-color: #cbd5e1;
 }
 
 /* Modal Body & Footer */
@@ -179,12 +181,12 @@
 
 /* Buttons in Modal */
 .ws-inv-btn {
-    padding: 10px 18px;
+    padding: 9px 18px;
     border-radius: 8px;
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     cursor: pointer;
-    border: none;
+    border: 1px solid transparent;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -194,36 +196,29 @@
     opacity: 0.6;
     cursor: not-allowed;
 }
-.ws-inv-btn-primary {
-    background: #1d4ed8;
+.ws-inv-btn-primary,
+.ws-inv-btn-primary.cyan,
+.ws-inv-btn-primary.green,
+.ws-inv-btn-primary.slate {
+    background: #2563eb;
+    border-color: #2563eb;
     color: #ffffff;
 }
-.ws-inv-btn-primary:hover:not(:disabled) {
-    background: #1e40af;
-}
-.ws-inv-btn-primary.cyan {
-    background: #0284c7;
-}
-.ws-inv-btn-primary.cyan:hover:not(:disabled) {
-    background: #0369a1;
-}
-.ws-inv-btn-primary.green {
-    background: #16a34a;
-}
-.ws-inv-btn-primary.green:hover:not(:disabled) {
-    background: #15803d;
-}
-.ws-inv-btn-primary.slate {
-    background: #475569;
-}
+.ws-inv-btn-primary:hover:not(:disabled),
+.ws-inv-btn-primary.cyan:hover:not(:disabled),
+.ws-inv-btn-primary.green:hover:not(:disabled),
 .ws-inv-btn-primary.slate:hover:not(:disabled) {
-    background: #334155;
+    background: #1d4ed8;
+    border-color: #1d4ed8;
 }
 .ws-inv-btn-primary.red {
     background: #dc2626;
+    border-color: #dc2626;
+    color: #ffffff;
 }
 .ws-inv-btn-primary.red:hover:not(:disabled) {
     background: #b91c1c;
+    border-color: #b91c1c;
 }
 .ws-inv-btn-secondary {
     background: #ffffff;
@@ -233,6 +228,7 @@
 .ws-inv-btn-secondary:hover:not(:disabled) {
     background: #f8fafc;
     border-color: #94a3b8;
+    color: #0f172a;
 }
 
 /* Preview / Realtime Box */
@@ -308,12 +304,12 @@
     cursor: pointer;
 }
 
-/* Summary Cards */
+/* Summary Cards - Unified Clean White Cards */
 .ws-inv-cards {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-    margin-bottom: 24px;
+    gap: 14px;
+    margin-bottom: 20px;
 }
 @media (max-width: 900px) {
     .ws-inv-cards {
@@ -326,39 +322,80 @@
     }
 }
 .ws-inv-card {
-    padding: 16px 20px;
+    padding: 14px 18px;
     border-radius: 10px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    border: 2px solid #e2e8f0;
+    transition: all 0.15s ease;
+    border: 1px solid #e2e8f0;
     background: #ffffff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    user-select: none;
 }
 .ws-inv-card:hover {
-    transform: translateY(-2px);
+    border-color: #cbd5e1;
+    transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
-.ws-inv-card.total { border-color: #e2e8f0; }
-.ws-inv-card.in-stock { border-color: #bbf7d0; background: #f0fdf4; }
-.ws-inv-card.low-stock { border-color: #fed7aa; background: #fff7ed; }
-.ws-inv-card.out-stock { border-color: #fecaca; background: #fef2f2; }
-.ws-inv-card .card-title {
-    font-size: 0.82rem;
-    font-weight: 700;
-    letter-spacing: 0.5px;
+.ws-inv-card.active,
+.ws-inv-card.selected {
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
 }
-.ws-inv-card.total .card-title { color: #64748b; }
-.ws-inv-card.in-stock .card-title { color: #16a34a; }
-.ws-inv-card.low-stock .card-title { color: #ea580c; }
-.ws-inv-card.out-stock .card-title { color: #dc2626; }
+.ws-inv-card .card-title {
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
 .ws-inv-card .card-num {
-    font-size: 2rem;
+    font-size: 1.55rem;
     font-weight: 800;
+    color: #0f172a;
     margin-top: 4px;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
 }
 .ws-inv-card.total .card-num { color: #0f172a; }
 .ws-inv-card.in-stock .card-num { color: #16a34a; }
-.ws-inv-card.low-stock .card-num { color: #ea580c; }
+.ws-inv-card.low-stock .card-num { color: #d97706; }
 .ws-inv-card.out-stock .card-num { color: #dc2626; }
+.ws-inv-card.purple .card-num { color: #7c3aed; }
+
+/* Item Title & Links in Inventory Tables */
+.ws-inv-item-name {
+    color: #0f172a !important;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    display: inline-block;
+    transition: color 0.15s ease;
+    white-space: nowrap;
+}
+.ws-inv-item-name:hover {
+    color: #2563eb !important;
+    text-decoration: underline;
+}
+
+/* Neutralize red .ws-link if rendered anywhere in inventory tables */
+.ws-table .ws-link,
+.ws-inv-history-table .ws-link,
+.ws-table strong.ws-link,
+.ws-table div.ws-link {
+    color: #0f172a !important;
+    font-weight: 600 !important;
+    margin-top: 0 !important;
+    display: inline !important;
+    text-decoration: none !important;
+    cursor: pointer !important;
+}
+.ws-table .ws-link:hover,
+.ws-inv-history-table .ws-link:hover,
+.ws-table strong.ws-link:hover,
+.ws-table div.ws-link:hover {
+    color: #2563eb !important;
+    text-decoration: underline !important;
+}
 
 /* Info Card Helpers */
 .ws-inv-info-card .info-head {
@@ -558,24 +595,42 @@
     color: #475569;
 }
 
+/* Badge trạng thái tồn kho (Đủ - Sắp hết - Hết hàng) */
+.ws-badge.ws-badge-green,
+.ws-status-pill.ws-badge-green {
+    background: #ecfdf5 !important;
+    color: #16a34a !important;
+    border: 1px solid rgba(22, 163, 74, 0.25) !important;
+}
+
+.ws-badge.ws-badge-orange,
+.ws-status-pill.ws-badge-orange {
+    background: #fef3c7 !important;
+    color: #d97706 !important;
+    border: 1px solid rgba(217, 119, 6, 0.3) !important;
+}
+
+.ws-badge.ws-badge-red,
+.ws-status-pill.ws-badge-red {
+    background: #fee2e2 !important;
+    color: #dc2626 !important;
+    border: 1px solid rgba(220, 38, 38, 0.25) !important;
+}
+
 /* ============================================================ */
 /*  GIAI ĐOẠN 3: CÔNG THỨC & LUỒNG SẢN XUẤT (RECIPE & PRODUCTION)*/
 /* ============================================================ */
 
-/* Modal Header Themes */
+/* Modal Header Themes - Clean Light Header */
 .ws-inv-modal-head.purple {
-    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    color: #0f172a;
 }
 
 /* Stat Cards */
-.ws-inv-card.purple {
-    border-left: 4px solid #7c3aed;
-}
-.ws-inv-card.purple .card-title {
-    color: #6d28d9;
-}
 .ws-inv-card.purple .card-num {
-    color: #5b21b6;
+    color: #7c3aed;
 }
 
 /* Recipe Ingredient Tags */

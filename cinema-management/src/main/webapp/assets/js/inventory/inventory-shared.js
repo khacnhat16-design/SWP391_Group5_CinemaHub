@@ -271,6 +271,146 @@
         return Number(n.toFixed(3)).toString();
     }
 
+    /** Chuyển đổi timestamp UTC (từ DB) sang giờ Việt Nam (UTC+7) yyyy-MM-dd HH:mm:ss */
+    function formatVietnamTime(dateStr) {
+        if (!dateStr || dateStr === '—' || dateStr === '+' || dateStr === '-') return '—';
+        var str = String(dateStr).trim();
+        var iso = str.indexOf('T') !== -1 ? str : str.replace(' ', 'T') + 'Z';
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return str;
+        var yyyy = d.getFullYear();
+        var MM = ('0' + (d.getMonth() + 1)).slice(-2);
+        var dd = ('0' + d.getDate()).slice(-2);
+        var hh = ('0' + d.getHours()).slice(-2);
+        var mm = ('0' + d.getMinutes()).slice(-2);
+        var ss = ('0' + d.getSeconds()).slice(-2);
+        return yyyy + '-' + MM + '-' + dd + ' ' + hh + ':' + mm + ':' + ss;
+    }
+
+    function formatExpiryDateDisplay(dateStr) {
+        if (!dateStr) return '';
+        var parts = String(dateStr).trim().split('-');
+        if (parts.length === 3) {
+            return parts[2] + '/' + parts[1] + '/' + parts[0];
+        }
+        return dateStr;
+    }
+
+    function renderExpiryBadge(daysUntil, expiryDate, warningDays) {
+        if (!expiryDate || daysUntil == null) {
+            return hub.el('span', {
+                class: 'ws-badge',
+                style: 'background: #f1f5f9; color: #64748b; font-weight: 500; text-transform: none;',
+                title: 'Chưa cập nhật hạn sử dụng'
+            }, ['Chưa có']);
+        }
+        var formattedDate = formatExpiryDateDisplay(expiryDate);
+        var wDays = warningDays != null ? warningDays : 7;
+        if (daysUntil < 0) {
+            var overdue = Math.abs(daysUntil);
+            return hub.el('span', {
+                class: 'ws-badge ws-badge-red',
+                style: 'text-transform: none;',
+                title: 'Đã hết hạn ngày: ' + formattedDate + ' (quá ' + overdue + ' ngày)'
+            }, [
+                overdue > 0 ? ('Hết hạn (' + overdue + ' ngày)') : 'Hết hạn'
+            ]);
+        }
+        if (daysUntil <= wDays) {
+            return hub.el('span', {
+                class: 'ws-badge ws-badge-orange',
+                style: 'text-transform: none;',
+                title: 'Hết hạn ngày: ' + formattedDate + ' (còn ' + daysUntil + ' ngày)'
+            }, [
+                'Còn ' + daysUntil + ' ngày'
+            ]);
+        }
+        return hub.el('span', {
+            class: 'ws-badge ws-badge-green',
+            style: 'text-transform: none;',
+            title: 'Hạn sử dụng đến: ' + formattedDate + (daysUntil != null ? (' (còn ' + daysUntil + ' ngày)') : '')
+        }, [
+            formattedDate
+        ]);
+    }
+
+    function showExpiryConfigModal(onSuccess) {
+        hub.api('/inventory?action=expiry-config').then(function (res) {
+            var curDays = (res && res.warningDays) || 7;
+            var daysInput = hub.el('input', {
+                type: 'number',
+                class: 'ws-input',
+                min: '1',
+                max: '365',
+                step: '1',
+                value: curDays,
+                placeholder: 'Số ngày cảnh báo trước hạn (ví dụ: 7)'
+            });
+
+            var infoBox = hub.el('div', { class: 'ws-inv-info-card' }, [
+                hub.el('div', { class: 'info-title' }, ['Cấu hình cảnh báo hạn sử dụng']),
+                hub.el('div', { class: 'info-sub', style: 'margin-top: 6px; line-height: 1.5;' }, [
+                    'Thiết lập ngưỡng số ngày trước khi mặt hàng hết hạn để hệ thống kích hoạt cảnh báo cận hạn (badge cam) và gửi thông báo nhắc nhở cho quản lý & nhân viên chi nhánh.'
+                ])
+            ]);
+
+            var cancelBtn = hub.el('button', { type: 'button', class: 'ws-inv-btn ws-inv-btn-secondary', style: 'flex: 1;' }, ['Hủy']);
+            var saveBtn = hub.el('button', { type: 'button', class: 'ws-inv-btn ws-inv-btn-primary cyan', style: 'flex: 1;' }, ['Lưu cấu hình']);
+            var footer = makeInvFooter(cancelBtn, saveBtn);
+
+            var modal = createInventoryModal({
+                title: 'Cảnh báo hạn sử dụng',
+                subtitle: 'Cấu hình số ngày cảnh báo trước khi hết hạn (Row 62)',
+                theme: 'cyan',
+                maxWidth: '480px',
+                body: [
+                    infoBox,
+                    makeInvField('Cảnh báo trước khi hết hạn (Số ngày)', daysInput, true),
+                    hub.el('small', { class: 'muted', style: 'display: block; margin-top: -6px; margin-bottom: 12px; font-size: 0.82rem;' }, [
+                        'Mặc định: 7 ngày. Khi hạn sử dụng còn ≤ số ngày này, hệ thống sẽ đánh dấu "CẬN HẠN".'
+                    ])
+                ],
+                footer: footer
+            });
+
+            cancelBtn.addEventListener('click', modal.close);
+
+            saveBtn.addEventListener('click', function () {
+                clearFieldError(daysInput);
+                var raw = (daysInput.value || '').trim();
+                var num = parseInt(raw, 10);
+                if (isNaN(num) || num < 1 || num > 365) {
+                    setFieldError(daysInput, 'Vui lòng nhập số ngày từ 1 đến 365.');
+                    return;
+                }
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'Đang lưu…';
+
+                hub.api('/inventory?action=update-expiry-config&warningDays=' + num, {
+                    method: 'POST'
+                }).then(function () {
+                    hub.notify('Cập nhật cấu hình cảnh báo cận hạn thành công (' + num + ' ngày)!', 'ok');
+                    modal.close();
+                    if (typeof onSuccess === 'function') onSuccess(num);
+                }).catch(function (err) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Lưu cấu hình';
+                    notifyError(err);
+                });
+            });
+        }).catch(notifyError);
+    }
+
+    function triggerAlertScan(branchId, onDone) {
+        hub.api('/inventory?action=generate-alerts&branchId=' + branchId, {
+            method: 'POST'
+        }).then(function (res) {
+            var total = (res && res.totalAlerts) || 0;
+            var sent = (res && res.notificationsSent) || 0;
+            hub.notify('Quét cảnh báo hoàn tất! Phát hiện ' + total + ' cảnh báo kho, đã gửi ' + sent + ' thông báo đến chuông hệ thống.', 'ok');
+            if (typeof onDone === 'function') onDone(res);
+        }).catch(notifyError);
+    }
 
     inv.notifyError = notifyError;
     inv.branchListApiPath = branchListApiPath;
@@ -291,4 +431,9 @@
     inv.getLossRatio = getLossRatio;
     inv.resolveCookingTime = resolveCookingTime;
     inv.formatDosageNumber = formatDosageNumber;
+    inv.formatVietnamTime = formatVietnamTime;
+    inv.formatExpiryDateDisplay = formatExpiryDateDisplay;
+    inv.renderExpiryBadge = renderExpiryBadge;
+    inv.showExpiryConfigModal = showExpiryConfigModal;
+    inv.triggerAlertScan = triggerAlertScan;
 })();

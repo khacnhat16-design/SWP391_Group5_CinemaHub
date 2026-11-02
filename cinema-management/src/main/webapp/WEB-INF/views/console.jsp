@@ -1,4 +1,4 @@
-﻿<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
+<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
 <%@ taglib prefix="c" uri="jakarta.tags.core" %>
 <%--
   Khu vực quản lý CinemaHub.
@@ -17,6 +17,10 @@
 <c:choose>
     <%-- ============ INTERNAL USERS (workspace theme) ============ --%>
     <c:when test="${isInternal}">
+        <%-- Topbar hiển thị pageTitle từ requestScope; mặc định 'Bảng điều khiển' cho dashboard.
+             Khi JS gọi setWorkspaceHeader(title) trong form-page.js / route() cập nhật h1
+             động theo module hiện tại nên không bị stuck ở 'Bảng điều khiển'.
+         --%>
         <c:set var="pageTitle" value="${empty requestScope.pageTitle ? 'Bảng điều khiển' : requestScope.pageTitle}" scope="request"/>
         <!doctype html>
         <html lang="vi">
@@ -25,12 +29,16 @@
             <meta name="viewport" content="width=device-width,initial-scale=1">
             <meta name="ctx" content="${ctx}">
             <meta name="user-role" content="${currentRole}">
-            <meta name="user-id" content="${sessionScope.userId}">
+            <meta name="role" content="${currentRole}">
             <meta name="csrf-token" content="${sessionScope.csrfToken}">
             <title><c:out value="${pageTitle}"/> | Khu vực quản lý CinemaHub</title>
             <link rel="stylesheet" href="${ctx}/assets/css/cinema.css">
-            <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261016-inv-accordion-1">
-            <link rel="stylesheet" href="${ctx}/assets/css/inventory.css?v=20261026-mod-6">
+            <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261031-customer-fnb-bright-1">
+            <%-- rsc.css định nghĩa .ws-input/.ws-label/.ws-btn dùng chung cho các module
+                 (review-branch, customer-points, voucher…). Không load thì các select/input
+                 mất style nền trắng → mặc định nền đen của trình duyệt. --%>
+            <link rel="stylesheet" href="${ctx}/assets/css/rsc.css?v=20261031-console-form-1">
+            <link rel="stylesheet" href="${ctx}/assets/css/inventory.css?v=20261102-unified-ui-1">
         </head>
         <body class="workspace-page">
             <%@ include file="/WEB-INF/views/layout/workspace-sidebar.jsp" %>
@@ -40,19 +48,24 @@
                     <div id="viewRoot" class="ws-server-view"><%-- Client-side JS render --%></div>
                 </div>
             </main>
-            <script src="${ctx}/assets/js/app.js?v=20261004-showtime-reminders-1" defer></script>
+            <script src="${ctx}/assets/js/app.js?v=20261102-inventory-notif-1" defer></script>
             <script src="${ctx}/assets/js/page-router.js?v=20260925-1" defer></script>
-            <script src="${ctx}/assets/js/list-page.js?v=20261003-pricing-target-1" defer></script>
-            <script src="${ctx}/assets/js/form-page.js?v=20261004-movie-author-validation-1" defer></script>
-            <script src="${ctx}/assets/js/pricing-templates.js?v=20261004-branch-pricing-templates-1" defer></script>
-            <script src="${ctx}/assets/js/modules-form-pages.js?v=20261019-hist-fix-v3" defer></script>
-            <script src="${ctx}/assets/js/console.js?v=20261017-inv-fix-1" defer></script>
-            <%-- Module Kho Hàng (Modular: Shared -> Product -> Material -> Recipe -> Main Router) --%>
-            <script src="${ctx}/assets/js/inventory/inventory-shared.js?v=20261026-mod-6" defer></script>
-            <script src="${ctx}/assets/js/inventory/inventory-product.js?v=20261026-mod-6" defer></script>
-            <script src="${ctx}/assets/js/inventory/inventory-material.js?v=20261026-mod-6" defer></script>
-            <%-- <script src="${ctx}/assets/js/inventory/inventory-recipe.js?v=20261026-mod-6" defer></script> --%>
-            <script src="${ctx}/assets/js/inventory/inventory-main.js?v=20261026-mod-6" defer></script>
+            <script src="${ctx}/assets/js/list-page.js?v=20261003-no-list-ids-1" defer></script>
+            <script src="${ctx}/assets/js/form-page.js?v=20261031-points-validation-1" defer></script>
+            <script src="${ctx}/assets/js/modules-form-pages.js?v=20261031-fnb-datetime-confirm-1" defer></script>
+            <script src="${ctx}/assets/js/modules-voucher.js?v=20261031-voucher-validation-1" defer></script>
+            <script src="${ctx}/assets/js/fnb-customer.js?v=20261031-fnb-utc-time-1" defer></script>
+            <script src="${ctx}/assets/js/pos-staff.js?v=20261031-sale-receipt-1" defer></script>
+            <script src="${ctx}/assets/js/console.js?v=20260525-fnb-refunds-1" defer></script>
+            <script src="${ctx}/assets/js/pricing-templates.js?v=20261011-manager-owner-3" defer></script>
+            <script src="${ctx}/assets/js/movie-price.js?v=20261031-admin-only-1" defer></script>
+            <script src="${ctx}/assets/js/modules-rsc.js?v=20261012-review-delete-2" defer></script>
+            <%-- Module Kho Hàng CinemaHub (Modular: Shared -> Product -> Material -> Recipe -> Main Router) --%>
+            <script src="${ctx}/assets/js/inventory/inventory-shared.js?v=20261102-unified-ui-1" defer></script>
+            <script src="${ctx}/assets/js/inventory/inventory-product.js?v=20261102-unified-ui-1" defer></script>
+            <script src="${ctx}/assets/js/inventory/inventory-material.js?v=20261102-unified-ui-1" defer></script>
+            <script src="${ctx}/assets/js/inventory/inventory-recipe.js?v=20261102-unified-ui-1" defer></script>
+            <script src="${ctx}/assets/js/inventory/inventory-main.js?v=20261102-unified-ui-1" defer></script>
         </body>
         </html>
     </c:when>
@@ -110,12 +123,14 @@
                     <div class="sidebar-backdrop" id="customerSidebarBackdrop" hidden></div>
                 </div>
                 <%@ include file="/WEB-INF/views/layout/appshell-close.jsp" %>
-                <script src="${ctx}/assets/js/app.js?v=20261004-showtime-reminders-1" defer></script>
+                <script src="${ctx}/assets/js/app.js?v=20261102-inventory-notif-1" defer></script>
                 <script src="${ctx}/assets/js/page-router.js?v=20260925-1" defer></script>
                 <script src="${ctx}/assets/js/list-page.js?v=20261003-no-list-ids-1" defer></script>
-                <script src="${ctx}/assets/js/form-page.js?v=20261004-movie-author-validation-1" defer></script>
-                <script src="${ctx}/assets/js/modules-form-pages.js?v=20261019-hist-fix-v4" defer></script>
-                <script src="${ctx}/assets/js/console.js?v=20261004-sidebar-active-1" defer></script>
+                <script src="${ctx}/assets/js/form-page.js?v=20261031-points-validation-1" defer></script>
+                <script src="${ctx}/assets/js/modules-form-pages.js?v=20261031-fnb-datetime-confirm-1" defer></script>
+                <script src="${ctx}/assets/js/fnb-customer.js?v=20261031-fnb-utc-time-1" defer></script>
+                <script src="${ctx}/assets/js/console.js?v=20260525-fnb-refunds-1" defer></script>
+                <script src="${ctx}/assets/js/modules-rsc.js?v=20261012-review-delete-2" defer></script>
                 <%@ include file="/WEB-INF/views/layout/footer.jsp" %>
             </c:otherwise>
         </c:choose>

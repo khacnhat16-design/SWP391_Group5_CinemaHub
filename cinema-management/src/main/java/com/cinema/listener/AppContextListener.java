@@ -96,12 +96,33 @@ public class AppContextListener implements ServletContextListener {
         // hold + ticket PENDING, không cần PricingService/PaymentService.
         BookingService bookingService = new BookingService(new SeatHoldDAO(), new TicketDAO());
 
+        com.cinema.service.inventory.InventoryService invAlertService =
+                new com.cinema.service.inventory.InventoryService(
+                        new com.cinema.dao.inventory.InventoryDAO(),
+                        new com.cinema.dao.inventory.ProductDAO(),
+                        branchDao,
+                        notificationDao
+                );
+
         // Danh sách task định kỳ mà ExpiryScheduler sẽ chạy mỗi 30s. Mỗi task
         // best-effort: nếu fail không ảnh hưởng task khác.
         return List.of(
                 new ExpiryScheduler.NamedTask("hold-and-ticket-expiry", bookingService::sweepExpiredHolds),
                 new ExpiryScheduler.NamedTask("showtime-end", showtimeService::endElapsedShowtimes),
-                new ExpiryScheduler.NamedTask("showtime-reminder", () -> notificationService.sendShowtimeReminders())
+                new ExpiryScheduler.NamedTask("showtime-reminder", () -> notificationService.sendShowtimeReminders()),
+                new ExpiryScheduler.NamedTask("inventory-alert-sweep", () -> {
+                    try {
+                        List<com.cinema.model.branch.Branch> branches = branchDao.findAllActive();
+                        if (branches != null) {
+                            for (com.cinema.model.branch.Branch b : branches) {
+                                if (b.id() != null) {
+                                    invAlertService.generateAlertNotifications(null, b.id());
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {
+                    }
+                })
         );
     }
 }

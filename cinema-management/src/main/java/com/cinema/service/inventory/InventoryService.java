@@ -4,16 +4,18 @@ import com.cinema.common.ServiceException;
 import com.cinema.dao.branch.BranchDAO;
 import com.cinema.dao.inventory.InventoryDAO;
 import com.cinema.dao.inventory.ProductDAO;
+import com.cinema.dao.notification.NotificationDAO;
 import com.cinema.model.branch.Branch;
 import com.cinema.model.inventory.Product;
+import com.cinema.model.notification.Notification;
 import com.cinema.util.TransactionTemplate;
 
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Logger;
 
 /**
- * Service quản lý tồn kho bắp nước, nguyên liệu thô và công thức chế biến (Giai
- * đoạn 1).
+ * Service quản lý tồn kho bắp nước, nguyên liệu thô, công thức chế biến và cảnh báo tồn kho/hạn sử dụng.
  */
 public class InventoryService {
     private static final Logger logger = Logger.getLogger(InventoryService.class.getName());
@@ -21,12 +23,18 @@ public class InventoryService {
     private final InventoryDAO inventoryDao;
     private final ProductDAO productDao;
     private final BranchDAO branchDao;
+    private final NotificationDAO notificationDao;
     private final TransactionTemplate tx = new TransactionTemplate();
 
-    public InventoryService(InventoryDAO inventoryDao, ProductDAO productDao, BranchDAO branchDao) {
+    public InventoryService(InventoryDAO inventoryDao, ProductDAO productDao, BranchDAO branchDao, NotificationDAO notificationDao) {
         this.inventoryDao = inventoryDao;
         this.productDao = productDao;
         this.branchDao = branchDao;
+        this.notificationDao = notificationDao != null ? notificationDao : new NotificationDAO();
+    }
+
+    public InventoryService(InventoryDAO inventoryDao, ProductDAO productDao, BranchDAO branchDao) {
+        this(inventoryDao, productDao, branchDao, new NotificationDAO());
     }
 
     // ================================================================
@@ -52,9 +60,9 @@ public class InventoryService {
         return inventoryDao.findAdjustments(branchId, productId);
     }
 
-    /** Nhập kho thành phẩm (M-P3). */
+    /** Nhập kho thành phẩm (M-P3) kèm ngày hết hạn và mã lô. */
     public void restock(Long actorBranchScope, long branchId, long productId,
-            int deltaQty, String reason, long actorId) throws Exception {
+            int deltaQty, String reason, String expiryDate, String batchNo, long actorId) throws Exception {
         requireBranchScope(actorBranchScope, branchId);
         if (deltaQty <= 0) {
             throw new ServiceException.Validation("Số lượng nhập kho phải là số nguyên dương");
@@ -64,15 +72,21 @@ public class InventoryService {
 
         String effectiveReason = (reason == null || reason.isBlank()) ? "NHẬP KHO" : reason.trim();
         tx.executeVoid(conn -> {
-            inventoryDao.restock(conn, branchId, productId, deltaQty);
-            inventoryDao.insertAdjustment(conn, branchId, productId, deltaQty, effectiveReason, actorId);
+            inventoryDao.restock(conn, branchId, productId, deltaQty, expiryDate, batchNo);
+            inventoryDao.insertAdjustment(conn, branchId, productId, deltaQty, effectiveReason, expiryDate, batchNo, actorId);
         });
         logger.info("Restocked product " + productId + " +" + deltaQty + " at branch " + branchId);
+        triggerAsyncAlertCheck(branchId);
     }
 
-    /** Điều chỉnh kiểm kê tồn kho thành phẩm (M-P4). */
-    public void adjust(Long actorBranchScope, long branchId, long productId,
+    public void restock(Long actorBranchScope, long branchId, long productId,
             int deltaQty, String reason, long actorId) throws Exception {
+        restock(actorBranchScope, branchId, productId, deltaQty, reason, null, null, actorId);
+    }
+
+    /** Điều chỉnh kiểm kê tồn kho thành phẩm (M-P4) kèm ngày hết hạn và mã lô. */
+    public void adjust(Long actorBranchScope, long branchId, long productId,
+            int deltaQty, String reason, String expiryDate, String batchNo, long actorId) throws Exception {
         requireBranchScope(actorBranchScope, branchId);
         if (deltaQty == 0) {
             throw new ServiceException.Validation("Chênh lệch điều chỉnh phải khác 0");
@@ -84,17 +98,35 @@ public class InventoryService {
 
         tx.executeVoid(conn -> {
             if (deltaQty > 0) {
-                inventoryDao.restock(conn, branchId, productId, deltaQty);
+                inventoryDao.restock(conn, branchId, productId, deltaQty, expiryDate, batchNo);
             } else {
                 if (!inventoryDao.tryDeduct(conn, branchId, productId, -deltaQty)) {
                     throw new ServiceException.BusinessRule("INVENTORY_INSUFFICIENT",
                             "Điều chỉnh giảm vượt quá tồn kho hiện tại (không được âm kho)");
                 }
             }
-            inventoryDao.insertAdjustment(conn, branchId, productId, deltaQty, reason.trim(), actorId);
+            inventoryDao.insertAdjustment(conn, branchId, productId, deltaQty, reason.trim(), expiryDate, batchNo, actorId);
         });
         logger.info("Adjusted stock product " + productId + " " + (deltaQty > 0 ? "+" : "")
                 + deltaQty + " at branch " + branchId + " (" + reason + ")");
+        triggerAsyncAlertCheck(branchId);
+    }
+
+    public void adjust(Long actorBranchScope, long branchId, long productId,
+            int deltaQty, String reason, long actorId) throws Exception {
+        adjust(actorBranchScope, branchId, productId, deltaQty, reason, null, null, actorId);
+    }
+
+    /** Cấu hình ngưỡng tồn kho tối thiểu cho sản phẩm (Row 60: Configure low-stock thresholds). */
+    public void updateProductMinStock(Long actorBranchScope, long branchId, long productId, int minStock) throws Exception {
+        requireBranchScope(actorBranchScope, branchId);
+        if (minStock < 0) {
+            throw new ServiceException.Validation("Định mức tồn tối thiểu không được âm");
+        }
+        requireActiveProduct(productId);
+        inventoryDao.updateProductMinStock(branchId, productId, minStock);
+        logger.info("Updated min stock for product " + productId + " at branch " + branchId + " to " + minStock);
+        triggerAsyncAlertCheck(branchId);
     }
 
     // ================================================================
@@ -115,10 +147,11 @@ public class InventoryService {
         return inventoryDao.findMaterialAdjustments(branchId, materialId);
     }
 
-    /** Nhập kho nguyên liệu (M-R3). deltaQty > 0. */
+    /** Nhập kho nguyên liệu (M-R3) kèm ngày hết hạn và mã lô. deltaQty > 0. */
     public void restockMaterial(Long actorBranchScope, long branchId, long materialId,
             double deltaQty, String reason, Long costPrice,
             String supplier, String poNumber, String note,
+            String expiryDate, String batchNo,
             long actorId) throws Exception {
         requireBranchScope(actorBranchScope, branchId);
         if (deltaQty <= 0) {
@@ -129,14 +162,23 @@ public class InventoryService {
         String effectiveReason = (reason == null || reason.isBlank()) ? "NHAP_HANG_TU_NCC" : reason.trim();
         tx.executeVoid(conn -> {
             inventoryDao.restockMaterial(conn, branchId, materialId, deltaQty, effectiveReason,
-                    costPrice, supplier, poNumber, note, actorId);
+                    costPrice, supplier, poNumber, note, expiryDate, batchNo, actorId);
         });
         logger.info("Restocked material " + materialId + " +" + deltaQty + " at branch " + branchId);
+        triggerAsyncAlertCheck(branchId);
     }
 
-    /** Điều chỉnh tồn kho nguyên liệu (M-R5). */
+    public void restockMaterial(Long actorBranchScope, long branchId, long materialId,
+            double deltaQty, String reason, Long costPrice,
+            String supplier, String poNumber, String note,
+            long actorId) throws Exception {
+        restockMaterial(actorBranchScope, branchId, materialId, deltaQty, reason, costPrice, supplier, poNumber, note, null, null, actorId);
+    }
+
+    /** Điều chỉnh tồn kho nguyên liệu (M-R5) kèm ngày hết hạn và mã lô. */
     public void adjustMaterial(Long actorBranchScope, long branchId, long materialId,
             double deltaQty, String reason, String note,
+            String expiryDate, String batchNo,
             long actorId) throws Exception {
         requireBranchScope(actorBranchScope, branchId);
         if (deltaQty == 0) {
@@ -148,7 +190,7 @@ public class InventoryService {
 
         tx.executeVoid(conn -> {
             boolean ok = inventoryDao.adjustMaterial(conn, branchId, materialId, deltaQty, reason.trim(), note,
-                    actorId);
+                    expiryDate, batchNo, actorId);
             if (!ok) {
                 throw new ServiceException.BusinessRule("INVENTORY_INSUFFICIENT",
                         "Điều chỉnh giảm vượt quá tồn kho hiện tại (không được âm kho)");
@@ -156,10 +198,17 @@ public class InventoryService {
         });
         logger.info("Adjusted material stock " + materialId + " " + (deltaQty > 0 ? "+" : "")
                 + deltaQty + " at branch " + branchId + " (" + reason + ")");
+        triggerAsyncAlertCheck(branchId);
+    }
+
+    public void adjustMaterial(Long actorBranchScope, long branchId, long materialId,
+            double deltaQty, String reason, String note,
+            long actorId) throws Exception {
+        adjustMaterial(actorBranchScope, branchId, materialId, deltaQty, reason, note, null, null, actorId);
     }
 
     // ================================================================
-    // HELPER GUARDS
+    // HELPER GUARDS & CONFIGURATIONS
     // ================================================================
 
     private void requireBranchScope(Long actorBranchScope, long targetBranchId) {
@@ -188,18 +237,91 @@ public class InventoryService {
     }
 
     /**
-     * Cáº¥u hÃ¬nh ngÆ°á»¡ng tá»“n kho tá»‘i thiá»ƒu (DÃ²ng 78: Configure low-stock
-     * thresholds).
+     * Cấu hình ngưỡng tồn kho tối thiểu cho nguyên liệu (Row 60: Configure low-stock thresholds).
      */
     public void updateMaterialMinStock(Long actorBranchScope, long materialId, double minStock) throws Exception {
         if (minStock < 0) {
-            throw new ServiceException.Validation("Äá»‹nh má»©c tá»“n tá»‘i thiá»ƒu khÃ´ng Ä‘Æ°á»£c Ã¢m");
+            throw new ServiceException.Validation("Định mức tồn tối thiểu không được âm");
         }
         boolean ok = inventoryDao.updateMaterialMinStock(materialId, minStock);
         if (!ok) {
-            throw new ServiceException.NotFound("NguyÃªn liá»‡u khÃ´ng tá»“n táº¡i");
+            throw new ServiceException.NotFound("Nguyên liệu không tồn tại");
         }
         logger.info("Updated min stock for material " + materialId + " to " + minStock);
+        triggerAsyncAlertCheck(actorBranchScope != null ? actorBranchScope : 1L);
+    }
+
+    /** Lấy cấu hình số ngày cảnh báo cận hạn (Row 62). */
+    public int getExpiryWarningDays() throws Exception {
+        return inventoryDao.getExpiryWarningDays();
+    }
+
+    /** Cấu hình số ngày cảnh báo cận hạn (Row 62: Configure expiry date alerts). */
+    public void updateExpiryWarningDays(int days, long actorId) throws Exception {
+        if (days < 1 || days > 365) {
+            throw new ServiceException.Validation("Số ngày cảnh báo hạn sử dụng phải từ 1 đến 365 ngày");
+        }
+        inventoryDao.updateExpiryWarningDays(days, actorId);
+        logger.info("Updated expiry warning days to " + days + " by user " + actorId);
+    }
+
+    /** Lấy toàn bộ cảnh báo tồn kho và hạn sử dụng của chi nhánh (Row 61, 63, 64). */
+    public List<InventoryDAO.InventoryAlertItem> getAlerts(Long actorBranchScope, long branchId) throws Exception {
+        requireBranchScope(actorBranchScope, branchId);
+        int warningDays = inventoryDao.getExpiryWarningDays();
+        return inventoryDao.findLowStockAndExpiryAlerts(branchId, warningDays);
+    }
+
+    /**
+     * Quét và tạo thông báo hệ thống cho Quản lý & Nhân viên chi nhánh (Row 61 & 63: Generate low-stock & expiry alerts).
+     */
+    public Map<String, Object> generateAlertNotifications(Long actorBranchScope, long branchId) throws Exception {
+        if (actorBranchScope != null && actorBranchScope != branchId) {
+            throw new ServiceException.Forbidden("Vi phạm phạm vi chi nhánh");
+        }
+        int warningDays = inventoryDao.getExpiryWarningDays();
+        List<InventoryDAO.InventoryAlertItem> alerts = inventoryDao.findLowStockAndExpiryAlerts(branchId, warningDays);
+        List<Long> staffIds = inventoryDao.findStaffUserIdsForBranch(branchId);
+
+        int sentCount = 0;
+        for (InventoryDAO.InventoryAlertItem alert : alerts) {
+            String notifType = (alert.alertType().equals("EXPIRED") || alert.alertType().equals("EXPIRING_SOON"))
+                    ? Notification.TYPE_INVENTORY_EXPIRY_WARNING
+                    : Notification.TYPE_INVENTORY_LOW_STOCK;
+            String title = (alert.alertType().equals("EXPIRED"))
+                    ? "Cảnh báo hết hạn: " + alert.itemName()
+                    : (alert.alertType().equals("EXPIRING_SOON"))
+                    ? "Cảnh báo cận hạn: " + alert.itemName()
+                    : "Cảnh báo tồn kho: " + alert.itemName();
+
+            for (Long userId : staffIds) {
+                try {
+                    if (!inventoryDao.hasRecentNotification(userId, notifType, alert.itemName())) {
+                        notificationDao.insert(null, userId, notifType, title, alert.message());
+                        sentCount++;
+                    }
+                } catch (Exception e) {
+                    logger.warning("Không thể gửi thông báo kho cho user " + userId + ": " + e.getMessage());
+                }
+            }
+        }
+
+        return Map.of(
+                "totalAlerts", alerts.size(),
+                "notificationsSent", sentCount,
+                "warningDays", warningDays,
+                "alerts", alerts
+        );
+    }
+
+    private void triggerAsyncAlertCheck(long branchId) {
+        new Thread(() -> {
+            try {
+                generateAlertNotifications(null, branchId);
+            } catch (Exception e) {
+                logger.warning("Lỗi tự động quét cảnh báo kho: " + e.getMessage());
+            }
+        }).start();
     }
 
     // ================================================================
@@ -323,5 +445,6 @@ public class InventoryService {
         });
 
         logger.info("Successfully produced " + quantity + " of product " + productId + " at branch " + branchId);
+        triggerAsyncAlertCheck(branchId);
     }
 }

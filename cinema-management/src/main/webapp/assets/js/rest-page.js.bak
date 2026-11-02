@@ -1,0 +1,1658 @@
+﻿/**
+ * rest-page.js — Renderer cho các trang danh mục presentation-only.
+ *
+ * Dùng chung bởi WEB-INF/views/{branch,movie,screen,report,shift,booking,
+ * concession,notification}/list.jsp. Mỗi trang chá»‰ là shell (header + app shell +
+ * footer); nội dung được dựng ở đây bằng cách gọi REST API có sẵn.
+ *
+ * Trang khai báo: <meta name="rest-page" content="{domain}">
+ * Không chứa business logic — chá»‰ trình bày dữ liá»‡u từ controller.
+ */
+(function () {
+    'use strict';
+
+    const hub = window.CinemaHub;
+    if (!hub) return;
+
+    const viewRoot = document.getElementById('viewRoot');
+    // meta chá»‰ có trên trang danh mục standalone; trên /console thì null
+    // (console.js tự gọi PAGES[module]() — vẫn cần export bên dưới).
+    const meta = document.querySelector('meta[name="rest-page"]');
+    if (!viewRoot) return;
+
+    const el = hub.el;
+    const query = new URLSearchParams(window.location.search);
+
+    // ---------- helpers ----------
+
+    function card(title, sub) {
+        const box = el('section', { class: 'app-card' });
+        if (title) box.appendChild(el('h2', {}, [title]));
+        if (sub) box.appendChild(el('p', { class: 'sub' }, [sub]));
+        return box;
+    }
+
+    function empty(title, message, actionLabel, actionHref) {
+        const box = el('div', { class: 'empty-state' }, [
+            el('h3', {}, [title]),
+            el('p', {}, [message])
+        ]);
+        if (actionLabel) box.appendChild(el('a', { class: 'btn', href: actionHref || '#' }, [actionLabel]));
+        return box;
+    }
+
+    function flashErr(message) {
+        return el('div', { class: 'flash flash-err', role: 'alert' }, [message || 'Không tải được dữ liá»‡u.']);
+    }
+
+    function text(value, fallback) {
+        return value === null || value === undefined || value === '' ? (fallback || '—') : String(value);
+    }
+
+    function actionButton(label, className, handler) {
+        const button = el('button', { class: 'btn small ' + (className || 'secondary'), type: 'button' }, [label]);
+        button.addEventListener('click', handler);
+        return button;
+    }
+
+    function openForm(title, fields, submitLabel, onSubmit) {
+        const modal = el('div', { class: 'modal' });
+        const panel = el('div', { class: 'modal-panel', role: 'dialog', 'aria-modal': 'true' });
+        const form = el('form', {});
+        const body = el('div', { class: 'modal-body' });
+        const footer = el('div', { class: 'modal-foot' });
+        const close = function () { modal.remove(); };
+
+        panel.appendChild(el('div', { class: 'modal-head' }, [
+            el('h2', {}, [title]),
+            actionButton('×', 'secondary modal-x', close)
+        ]));
+        fields.forEach(function (field) {
+            const control = field.type === 'select'
+                ? el('select', { name: field.name, required: field.required !== false },
+                    (field.options || []).map(function (option) {
+                        const value = typeof option === 'string' ? option : option.value;
+                        const label = typeof option === 'string' ? option : option.label;
+                        return el('option', { value: value, selected: String(value) === String(field.value || '') }, [label]);
+                    }))
+                : el('input', {
+                    name: field.name,
+                    type: field.type || 'text',
+                    value: field.value == null ? '' : field.value,
+                    required: field.required !== false,
+                    min: field.min,
+                    step: field.step
+                });
+            body.appendChild(el('label', {}, [el('span', {}, [field.label]), control]));
+        });
+        footer.appendChild(actionButton('Hủy', 'secondary', close));
+        footer.appendChild(el('button', { class: 'btn', type: 'submit' }, [submitLabel || 'Lưu']));
+        form.appendChild(body);
+        form.appendChild(footer);
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const submit = form.querySelector('button[type="submit"]');
+            submit.disabled = true;
+            try {
+                await onSubmit(Object.fromEntries(new FormData(form)));
+                close();
+                hub.notify('Đã lưu thay đổi.', 'ok');
+            } catch (error) {
+                hub.notify(error.message || 'Không thá»ƒ lưu dữ liá»‡u.', 'err');
+                submit.disabled = false;
+            }
+        });
+        panel.appendChild(form);
+        modal.appendChild(el('div', { class: 'modal-backdrop' }));
+        modal.appendChild(panel);
+        modal.querySelector('.modal-backdrop').addEventListener('click', close);
+        document.body.appendChild(modal);
+    }
+
+    function confirmAction(message, action) {
+        if (window.confirm(message)) return action();
+        return Promise.resolve();
+    }
+
+    window.CinemaHubForms = {
+        openForm: openForm,
+        actionButton: actionButton,
+        confirmAction: confirmAction
+    };
+
+    /** Dựng card + vùng bảng, gọi loader, xử lý empty/error/busy nhất quán. */
+    async function renderTable(title, sub, loader, addAction) {
+        const box = card(title, sub);
+        if (addAction) {
+            box.appendChild(el('div', { class: 'toolbar table-toolbar' }, [
+                actionButton('Thêm mới', '', addAction)
+            ]));
+        }
+        const region = el('div', { class: 'table-wrap' });
+        box.appendChild(region);
+        viewRoot.replaceChildren(box);
+
+        region.replaceChildren(el('div', { class: 'loading-state', role: 'status' }, [
+            el('span', { class: 'spinner', 'aria-hidden': 'true' }),
+            el('span', {}, ['Đang tải dữ liá»‡u…'])
+        ]));
+
+        try {
+            const node = await loader(region);
+            region.replaceChildren(node);
+        } catch (e) {
+            region.replaceChildren(flashErr(e.message));
+        }
+    }
+
+    // ---------- pages ----------
+
+    async function pageBranch() {
+        await renderTable('Chi nhánh', 'Danh mục chi nhánh toàn há»‡ thống.', async function () {
+            const list = await hub.api('/branch');
+            if (!list || !list.length) return empty('Chưa có chi nhánh', 'Há»‡ thống chưa được cấu hình chi nhánh nào.');
+            return hub.table(
+                [{ label: 'ID' }, { label: 'Tên' }, { label: 'Đá»‹a chá»‰' }, { label: 'Điá»‡n thoại' }, { label: 'Trạng thái' }, { label: 'Thao tác' }],
+                list,
+                function (b) {
+                    return el('tr', {}, [
+                        el('td', {}, [text(b.id)]),
+                        el('td', {}, [text(b.name)]),
+                        el('td', {}, [text(b.address)]),
+                        el('td', {}, [text(b.phone)]),
+                        el('td', {}, [hub.statusBadge(text(b.status, 'UNKNOWN'))]),
+                        el('td', { class: 'row-actions' }, [
+                            actionButton('Sửa', 'secondary', function () {
+                                openForm('Sửa chi nhánh', [
+                                    { name: 'name', label: 'Tên chi nhánh', value: b.name },
+                                    { name: 'address', label: 'Đá»‹a chá»‰', value: b.address },
+                                    { name: 'phone', label: 'Điá»‡n thoại', value: b.phone, type: 'tel' }
+                                ], 'Lưu', async function (data) {
+                                    await hub.api('/branch/' + b.id, { method: 'PUT', body: data });
+                                    await pageBranch();
+                                });
+                            }),
+                            b.status === 'ACTIVE' ? actionButton('Ngừng', 'danger', function () {
+                                confirmAction('Ngừng hoạt động chi nhánh này?', async function () {
+                                    await hub.api('/branch/' + b.id, { method: 'PUT', body: { action: 'deactivate' } });
+                                    await pageBranch();
+                                });
+                            }) : null
+                        ].filter(Boolean))
+                    ]);
+                }
+            );
+        }, function () {
+            openForm('Thêm chi nhánh', [
+                { name: 'name', label: 'Tên chi nhánh' },
+                { name: 'address', label: 'Đá»‹a chá»‰' },
+                { name: 'phone', label: 'Điá»‡n thoại', type: 'tel' }
+            ], 'Tạo chi nhánh', async function (data) {
+                await hub.api('/branch', { method: 'POST', body: data });
+                await pageBranch();
+            });
+        });
+    }
+
+    // ---------- movie form helpers ----------
+
+    /**
+     * Opens the movie create/edit form with a proper file-picker + preview for the poster.
+     *
+     * @param {string} title  Dialog title
+     * @param {object|null} movie  Existing movie data (null = create mode)
+     * @param {Function} onSubmit  Called with {title,…,posterUrl} on success
+     */
+    function openMovieForm(title, movie, onSubmit) {
+        const modal = el('div', {class: 'modal'});
+        const panel = el('div', {class: 'modal-panel', role: 'dialog', 'aria-modal': 'true'});
+        const form = el('form', {});
+        const body = el('div', {class: 'modal-body'});
+        const footer = el('div', {class: 'modal-foot'});
+        const close = function () { modal.remove(); };
+
+        panel.appendChild(el('div', {class: 'modal-head'}, [
+            el('h2', {}, [title]),
+            actionButton('×', 'secondary modal-x', close)
+        ]));
+        footer.appendChild(actionButton('Hủy', 'secondary', close));
+
+        // ── standard fields ────────────────────────────────────────────────────
+        const fields = [
+            {name: 'title',        label: 'Tên phim',           value: movie?.title || '',        type: 'text',     required: true},
+            {name: 'durationMin',  label: 'Thời lượng (phút)', value: movie?.durationMin || '', type: 'number',   min: 1},
+            {name: 'genre',         label: 'Thá»ƒ loại',           value: movie?.genre || ''},
+            {name: 'rating',        label: 'Giới hạn tuổi',     value: movie?.rating || '',      type: 'select',
+                options: ['P', 'C13', 'C16', 'C18']},
+            {name: 'releaseDate',  label: 'Ngày phát hành',   value: movie?.releaseDate || '',  type: 'date'},
+            {name: 'endDate',       label: 'Ngày kết thúc',    value: movie?.endDate || '',      type: 'date'},
+            {name: 'description',   label: 'Mô tả',             value: movie?.description || '',  required: false},
+            {name: 'status',        label: 'Trạng thái',        value: movie?.status || 'DRAFT',  type: 'select',
+                options: ['DRAFT', 'PUBLISHED', 'ARCHIVED']}
+        ];
+
+        fields.forEach(function (f) {
+            const control = f.type === 'select'
+                ? el('select', {name: f.name, required: f.required !== false ? 'required' : undefined},
+                    (f.options || []).map(function (opt) {
+                        const v = typeof opt === 'string' ? opt : opt.value;
+                        const l = typeof opt === 'string' ? opt : opt.label;
+                        return el('option', {value: v, selected: String(v) === String(f.value || '')}, [l]);
+                    }))
+                : el('input', {
+                    name: f.name,
+                    type: f.type || 'text',
+                    value: f.value == null ? '' : f.value,
+                    required: f.required !== false ? 'required' : undefined,
+                    min: f.min,
+                    step: f.step
+                });
+            body.appendChild(el('label', {}, [el('span', {}, [f.label]), control]));
+        });
+
+        // ── poster field ──────────────────────────────────────────────────────
+        const posterLabel = el('label', {}, [el('span', {}, ['Ảnh poster'])]);
+
+        // Hidden input that holds the final UploadThing URL
+        const posterUrlInput = el('input', {
+            type: 'hidden',
+            name: 'posterUrl',
+            value: movie?.posterUrl || ''
+        });
+
+        // File input
+        const fileInput = el('input', {
+            type: 'file',
+            accept: 'image/*',
+            class: 'poster-file-input',
+            style: 'display:block;margin-top:4px'
+        });
+
+        // Preview container
+        const previewBox = el('div', {class: 'poster-preview-box'}, []);
+        const existingUrl = movie?.posterUrl;
+        if (existingUrl) {
+            previewBox.appendChild(el('img', {
+                src: existingUrl,
+                alt: 'Poster hiá»‡n tại',
+                style: 'max-width:200px;border-radius:6px;display:block;margin-top:4px'
+            }));
+            previewBox.appendChild(el('span', {class: 'sub', style: 'display:block;margin-top:2px'}, ['Poster hiá»‡n tại']));
+        }
+
+        // Upload status
+        const uploadStatus = el('span', {class: 'sub', style: 'display:block;margin-top:4px'}, []);
+
+        // Remove button (only shown when there's a poster)
+        const removeBtn = el('button', {
+            type: 'button',
+            class: 'btn small secondary',
+            style: existingUrl || movie?.posterUrl ? 'margin-top:4px' : 'display:none'
+        }, ['Xóa ảnh']);
+        removeBtn.addEventListener('click', function () {
+            posterUrlInput.value = '';
+            fileInput.value = '';
+            previewBox.innerHTML = '';
+            removeBtn.style.display = 'none';
+        });
+
+        posterLabel.appendChild(fileInput);
+        posterLabel.appendChild(previewBox);
+        posterLabel.appendChild(uploadStatus);
+        posterLabel.appendChild(removeBtn);
+        body.appendChild(posterUrlInput);
+        body.appendChild(posterLabel);
+
+        // ── file-picker logic ────────────────────────────────────────────────
+        fileInput.addEventListener('change', async function () {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) return;
+
+            // Immediate local preview
+            const localUrl = URL.createObjectURL(file);
+            previewBox.innerHTML = '';
+            const previewImg = el('img', {
+                src: localUrl,
+                alt: 'Preview',
+                style: 'max-width:200px;border-radius:6px;display:block;margin-top:4px'
+            });
+            const previewLabel = el('span', {class: 'sub', style: 'display:block;margin-top:2px'}, ['Preview local']);
+            previewBox.appendChild(previewImg);
+            previewBox.appendChild(previewLabel);
+            removeBtn.style.display = 'none';
+
+            // Upload to /upload
+            uploadStatus.textContent = 'Đang tải ảnh lên…';
+            try {
+                const result = await hub.uploadFile(file, 'file');
+                posterUrlInput.value = result.url;
+                uploadStatus.textContent = 'Đã tải lên: ' + result.filename;
+                removeBtn.style.display = '';
+            } catch (err) {
+                uploadStatus.textContent = 'Upload thất bại: ' + (err.message || 'Lỗi không xác đá»‹nh');
+                previewBox.innerHTML = '';
+                removeBtn.style.display = 'none';
+            }
+        });
+
+        // ── submit ─────────────────────────────────────────────────────────────
+        const submitBtn = el('button', {class: 'btn', type: 'submit'}, [
+            movie ? 'Lưu' : 'Tạo phim'
+        ]);
+        footer.appendChild(submitBtn);
+
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            submitBtn.disabled = true;
+            try {
+                const fd = new FormData(form);
+                const data = Object.fromEntries(fd);
+                await onSubmit(data);
+                close();
+                hub.notify('Đã lưu thay đổi.', 'ok');
+            } catch (error) {
+                hub.notify(error.message || 'Không thá»ƒ lưu dữ liá»‡u.', 'err');
+                submitBtn.disabled = false;
+            }
+        });
+
+        form.appendChild(body);
+        form.appendChild(footer);
+        panel.appendChild(form);
+        modal.appendChild(el('div', {class: 'modal-backdrop'}));
+        modal.appendChild(panel);
+        modal.querySelector('.modal-backdrop').addEventListener('click', close);
+        document.body.appendChild(modal);
+    }
+
+    async function pageMovie() {
+        await renderTable('Danh mục phim', 'Phim trong há»‡ thống và trạng thái phát hành.', async function () {
+            const list = await hub.api('/movie');
+            if (!list || !list.length) return empty('Chưa có phim', 'Danh mục phim đang trống.');
+            return hub.table(
+                [{label: 'ID'}, {label: 'Tên phim'}, {label: 'Thá»ƒ loại'}, {label: 'Thời lượng'},
+                    {label: 'Giới hạn tuổi'}, {label: 'Trạng thái'}, {label: 'Thao tác'}],
+                list,
+                function (m) {
+                    return el('tr', {}, [
+                        el('td', {}, [text(m.id)]),
+                        el('td', {}, [text(m.title)]),
+                        el('td', {}, [text(m.genre)]),
+                        el('td', {}, [m.durationMin !== null && m.durationMin !== undefined ? m.durationMin + ' phút' : '—']),
+                        el('td', {}, [text(m.rating)]),
+                        el('td', {}, [hub.statusBadge(text(m.status, 'UNKNOWN'))]),
+                        el('td', {class: 'row-actions'}, [
+                            actionButton('Sửa', 'secondary', function () {
+                                openMovieForm('Sửa phim', m, async function (data) {
+                                    await hub.api('/movie/' + m.id, {method: 'PUT', body: data});
+                                    await pageMovie();
+                                });
+                            }),
+                            m.status !== 'ARCHIVED' ? actionButton('Lưu trữ', 'danger', function () {
+                                confirmAction('Lưu trữ phim này?', async function () {
+                                    await hub.api('/movie/' + m.id, {method: 'PUT', body: {action: 'archive'}});
+                                    await pageMovie();
+                                });
+                            }) : null
+                        ].filter(Boolean))
+                    ]);
+                }
+            );
+        }, function () {
+            openMovieForm('Thêm phim', null, async function (data) {
+                await hub.api('/movie', {method: 'POST', body: data});
+                await pageMovie();
+            });
+        });
+    }
+
+    async function pageScreen() {
+        let branchId = query.get('branchId');
+        if (!branchId && document.querySelector('meta[name="user-role"]')?.content === 'ADMIN') {
+            const branches = await hub.api('/branch');
+            branchId = branches && branches[0] ? String(branches[0].id) : '';
+        }
+        await renderTable('Phòng chiếu & sơ đồ ghế', 'Phòng chiếu thuộc phạm vi chi nhánh hiá»‡n tại.', async function () {
+            const list = await hub.api('/screen' + (branchId ? '?branchId=' + encodeURIComponent(branchId) : ''));
+            if (!list || !list.length) return empty('Chưa có phòng chiếu', 'Chi nhánh này chưa được cấu hình phòng chiếu.');
+            return hub.table(
+                [{ label: 'Mã' }, { label: 'Tên' }, { label: 'Số hàng' }, { label: 'Số cột' }, { label: 'Trạng thái' }, { label: 'Thao tác' }],
+                list,
+                function (s) {
+                    return el('tr', {}, [
+                        el('td', {}, [text(s.code)]),
+                        el('td', {}, [text(s.name)]),
+                        el('td', {}, [text(s.rowCount)]),
+                        el('td', {}, [text(s.colCount)]),
+                        el('td', {}, [hub.statusBadge(text(s.status, 'UNKNOWN'))]),
+                        el('td', { class: 'row-actions' }, [
+                            actionButton('Sửa', 'secondary', function () {
+                                openForm('Sửa phòng chiếu', [
+                                    { name: 'rowCount', label: 'Số hàng', value: s.rowCount, type: 'number', min: 1 },
+                                    { name: 'colCount', label: 'Số cột', value: s.colCount, type: 'number', min: 1 },
+                                    { name: 'vipRows', label: 'Hàng ghế VIP', value: '', required: false }
+                                ], 'Lưu', async function (data) {
+                                    await hub.api('/screen/' + s.id, { method: 'PUT', body: data });
+                                    await pageScreen();
+                                });
+                            }),
+                            s.status === 'ACTIVE' ? actionButton('Ngừng', 'danger', function () {
+                                confirmAction('Ngừng hoạt động phòng chiếu này?', async function () {
+                                    await hub.api('/screen/' + s.id, { method: 'PUT', body: { action: 'deactivate' } });
+                                    await pageScreen();
+                                });
+                            }) : null
+                        ].filter(Boolean))
+                    ]);
+                }
+            );
+        }, function () {
+            if (!branchId) {
+                hub.notify('Hãy mở phòng chiếu từ một chi nhánh cụ thá»ƒ.', 'warn');
+                return;
+            }
+            openForm('Thêm phòng chiếu', [
+                { name: 'branchId', label: 'Chi nhánh', value: branchId, type: 'hidden' },
+                { name: 'code', label: 'Mã phòng' },
+                { name: 'name', label: 'Tên phòng' },
+                { name: 'rowCount', label: 'Số hàng', type: 'number', min: 1 },
+                { name: 'colCount', label: 'Số cột', type: 'number', min: 1 },
+                { name: 'vipRows', label: 'Hàng ghế VIP', required: false }
+            ], 'Tạo phòng', async function (data) {
+                await hub.api('/screen', { method: 'POST', body: data });
+                await pageScreen();
+            });
+        });
+    }
+
+    async function pageShift() {
+        await renderTable('Ca làm viá»‡c', 'Lá»‹ch sử mở/đóng ca và đối soát tiền mặt.', async function () {
+            const list = await hub.api('/shift/history');
+            if (!list || !list.length) return empty('Chưa có ca làm viá»‡c', 'Mở ca đầu tiên đá»ƒ bắt đầu vận hành.');
+            return hub.table(
+                [{ label: 'Mã ca' }, { label: 'Mở lúc' }, { label: 'Đóng lúc' }, { label: 'Tiền há»‡ thống' }, { label: 'Tiền thực tế' }, { label: 'Trạng thái' }],
+                list,
+                function (s) {
+                    return el('tr', {}, [
+                        el('td', {}, [text(s.id)]),
+                        el('td', {}, [hub.fmtDateTime(s.openedAt)]),
+                        el('td', {}, [hub.fmtDateTime(s.closedAt)]),
+                        el('td', {}, [hub.fmtMoney(s.closingCashSystem)]),
+                        el('td', {}, [hub.fmtMoney(s.closingCashActual)]),
+                        el('td', {}, [hub.statusBadge(s.status)])
+                    ]);
+                }
+            );
+        });
+    }
+
+    async function pageBooking() {
+        await renderTable('Vé của tôi', 'Vé thuộc tài khoản đang đÄƒng nhập.', async function () {
+            const list = await hub.api('/booking/mine');
+            const renderTickets = function () {
+                return hub.table(
+                    [{ label: 'Ve / Barcode' }, { label: 'Suat chieu' }, { label: 'Ghe' },
+                        { label: 'Tong tien' }, { label: 'Trang thai' }, { label: 'Thao tac' }],
+                    list,
+                    function (t) {
+                        const code = t.ticketCode || String(t.id);
+                        const barcode = el('canvas', {class: 'ticket-barcode', width: '220', height: '82'});
+                        setTimeout(function () { hub.renderBarcode(barcode, code); }, 0);
+                        const seats = Array.isArray(t.seats)
+                            ? t.seats.map(function (s) {
+                                return s.seatCode || ((s.rowLabel || '') + (s.colNo || '')) || s.seatId;
+                            }).join(', ')
+                            : '';
+                        const showtime = [
+                            t.movieTitle || ('Showtime #' + (t.showtimeId || '')),
+                            t.branchName,
+                            t.screenName,
+                            t.startTime ? hub.fmtDateTime(t.startTime) : null
+                        ].filter(Boolean).join(' - ');
+                        const actions = [];
+                        // Vé quá ngày suất chiếu → không cho hủy (Req nghiá»‡p vụ).
+                        if (t.status === 'CONFIRMED' && !t.showtimePassed) {
+                            actions.push(actionButton('Huy ve', 'danger', async function () {
+                                await confirmAction('Huy ve ' + code + '?', async function () {
+                                    await hub.api('/booking/cancel', {method: 'POST', body: {ticketId: t.id}});
+                                    hub.notify('Da huy ve.', 'ok');
+                                    await pageBooking();
+                                });
+                            }));
+                        } else if (t.status === 'CONFIRMED' && t.showtimePassed) {
+                            actions.push(el('span', {class: 'sub muted'}, ['Qua ngay - khong the huy']));
+                        }
+                        return el('tr', { class: t.showtimePassed ? 'row-disabled' : '' }, [
+                            el('td', {}, [el('div', {class: 'ticket-code'}, [code]), barcode]),
+                            el('td', {}, [showtime || '-']),
+                            el('td', {}, [seats || '-']),
+                            el('td', {}, [hub.fmtMoney(t.totalAmount)]),
+                            el('td', {}, [hub.statusBadge(t.status)]),
+                            el('td', {class: 'row-actions'}, actions.length ? actions : [el('span', {class: 'sub'}, ['-'])])
+                        ]);
+                    }
+                );
+            };
+            if (list && list.length) return renderTickets();
+            if (!list || !list.length) {
+                return empty('Bạn chưa có vé nào', 'Đặt vé từ mục Lá»‹ch chiếu đá»ƒ bắt đầu.',
+                    'Xem lá»‹ch chiếu', hub.ctx + '/console?module=discovery');
+            }
+            return hub.table(
+                [{ label: 'Mã vé' }, { label: 'Ghế' }, { label: 'Tổng tiền' }, { label: 'Điá»ƒm' }, { label: 'Trạng thái' }],
+                list,
+                function (t) {
+                    const code = t.ticketCode || String(t.id);
+                    const barcode = el('canvas', {class: 'ticket-barcode', width: '180', height: '76'});
+                    hub.renderBarcode(barcode, code);
+                    const seats = Array.isArray(t.seats)
+                        ? t.seats.map(function (s) { return s.seatCode || s.seatLabel || s.seatId; }).join(', ')
+                        : '';
+                    return el('tr', {}, [
+                        el('td', {}, [el('div', {class: 'ticket-code'}, [code]), barcode]),
+                        el('td', {}, [seats || '—']),
+                        el('td', {}, [hub.fmtMoney(t.totalAmount)]),
+                        el('td', {}, [String(t.pointsEarned || 0)]),
+                        el('td', {}, [hub.statusBadge(t.status)])
+                    ]);
+                }
+            );
+        });
+        showPaymentResult();
+    }
+
+    function showPaymentResult() {
+        const payment = query.get('payment');
+        if (!payment) return;
+        const ticketCode = query.get('ticketCode') || '';
+        const modal = el('div', { class: 'modal' });
+        const panel = el('div', { class: 'modal-panel', role: 'dialog', 'aria-modal': 'true' });
+        const close = function () {
+            modal.remove();
+            const clean = new URL(window.location.href);
+            clean.searchParams.delete('payment');
+            clean.searchParams.delete('ticketCode');
+            window.history.replaceState(null, '', clean.pathname + clean.search);
+        };
+        const success = payment === 'success';
+        const body = el('div', { class: 'modal-body ticket-result-modal' });
+        body.appendChild(el('div', { class: 'payment-result-icon ' + (success ? 'ok' : 'failed') },
+            [success ? 'OK' : '!']));
+        body.appendChild(el('h3', {}, [
+            success ? 'Thanh toán thành công' : 'Thanh toán đã hủy hoặc thất bại'
+        ]));
+        body.appendChild(el('p', { class: 'muted' }, [
+            success
+                ? 'Vé đã được lưu trong mục Vé của tôi và sẵn sàng đá»ƒ xuất trình tại rạp.'
+                : 'Vé chưa được xác nhận. Bạn có thá»ƒ đặt lại hoặc chọn phương thức khác.'
+        ]));
+        if (success && ticketCode) {
+            const barcode = el('canvas', { class: 'ticket-barcode', width: '240', height: '82' });
+            hub.renderBarcode(barcode, ticketCode);
+            body.appendChild(el('strong', { class: 'ticket-result-code' }, [ticketCode]));
+            body.appendChild(barcode);
+        }
+        const foot = el('div', { class: 'modal-foot' }, [
+            actionButton('Đóng', 'secondary', close),
+            success ? el('a', { class: 'btn', href: hub.ctx + '/console?module=my-tickets' },
+                ['Xem vé của tôi']) : null
+        ].filter(Boolean));
+        panel.appendChild(el('div', { class: 'modal-head' }, [
+            el('h2', {}, ['Kết quả giao dá»‹ch']),
+            actionButton('×', 'secondary modal-x', close)
+        ]));
+        panel.appendChild(body);
+        panel.appendChild(foot);
+        modal.appendChild(el('div', { class: 'modal-backdrop' }));
+        modal.appendChild(panel);
+        modal.querySelector('.modal-backdrop').addEventListener('click', close);
+        document.body.appendChild(modal);
+    }
+
+    async function pageConcession() {
+        await renderTable('Đơn bắp nước của tôi', 'Đơn pre-order gắn với tài khoản đang đÄƒng nhập.', async function () {
+            const list = await hub.api('/concession/orders/mine');
+            if (!list || !list.length) return empty('Chưa có đơn', 'Bạn chưa đặt sản phẩm bắp nước nào.');
+            return hub.table(
+                [{ label: 'Mã đơn' }, { label: 'Mã nhận' }, { label: 'Tổng tiền' }, { label: 'Trạng thái' }],
+                list,
+                function (o) {
+                    return el('tr', {}, [
+                        el('td', {}, [o.orderCode || String(o.id)]),
+                        el('td', {}, [o.pickupCode || '—']),
+                        el('td', {}, [hub.fmtMoney(o.totalAmount)]),
+                        el('td', {}, [hub.statusBadge(o.status)])
+                    ]);
+                }
+            );
+        });
+    }
+
+    // =============================================================
+    // F&B Customer Modules (catalog, cart, orders)
+    // =============================================================
+
+    const CART_KEY = 'fnb_cart_v1';
+
+    function loadCart() {
+        try {
+            const raw = localStorage.getItem(CART_KEY);
+            return raw ? JSON.parse(raw) : [];
+        } catch (e) { return []; }
+    }
+
+    function saveCart(cart) {
+        localStorage.setItem(CART_KEY, JSON.stringify(cart));
+        updateCartBadge();
+    }
+
+    function updateCartBadge() {
+        const cart = loadCart();
+        const total = cart.reduce(function (s, i) { return s + (i.qty || 0); }, 0);
+        document.querySelectorAll('.fnb-cart-badge').forEach(function (el) {
+            el.textContent = total;
+            el.style.display = total > 0 ? '' : 'none';
+        });
+    }
+
+    function fmtMoney(v) {
+        if (v == null || isNaN(v)) return '0đ';
+        try { return hub.fmtMoney(v); }
+        catch (e) { return Number(v).toLocaleString('vi-VN') + 'đ'; }
+    }
+
+    function statusBadge(label) {
+        const map = {
+            'PENDING': 'orange', 'PAID': 'blue', 'READY_FOR_PICKUP': 'green',
+            'FULFILLED': 'purple', 'CANCELLED': 'red', 'EXPIRED_NO_SHOW': 'gray'
+        };
+        const tone = map[label] || 'gray';
+        return '<span class="ws-badge ws-status-pill ws-badge-' + tone + '">' + (label || '') + '</span>';
+    }
+
+    /** F&B Catalog — browse products by type, add to cart */
+    async function pageFnbCatalog() {
+        const box = el('div', { class: 'fnb-catalog' });
+        const heading = el('div', { class: 'ws-page-heading' }, [
+            el('span', { class: 'eyebrow' }, ['F&B']),
+            el('h1', {}, ['Bắp rang & Nước uống']),
+            el('p', {}, ['Chọn sản phẩm yêu thích đá»ƒ thêm vào giỏ hàng.'])
+        ]);
+        box.appendChild(heading);
+
+        // Branch selector + cart button
+        const toolbar = el('div', { class: 'ws-toolbar' });
+        const branchSel = el('select', { name: 'branchId', class: 'ws-select' }, [
+            el('option', { value: '' }, ['— Chọn chi nhánh —'])
+        ]);
+        const cartBtn = el('a', { class: 'ws-btn primary', href: hub.ctx + '/console?module=fnb-cart' }, [
+            el('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', style: 'width:16px;height:16px;margin-right:6px;vertical-align:middle' }, [
+                el('path', { d: 'M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z' }),
+                el('line', { x1: '3', y1: '6', x2: '21', y2: '6' }),
+                el('path', { d: 'M16 10a4 4 0 0 1-8 0' })
+            ]),
+            'Giỏ hàng ',
+            el('span', { class: 'fnb-cart-badge', style: 'display:none' }, ['0'])
+        ]);
+        toolbar.appendChild(branchSel);
+        toolbar.appendChild(el('div', { style: 'flex:1' }));
+        toolbar.appendChild(cartBtn);
+        box.appendChild(toolbar);
+
+        const content = el('div', { class: 'fnb-catalog-grid' });
+        box.appendChild(content);
+        viewRoot.replaceChildren(box);
+
+        // Load branches
+        try {
+            const branches = await hub.api('/branch');
+            (Array.isArray(branches) ? branches : []).forEach(function (b) {
+                branchSel.appendChild(el('option', { value: String(b.id) }, [b.name || ('#' + b.id)]));
+            });
+        } catch (e) { /* ignore */ }
+
+        // Load products
+        content.replaceChildren(el('div', { class: 'loading-state' }, [el('span', {}, ['Đang tải sản phẩm…'])]));
+        try {
+            const products = await hub.api('/concession/products');
+            if (!products || !products.length) {
+                content.replaceChildren(empty('Chưa có sản phẩm', 'Danh mục bắp nước đang trống.'));
+                return;
+            }
+
+            const TYPES = { POPCORN: '🍿 Bắp rang', DRINK: '🥤 Nước uống', COMBO: '🎁 Combo', OTHER: 'ðŸ“¦ Khác' };
+            const sorted = [...products].sort(function (a, b) {
+                const order = ['POPCORN', 'DRINK', 'COMBO', 'OTHER'];
+                return (order.indexOf(a.type) - order.indexOf(b.type)) || (a.name > b.name ? 1 : -1);
+            });
+
+            content.replaceChildren();
+            Object.keys(TYPES).forEach(function (type) {
+                const items = sorted.filter(function (p) { return p.type === type; });
+                if (!items.length) return;
+
+                const section = el('div', { class: 'fnb-type-section' });
+                section.appendChild(el('h2', { class: 'fnb-type-title' }, [TYPES[type]]));
+
+                const grid = el('div', { class: 'fnb-product-grid' });
+                items.forEach(function (p) {
+                    const card = el('div', { class: 'fnb-product-card' });
+
+                    // Image
+                    const imgWrap = el('div', { class: 'fnb-product-img' });
+                    if (p.imageUrl) {
+                        imgWrap.appendChild(el('img', { src: p.imageUrl, alt: p.name, loading: 'lazy' }));
+                    } else {
+                        imgWrap.appendChild(el('span', { class: 'fnb-product-placeholder' }, [
+                            { POPCORN: '🍿', DRINK: '🥤', COMBO: '🎁', OTHER: 'ðŸ“¦' }[p.type] || '🍿'
+                        ]));
+                    }
+                    card.appendChild(imgWrap);
+
+                    // Info
+                    const info = el('div', { class: 'fnb-product-info' });
+                    info.appendChild(el('h3', { class: 'fnb-product-name' }, [p.name || '']));
+                    if (p.description) info.appendChild(el('p', { class: 'fnb-product-desc' }, [p.description]));
+                    info.appendChild(el('div', { class: 'fnb-product-price' }, [fmtMoney(p.price)]));
+
+                    // Qty + Add to cart
+                    const cartRow = el('div', { class: 'fnb-cart-row' });
+                    const minusBtn = el('button', { class: 'ws-btn ws-btn-sm secondary', type: 'button' }, ['−']);
+                    const plusBtn = el('button', { class: 'ws-btn ws-btn-sm secondary', type: 'button' }, ['+']);
+                    const qtyInput = el('input', { type: 'number', min: '1', value: '1', class: 'ws-input ws-input-sm fnb-qty-input', style: 'width:52px;text-align:center' });
+                    const addBtn = el('button', { class: 'ws-btn ws-btn-sm primary', type: 'button' }, ['+ Giỏ']);
+
+                    minusBtn.addEventListener('click', function () {
+                        const v = parseInt(qtyInput.value) || 1;
+                        qtyInput.value = Math.max(1, v - 1);
+                    });
+                    plusBtn.addEventListener('click', function () {
+                        const v = parseInt(qtyInput.value) || 1;
+                        qtyInput.value = v + 1;
+                    });
+                    addBtn.addEventListener('click', function () {
+                        const qty = parseInt(qtyInput.value) || 1;
+                        const cart = loadCart();
+                        const existing = cart.find(function (i) { return String(i.productId) === String(p.id); });
+                        if (existing) {
+                            existing.qty += qty;
+                        } else {
+                            cart.push({
+                                productId: p.id,
+                                productName: p.name,
+                                unitPrice: p.price,
+                                imageUrl: p.imageUrl,
+                                qty: qty
+                            });
+                        }
+                        saveCart(cart);
+                        hub.notify('Đã thêm ' + p.name + ' x' + qty + ' vào giỏ hàng.', 'ok');
+                    });
+
+                    cartRow.appendChild(minusBtn);
+                    cartRow.appendChild(qtyInput);
+                    cartRow.appendChild(plusBtn);
+                    cartRow.appendChild(addBtn);
+                    info.appendChild(cartRow);
+                    card.appendChild(info);
+                    grid.appendChild(card);
+                });
+
+                section.appendChild(grid);
+                content.appendChild(section);
+            });
+            updateCartBadge();
+        } catch (e) {
+            content.replaceChildren(el('div', { class: 'flash flash-err' }, [e.message || 'Không tải được sản phẩm.']));
+        }
+    }
+
+    /** F&B Cart — review cart, select pickup, loyalty points, checkout */
+    async function pageFnbCart() {
+        const cart = loadCart();
+        const cartEmpty = !cart.length;
+
+        const box = el('div', { class: 'fnb-cart-page' });
+        const heading = el('div', { class: 'ws-page-heading' }, [
+            el('span', { class: 'eyebrow' }, ['F&B']),
+            el('h1', {}, ['Giỏ hàng bắp nước']),
+            el('p', {}, [cartEmpty ? 'Giỏ hàng đang trống.' : 'Xem lại và thanh toán đơn hàng của bạn.'])
+        ]);
+        box.appendChild(heading);
+        viewRoot.replaceChildren(box);
+
+        if (cartEmpty) {
+            box.appendChild(el('div', { class: 'ws-empty' }, [
+                el('p', {}, ['Chưa có sản phẩm nào.']),
+                el('a', { class: 'ws-btn primary', href: hub.ctx + '/console?module=fnb-catalog' }, ['Xem thực đơn'])
+            ]));
+            return;
+        }
+
+        // Two-column layout
+        const layout = el('div', { class: 'fnb-cart-layout' });
+
+        // LEFT: cart items
+        const leftCol = el('div', { class: 'fnb-cart-items' });
+
+        cart.forEach(function (item, idx) {
+            const row = el('div', { class: 'fnb-cart-item' });
+
+            // Image
+            const imgWrap = el('div', { class: 'fnb-cart-item-img' });
+            if (item.imageUrl) {
+                imgWrap.appendChild(el('img', { src: item.imageUrl, alt: item.productName, style: 'width:64px;height:64px;object-fit:cover;border-radius:8px' }));
+            } else {
+                imgWrap.appendChild(el('span', { style: 'font-size:2rem' }, ['🍿']));
+            }
+            row.appendChild(imgWrap);
+
+            // Info
+            const info = el('div', { class: 'fnb-cart-item-info' });
+            info.appendChild(el('strong', {}, [item.productName || '']));
+            info.appendChild(el('div', { class: 'sub' }, [fmtMoney(item.unitPrice) + ' / phần']));
+
+            // Qty controls
+            const qtyWrap = el('div', { class: 'fnb-qty-ctrl' });
+            const minus = el('button', { class: 'ws-btn ws-btn-sm secondary', type: 'button' }, ['−']);
+            const qtySpan = el('span', { class: 'fnb-qty-val' }, [String(item.qty)]);
+            const plus = el('button', { class: 'ws-btn ws-btn-sm secondary', type: 'button' }, ['+']);
+            const subtotal = el('div', { class: 'fnb-cart-item-total' }, [fmtMoney(item.qty * item.unitPrice)]);
+
+            minus.addEventListener('click', function () {
+                if (item.qty <= 1) {
+                    cart.splice(idx, 1);
+                    saveCart(cart);
+                    pageFnbCart();
+                } else {
+                    item.qty--;
+                    saveCart(cart);
+                    qtySpan.textContent = item.qty;
+                    subtotal.textContent = fmtMoney(item.qty * item.unitPrice);
+                    recalcTotal();
+                }
+            });
+            plus.addEventListener('click', function () {
+                item.qty++;
+                saveCart(cart);
+                qtySpan.textContent = item.qty;
+                subtotal.textContent = fmtMoney(item.qty * item.unitPrice);
+                recalcTotal();
+            });
+            qtyWrap.appendChild(minus);
+            qtyWrap.appendChild(qtySpan);
+            qtyWrap.appendChild(plus);
+            info.appendChild(qtyWrap);
+
+            // Remove button
+            const removeBtn = el('button', { class: 'ws-btn ws-btn-sm danger', type: 'button' }, ['✕ Xóa']);
+            removeBtn.addEventListener('click', function () {
+                cart.splice(idx, 1);
+                saveCart(cart);
+                pageFnbCart();
+            });
+            info.appendChild(removeBtn);
+
+            row.appendChild(info);
+            row.appendChild(el('div', { class: 'fnb-cart-item-right' }, [qtyWrap, subtotal]));
+            leftCol.appendChild(row);
+        });
+        layout.appendChild(leftCol);
+
+        // RIGHT: summary & checkout
+        const rightCol = el('div', { class: 'fnb-cart-summary' });
+
+        // Branch selector
+        const branchSection = el('div', { class: 'fnb-summary-section' });
+        branchSection.appendChild(el('label', { class: 'ws-form-label' }, ['Chi nhánh nhận hàng']));
+        const branchSel = el('select', { name: 'branchId', class: 'ws-select', id: 'fnb-branch-sel', required: 'required' }, [
+            el('option', { value: '' }, ['— Chọn chi nhánh —'])
+        ]);
+        branchSection.appendChild(branchSel);
+
+        // Loyalty points (Phase 3)
+        const pointsSection = el('div', { class: 'fnb-summary-section' });
+        let loyaltyInfo = { points: 0, tier: 'STANDARD', redemptionRate: 100, maxRedeemable: 0 };
+        try {
+            const info = await hub.api('/loyalty/info');
+            if (info) {
+                loyaltyInfo = info;
+            }
+        } catch (e) { /* ignore - guest or no loyalty */ }
+
+        const subtotalVal = cart.reduce(function (s, i) { return s + i.qty * i.unitPrice; }, 0);
+
+        const pointsRow = el('div', { class: 'fnb-points-row' }, [
+            el('span', {}, ['Điá»ƒm thưởng']),
+            el('span', { class: 'sub' }, ['(Có ' + loyaltyInfo.points + ' điá»ƒm, ' + loyaltyInfo.tier + ')'])
+        ]);
+        pointsSection.appendChild(pointsRow);
+
+        const pointsInput = el('input', {
+            type: 'number',
+            id: 'fnb-points-used',
+            name: 'pointsUsed',
+            min: '0',
+            max: String(Math.min(loyaltyInfo.points, loyaltyInfo.maxRedeemable || Math.floor(subtotalVal / loyaltyInfo.redemptionRate))),
+            value: '0',
+            class: 'ws-input',
+            placeholder: '0'
+        });
+        pointsSection.appendChild(pointsInput);
+
+        // Redemption rate display
+        const rateNote = el('div', { class: 'sub', style: 'margin-top:4px' }, [
+            'Quy đổi: ' + loyaltyInfo.redemptionRate + 'đ / điá»ƒm'
+        ]);
+        pointsSection.appendChild(rateNote);
+
+        // Max redeemable info
+        const maxRedeemable = Math.min(
+            loyaltyInfo.points,
+            Math.floor(subtotalVal / loyaltyInfo.redemptionRate)
+        );
+        const maxNote = el('div', { class: 'sub', style: 'margin-top:2px' }, [
+            'Tối đa: ' + maxRedeemable + ' điá»ƒm (-' + fmtMoney(maxRedeemable * loyaltyInfo.redemptionRate) + ')'
+        ]);
+        pointsSection.appendChild(maxNote);
+
+        rightCol.appendChild(branchSection);
+        rightCol.appendChild(pointsSection);
+
+        // Totals
+        const totalSection = el('div', { class: 'fnb-summary-section' });
+        const pointsDiscount = el('div', { id: 'fnb-points-discount', class: 'fnb-discount-row' }, ['Giảm điá»ƒm: —']);
+        const finalAmount = el('div', { class: 'fnb-final-row' }, [el('strong', {}, ['Tổng cộng: ']), el('strong', { id: 'fnb-final-amount' }, [fmtMoney(subtotalVal)])]);
+
+        totalSection.appendChild(el('div', { class: 'fnb-subtotal-row' }, ['Tạm tính: ', fmtMoney(subtotalVal)]));
+        totalSection.appendChild(pointsDiscount);
+        totalSection.appendChild(finalAmount);
+        rightCol.appendChild(totalSection);
+
+        // Load branches
+        try {
+            const branches = await hub.api('/branch');
+            (Array.isArray(branches) ? branches : []).forEach(function (b) {
+                branchSel.appendChild(el('option', { value: String(b.id) }, [b.name || ('#' + b.id)]));
+            });
+        } catch (e) { /* ignore */ }
+
+        // Payment method
+        const paySection = el('div', { class: 'fnb-summary-section' });
+        paySection.appendChild(el('label', { class: 'ws-form-label' }, ['Phương thức thanh toán']));
+        const payMethods = [
+            { value: 'WALLET', label: 'Ví CinemaHub' },
+            { value: 'VNPAY', label: 'VNPay QR / Banking' },
+            { value: 'CASH', label: 'Tiền mặt (tại quầy)' }
+        ];
+        payMethods.forEach(function (m) {
+            const label = el('label', { class: 'ws-radio-label' });
+            const radio = el('input', { type: 'radio', name: 'payMethod', value: m.value, checked: m.value === 'WALLET' ? 'checked' : undefined });
+            label.appendChild(radio);
+            label.appendChild(document.createTextNode(' ' + m.label));
+            paySection.appendChild(label);
+        });
+        rightCol.appendChild(paySection);
+
+        // Checkout button
+        const checkoutBtn = el('button', { class: 'ws-btn ws-btn-lg primary', id: 'fnb-checkout-btn', type: 'button' }, ['Đặt hàng & Thanh toán']);
+        rightCol.appendChild(checkoutBtn);
+
+        const errorMsg = el('div', { class: 'flash flash-err', style: 'display:none', id: 'fnb-checkout-err' });
+        rightCol.appendChild(errorMsg);
+
+        layout.appendChild(rightCol);
+        box.appendChild(layout);
+
+        // Recalc total function
+        function recalcTotal() {
+            const pts = parseInt(pointsInput.value) || 0;
+            const rate = loyaltyInfo.redemptionRate || 100;
+            const maxDiscount = subtotalVal;
+            const discount = Math.min(pts * rate, maxDiscount);
+            const final = subtotalVal - discount;
+
+            // Update max attribute
+            const newMax = Math.min(
+                loyaltyInfo.points,
+                Math.floor(subtotalVal / rate)
+            );
+            pointsInput.max = String(newMax);
+            if (pts > newMax) {
+                pointsInput.value = newMax;
+            }
+
+            document.getElementById('fnb-points-discount').textContent = 'Giảm điá»ƒm: -' + fmtMoney(discount);
+            document.getElementById('fnb-final-amount').textContent = fmtMoney(Math.max(0, final));
+        }
+
+        pointsInput.addEventListener('input', recalcTotal);
+
+        // Checkout
+        checkoutBtn.addEventListener('click', async function () {
+            const branchId = branchSel.value;
+            if (!branchId) {
+                hub.notify('Hãy chọn chi nhánh nhận hàng.', 'warn');
+                return;
+            }
+            errorMsg.style.display = 'none';
+            checkoutBtn.disabled = true;
+            checkoutBtn.textContent = 'Đang xử lý…';
+
+            try {
+                const lines = cart.map(function (item) {
+                    return item.productId + ':' + item.qty;
+                }).join(',');
+                const payMethod = (document.querySelector('input[name="payMethod"]:checked') || {}).value || 'WALLET';
+                const pointsUsed = parseInt(pointsInput.value) || 0;
+
+                const order = await hub.api('/concession/order', {
+                    method: 'POST',
+                    body: { branchId: branchId, lines: lines, payMethod: payMethod, pointsUsed: pointsUsed }
+                });
+
+                // Clear cart
+                saveCart([]);
+
+                // Handle payment
+                if (payMethod === 'VNPAY') {
+                    // Order created — now initiate VNPay
+                    const payResult = await hub.api('/concession/order/pay', {
+                        method: 'POST',
+                        body: { orderId: order.id, payMethod: 'VNPAY' }
+                    });
+                    if (payResult && payResult.paymentUrl) {
+                        window.location.href = payResult.paymentUrl;
+                    } else {
+                        hub.notify('Tạo đơn thành công. Đang chuyá»ƒn hướng thanh toán…', 'ok');
+                        window.location.href = hub.ctx + '/console?module=fnb-orders';
+                    }
+                } else if (payMethod === 'WALLET') {
+                    // WALLET — confirm payment directly
+                    const payResult = await hub.api('/concession/order/pay', {
+                        method: 'POST',
+                        body: { orderId: order.id, payMethod: 'WALLET' }
+                    });
+                    hub.notify('Đặt hàng thành công! Mã nhận: ' + (order.pickupCode || ''), 'ok');
+                    window.location.href = hub.ctx + '/console?module=fnb-orders';
+                } else {
+                    // CASH — order created, customer pays at counter
+                    hub.notify('Đặt hàng thành công! Mã nhận: ' + (order.pickupCode || ''), 'ok');
+                    window.location.href = hub.ctx + '/console?module=fnb-orders';
+                }
+            } catch (e) {
+                errorMsg.textContent = e.message || 'Đặt hàng thất bại.';
+                errorMsg.style.display = '';
+                checkoutBtn.disabled = false;
+                checkoutBtn.textContent = 'Đặt hàng & Thanh toán';
+            }
+        });
+    }
+
+    /** F&B Orders — customer order history with detail modal */
+    async function pageFnbOrders() {
+        const box = el('div', { class: 'fnb-orders-page' });
+        const heading = el('div', { class: 'ws-page-heading' }, [
+            el('span', { class: 'eyebrow' }, ['F&B']),
+            el('h1', {}, ['Đơn hàng bắp nước']),
+            el('p', {}, ['Lá»‹ch sử đơn hàng của bạn.'])
+        ]);
+        box.appendChild(heading);
+
+        // Filter bar
+        const toolbar = el('div', { class: 'ws-toolbar' });
+        const statusSel = el('select', { name: 'status', class: 'ws-select' }, [
+            el('option', { value: '' }, ['Tất cả trạng thái']),
+            el('option', { value: 'PENDING' }, ['Chờ thanh toán']),
+            el('option', { value: 'PAID' }, ['Đã thanh toán']),
+            el('option', { value: 'READY_FOR_PICKUP' }, ['Sẵn sàng nhận']),
+            el('option', { value: 'FULFILLED' }, ['Đã nhận']),
+            el('option', { value: 'CANCELLED' }, ['Đã hủy'])
+        ]);
+        const catalogLink = el('a', { class: 'ws-btn primary', href: hub.ctx + '/console?module=fnb-catalog' }, [
+            '🍿 Đặt thêm'
+        ]);
+        toolbar.appendChild(statusSel);
+        toolbar.appendChild(el('div', { style: 'flex:1' }));
+        toolbar.appendChild(catalogLink);
+        box.appendChild(toolbar);
+
+        const tableRegion = el('div', { class: 'ws-table-wrap' });
+        box.appendChild(tableRegion);
+        viewRoot.replaceChildren(box);
+
+        async function loadOrders() {
+            tableRegion.replaceChildren(el('div', { class: 'loading-state' }, [el('span', {}, ['Đang tải…'])]));
+            try {
+                const list = await hub.api('/concession/orders/mine');
+                const filtered = statusSel.value
+                    ? (Array.isArray(list) ? list.filter(function (o) { return o.status === statusSel.value; }) : [])
+                    : (Array.isArray(list) ? list : []);
+
+                if (!filtered.length) {
+                    tableRegion.replaceChildren(el('div', { class: 'ws-empty' }, [
+                        el('h3', {}, ['Chưa có đơn hàng']),
+                        el('p', {}, ['Đặt bắp nước từ thực đơn của chúng tôi.']),
+                        el('a', { class: 'ws-btn primary', href: hub.ctx + '/console?module=fnb-catalog' }, ['Xem thực đơn'])
+                    ]));
+                    return;
+                }
+
+                const table = el('table', { class: 'ws-table' });
+                table.innerHTML = '<thead><tr><th>Mã đơn</th><th>Chi nhánh</th><th>Tổng tiền</th><th>Trạng thái</th><th>Mã nhận</th><th>Ngày đặt</th><th></th></tr></thead>';
+                const tbody = el('tbody');
+                filtered.forEach(function (o) {
+                    const row = el('tr', {});
+
+                    const detailBtn = el('button', { class: 'ws-btn ws-btn-sm secondary', type: 'button' }, ['Chi tiết']);
+
+                    row.appendChild(el('td', {}, [o.orderCode || String(o.id)]));
+                    row.appendChild(el('td', {}, [o.branchName || ('#' + o.branchId) || '—']));
+                    row.appendChild(el('td', {}, [fmtMoney(o.totalAmount)]));
+                    row.appendChild(el('td', {}, [statusBadge(o.status)]));
+                    row.appendChild(el('td', {}, [o.pickupCode ? el('code', {}, [o.pickupCode]) : '—']));
+                    row.appendChild(el('td', {}, [o.createdAt ? hub.fmtDateTime(o.createdAt) : '—']));
+                    row.appendChild(el('td', { style: 'white-space:nowrap' }, [detailBtn]));
+
+                    detailBtn.addEventListener('click', function () { showOrderDetail(o.id); });
+                    tbody.appendChild(row);
+                });
+                table.appendChild(tbody);
+                tableRegion.replaceChildren(table);
+            } catch (e) {
+                tableRegion.replaceChildren(el('div', { class: 'flash flash-err' }, [e.message || 'Không tải được đơn hàng.']));
+            }
+        }
+
+        statusSel.addEventListener('change', loadOrders);
+        await loadOrders();
+    }
+
+    /** Show order detail in a modal */
+    async function showOrderDetail(orderId) {
+        const modal = el('div', { class: 'ws-modal' });
+        const panel = el('div', { class: 'ws-modal-panel', style: 'max-width:560px' });
+        const close = function () { modal.remove(); };
+
+        panel.appendChild(el('div', { class: 'ws-modal-head' }, [
+            el('h2', {}, ['Chi tiết đơn hàng']),
+            el('button', { class: 'ws-btn secondary ws-modal-x', type: 'button' }, ['×'])
+        ]));
+        panel.lastElementChild.querySelector('button').addEventListener('click', close);
+
+        const body = el('div', { class: 'ws-modal-body' });
+        body.appendChild(el('div', { class: 'loading-state' }, [el('span', {}, ['Đang tải…'])]));
+        panel.appendChild(body);
+
+        modal.appendChild(el('div', { class: 'ws-modal-backdrop' }));
+        modal.querySelector('.ws-modal-backdrop').addEventListener('click', close);
+        document.body.appendChild(modal);
+
+        try {
+            const order = await hub.api('/concession/orders/' + orderId);
+            body.replaceChildren();
+
+            // Status + code
+            const header = el('div', { class: 'fnb-order-detail-header' });
+            header.appendChild(el('div', { class: 'fnb-order-meta' }, [
+                el('div', {}, [el('span', { class: 'sub' }, ['Mã đơn:']), ' ', el('strong', {}, [order.orderCode || String(order.id)])]),
+                el('div', {}, [el('span', { class: 'sub' }, ['Chi nhánh:']), ' ', order.branchName || '—']),
+                el('div', {}, [statusBadge(order.status)])
+            ]));
+            body.appendChild(header);
+
+            // Pickup code with barcode
+            if (order.pickupCode) {
+                const pickupRow = el('div', { class: 'fnb-pickup-row' });
+                const barcode = el('canvas', { width: '240', height: '80' });
+                pickupRow.appendChild(el('div', { class: 'fnb-pickup-info' }, [
+                    el('div', { class: 'sub' }, ['Mã nhận hàng']),
+                    el('strong', { style: 'font-size:1.4rem;font-family:monospace;letter-spacing:0.1em' }, [order.pickupCode])
+                ]));
+                pickupRow.appendChild(barcode);
+                body.appendChild(pickupRow);
+                setTimeout(function () { try { hub.renderBarcode(barcode, order.pickupCode); } catch (e) {} }, 0);
+            }
+
+            // Lines
+            const linesSection = el('div', { class: 'fnb-order-lines' });
+            linesSection.appendChild(el('h3', {}, ['Sản phẩm']));
+            if (order.lines && order.lines.length) {
+                order.lines.forEach(function (line) {
+                    linesSection.appendChild(el('div', { class: 'fnb-order-line' }, [
+                        el('span', { style: 'flex:1' }, [line.productName]),
+                        el('span', { class: 'sub' }, ['×' + line.qty]),
+                        el('span', {}, [fmtMoney(line.subtotal)])
+                    ]));
+                });
+            }
+            body.appendChild(linesSection);
+
+            // Timeline
+            const timeline = el('div', { class: 'fnb-order-timeline' });
+            [
+                { label: 'Đặt hàng', time: order.createdAt },
+                { label: 'Thanh toán', time: order.paidAt },
+                { label: 'Sẵn sàng', time: order.fulfilledAt },
+                { label: 'Hủy', time: order.cancelledAt }
+            ].forEach(function (step) {
+                if (step.time) {
+                    timeline.appendChild(el('div', { class: 'fnb-timeline-step' }, [
+                        el('div', { class: 'fnb-timeline-dot' }),
+                        el('div', {}, [step.label]),
+                        el('div', { class: 'sub' }, [hub.fmtDateTime(step.time)])
+                    ]));
+                }
+            });
+            body.appendChild(timeline);
+
+            // Total
+            body.appendChild(el('div', { class: 'fnb-order-total' }, [
+                'Tổng cộng: ',
+                el('strong', {}, [fmtMoney(order.totalAmount)])
+            ]));
+
+            // Cancel button (only if PENDING)
+            if (order.status === 'PENDING') {
+                const cancelBtn = el('button', { class: 'ws-btn danger', type: 'button', id: 'fnb-cancel-btn' }, ['Hủy đơn hàng']);
+                cancelBtn.addEventListener('click', async function () {
+                    if (!window.confirm('Hủy đơn hàng này?')) return;
+                    cancelBtn.disabled = true;
+                    cancelBtn.textContent = 'Đang hủy…';
+                    try {
+                        await hub.api('/concession/order/cancel', { method: 'POST', body: { orderId: orderId, cancelReason: 'Khách hủy' } });
+                        hub.notify('Đơn đã được hủy.', 'ok');
+                        close();
+                        pageFnbOrders();
+                    } catch (e) {
+                        hub.notify(e.message || 'Không hủy được.', 'err');
+                        cancelBtn.disabled = false;
+                        cancelBtn.textContent = 'Hủy đơn hàng';
+                    }
+                });
+                body.appendChild(cancelBtn);
+            }
+
+        } catch (e) {
+            body.replaceChildren(el('div', { class: 'flash flash-err' }, [e.message || 'Không tải được chi tiết đơn.']));
+        }
+    }
+
+    async function pageProduct() {
+        await renderTable('Sản phẩm & combo', 'Danh mục bắp nước đang được quản lý.', async function () {
+            const list = await hub.api('/concession/products');
+            if (!list || !list.length) return empty('Chưa có sản phẩm', 'Danh mục bắp nước đang trống.');
+            return hub.table(
+                [{ label: 'ID' }, { label: 'Tên sản phẩm' }, { label: 'Loại' }, { label: 'Đơn vá»‹' }, { label: 'Giá bán' }, { label: 'Trạng thái' }, { label: 'Thao tác' }],
+                list,
+                function (p) {
+                    return el('tr', {}, [
+                        el('td', {}, [text(p.id)]),
+                        el('td', {}, [text(p.name)]),
+                        el('td', {}, [text(p.type)]),
+                        el('td', {}, [text(p.unit)]),
+                        el('td', {}, [hub.fmtMoney(p.price)]),
+                        el('td', {}, [hub.statusBadge(text(p.status, 'UNKNOWN'))]),
+                        el('td', { class: 'row-actions' }, [
+                            actionButton('Sửa giá', 'secondary', function () {
+                                openForm('Sửa sản phẩm', [
+                                    { name: 'name', label: 'Tên sản phẩm', value: p.name },
+                                    { name: 'description', label: 'Mô tả', value: p.description, required: false },
+                                    { name: 'price', label: 'Giá bán', value: p.price, type: 'number', min: 0 },
+                                    { name: 'unit', label: 'Đơn vá»‹', value: p.unit, required: false },
+                                    { name: 'type', label: 'Loại', value: p.type, type: 'select', options: ['POPCORN', 'DRINK', 'COMBO', 'OTHER'] }
+                                ], 'Lưu', async function (data) {
+                                    await hub.api('/concession/products/' + p.id, { method: 'PUT', body: data });
+                                    await pageProduct();
+                                });
+                            }),
+                            p.status === 'ACTIVE' ? actionButton('Ngừng', 'danger', function () {
+                                confirmAction('Ngừng kinh doanh sản phẩm này?', async function () {
+                                    await hub.api('/concession/products/' + p.id, { method: 'PUT', body: { action: 'deactivate' } });
+                                    await pageProduct();
+                                });
+                            }) : null
+                        ].filter(Boolean))
+                    ]);
+                }
+            );
+        }, function () {
+            openForm('Thêm sản phẩm', [
+                { name: 'name', label: 'Tên sản phẩm' },
+                { name: 'description', label: 'Mô tả', required: false },
+                { name: 'price', label: 'Giá bán', type: 'number', min: 0 },
+                { name: 'unit', label: 'Đơn vá»‹', value: 'phần', required: false },
+                { name: 'type', label: 'Loại', type: 'select', options: ['POPCORN', 'DRINK', 'COMBO', 'OTHER'] },
+                { name: 'components', label: 'Thành phần combo (ID:số lượng)', required: false }
+            ], 'Tạo sản phẩm', async function (data) {
+                if (data.type !== 'COMBO') delete data.components;
+                await hub.api('/concession/products', { method: 'POST', body: data });
+                await pageProduct();
+            });
+        });
+    }
+
+    async function pagePricing() {
+        await renderTable('Khung giá vé', 'Giá vé theo loại ghế, ngày và khung giờ.', async function () {
+            const list = await hub.api('/pricing/rules');
+            if (!list || !list.length) return empty('Chưa có khung giá', 'Há»‡ thống chưa được cấu hình khung giá vé.');
+            return hub.table(
+                [{ label: 'ID' }, { label: 'Loại ghế' }, { label: 'Ngày' }, { label: 'Khung giờ' }, { label: 'Giá vé' }, { label: 'Thao tác' }],
+                list,
+                function (r) {
+                    return el('tr', {}, [
+                        el('td', {}, [text(r.id)]),
+                        el('td', {}, [text(r.seatType)]),
+                        el('td', {}, [text(r.dayType)]),
+                        el('td', {}, [text(r.timeSlot)]),
+                        el('td', {}, [hub.fmtMoney(r.price)]),
+                        el('td', { class: 'row-actions' }, [
+                            actionButton('Sửa giá', 'secondary', function () {
+                                openForm('Sửa khung giá', [
+                                    { name: 'price', label: 'Giá vé', value: r.price, type: 'number', min: 0 }
+                                ], 'Lưu', async function (data) {
+                                    await hub.api('/pricing/rules/' + r.id, { method: 'PUT', body: data });
+                                    await pagePricing();
+                                });
+                            }),
+                            actionButton('Xóa', 'danger', function () {
+                                confirmAction('Xóa khung giá này? Vé đã bán vẫn giữ nguyên giá snapshot.', async function () {
+                                    await hub.api('/pricing/rules/' + r.id, { method: 'DELETE' });
+                                    await pagePricing();
+                                });
+                            })
+                        ])
+                    ]);
+                }
+            );
+        }, function () {
+            openForm('Thêm khung giá', [
+                { name: 'seatType', label: 'Loại ghế', type: 'select', options: ['STANDARD', 'VIP', 'COUPLE'] },
+                { name: 'dayType', label: 'Loại ngày', type: 'select', options: ['WEEKDAY', 'WEEKEND', 'HOLIDAY'] },
+                { name: 'timeSlot', label: 'Khung giờ', type: 'select', options: ['EARLY', 'DAY', 'LATE'] },
+                { name: 'price', label: 'Giá vé', type: 'number', min: 0 }
+            ], 'Tạo khung giá', async function (data) {
+                await hub.api('/pricing/rules', { method: 'POST', body: data });
+                await pagePricing();
+            });
+        });
+    }
+
+    async function pageInventory() {
+        const branches = await hub.api('/branch');
+        const selectedBranch = query.get('branchId') || (branches[0] && branches[0].id);
+        await renderTable('Tồn kho theo chi nhánh', 'Theo dõi và điều chá»‰nh số lượng sản phẩm tại từng chi nhánh.', async function () {
+            if (!selectedBranch) return empty('Chưa có chi nhánh', 'Hãy tạo chi nhánh trước khi quản lý tồn kho.');
+            const list = await hub.api('/inventory?branchId=' + encodeURIComponent(selectedBranch));
+            if (!list || !list.length) return empty('Chưa có tồn kho', 'Chi nhánh chưa có sản phẩm trong kho.');
+            return hub.table(
+                [{ label: 'Sản phẩm' }, { label: 'Loại' }, { label: 'Số lượng' }, { label: 'Giá bán' }, { label: 'Thao tác' }],
+                list,
+                function (stock) {
+                    return el('tr', {}, [
+                        el('td', {}, [text(stock.name)]),
+                        el('td', {}, [text(stock.type)]),
+                        el('td', {}, [text(stock.qty, '0') + ' ' + text(stock.unit)]),
+                        el('td', {}, [hub.fmtMoney(stock.price)]),
+                        el('td', { class: 'row-actions' }, [
+                            actionButton('Nhập kho', 'secondary', function () {
+                                openForm('Nhập kho', [
+                                    { name: 'productId', label: 'Sản phẩm', value: stock.productId, type: 'hidden' },
+                                    { name: 'branchId', label: 'Chi nhánh', value: selectedBranch, type: 'hidden' },
+                                    { name: 'quantity', label: 'Số lượng nhập', type: 'number', min: 1 },
+                                    { name: 'reason', label: 'Lý do', value: 'Nhập kho' }
+                                ], 'Lưu', async function (data) {
+                                    await hub.api('/inventory', { method: 'POST', body: data });
+                                    await pageInventory();
+                                });
+                            }),
+                            actionButton('Điều chá»‰nh', 'danger', function () {
+                                openForm('Điều chá»‰nh tồn kho', [
+                                    { name: 'productId', label: 'Sản phẩm', value: stock.productId, type: 'hidden' },
+                                    { name: 'branchId', label: 'Chi nhánh', value: selectedBranch, type: 'hidden' },
+                                    { name: 'quantity', label: 'Chênh lá»‡ch (+/-)', type: 'number', step: 1 },
+                                    { name: 'reason', label: 'Lý do', value: 'Kiá»ƒm kê' }
+                                ], 'Lưu', async function (data) {
+                                    data.action = 'adjust';
+                                    await hub.api('/inventory', { method: 'POST', body: data });
+                                    await pageInventory();
+                                });
+                            })
+                        ])
+                    ]);
+                }
+            );
+        });
+    }
+
+    async function pageNotification() {
+        const box = card('Thông báo', 'Thông báo in-app của tài khoản đang đÄƒng nhập.');
+        const region = el('div', { class: 'table-wrap' });
+        box.appendChild(region);
+        viewRoot.replaceChildren(box);
+
+        region.replaceChildren(el('div', { class: 'loading-state', role: 'status' }, [
+            el('span', { class: 'spinner', 'aria-hidden': 'true' }),
+            el('span', {}, ['Đang tải dữ liá»‡u…'])
+        ]));
+
+        try {
+            const data = await hub.api('/notification');
+            const list = (data && data.notifications) || [];
+            const markAll = el('button', {
+                class: 'btn secondary small', type: 'button',
+                onclick: async function () {
+                    try {
+                        await hub.api('/notification/read-all', { method: 'POST' });
+                        hub.notify('Đã đánh dấu tất cả là đã đọc.', 'ok');
+                        pageNotification();
+                    } catch (e) { hub.notify(e.message, 'err'); }
+                }
+            }, ['Đánh dấu tất cả đã đọc']);
+
+            if (!list.length) {
+                region.replaceChildren(empty('Không có thông báo', 'Bạn sẽ nhận thông báo khi có hoạt động mới.'));
+                return;
+            }
+
+            region.replaceChildren(
+                el('div', { class: 'toolbar' }, [markAll]),
+                hub.table(
+                    [{ label: 'Nội dung' }, { label: 'Thời điá»ƒm' }, { label: 'Trạng thái' }],
+                    list,
+                    function (n) {
+                        return el('tr', {}, [
+                            el('td', {}, [n.body || n.title || '—']),
+                            el('td', {}, [hub.fmtDateTime(n.createdAt)]),
+                            el('td', {}, [hub.statusBadge(n.read ? 'used' : 'pending')])
+                        ]);
+                    }
+                )
+            );
+        } catch (e) {
+            region.replaceChildren(flashErr(e.message));
+        }
+    }
+
+    async function pageShowtime() {
+        const box = card('Lá»‹ch chiếu', 'Danh sách suất chiếu trong phạm vi chi nhánh.');
+        const region = el('div', { class: 'table-wrap' });
+        box.appendChild(region);
+        viewRoot.replaceChildren(box);
+
+        // Lọc theo chi nhánh + phim + ngày + trạng thái
+        const toolbar = el('div', { class: 'toolbar' });
+        const branchSel = el('select', { name: 'branchId' }, [el('option', { value: '' }, ['Tất cả chi nhánh'])]);
+        const movieSel = el('select', { name: 'movieId' }, [el('option', { value: '' }, ['Tất cả phim'])]);
+        const dateInput = el('input', { type: 'date', name: 'date', value: query.get('date') || '' });
+        const statusSel = el('select', { name: 'status' }, [
+            el('option', { value: '' }, ['Tất cả trạng thái']),
+            el('option', { value: 'OPEN' }, ['Mở bán']),
+            el('option', { value: 'ENDED' }, ['Đã kết thúc']),
+            el('option', { value: 'CANCELLED' }, ['Đã hủy'])
+        ].filter(Boolean));
+        const applyBtn = el('button', { class: 'btn', type: 'button' }, ['Lọc']);
+        toolbar.appendChild(el('label', {}, [el('span', {}, ['Chi nhánh']), branchSel]));
+        toolbar.appendChild(el('label', {}, [el('span', {}, ['Phim']), movieSel]));
+        toolbar.appendChild(el('label', {}, [el('span', {}, ['Ngày']), dateInput]));
+        toolbar.appendChild(el('label', {}, [el('span', {}, ['Trạng thái']), statusSel]));
+        toolbar.appendChild(applyBtn);
+        box.appendChild(toolbar);
+
+        const tableRegion = el('div', { class: 'table-wrap' });
+        box.appendChild(tableRegion);
+
+        // Load dropdown options
+        try {
+            const branches = await hub.api('/branch');
+            (Array.isArray(branches) ? branches : []).forEach(function (b) {
+                branchSel.appendChild(el('option', { value: String(b.id) }, [b.name || ('#' + b.id)]));
+            });
+        } catch (e) { /* ignore */ }
+        try {
+            const movies = await hub.api('/movie');
+            (Array.isArray(movies) ? movies : []).forEach(function (m) {
+                movieSel.appendChild(el('option', { value: String(m.id) }, [m.title || ('#' + m.id)]));
+            });
+        } catch (e) { /* ignore */ }
+
+        async function load() {
+            tableRegion.replaceChildren(el('div', { class: 'loading-state' }, [el('p', {}, ['Đang tải…'])]));
+            try {
+                const qs = new URLSearchParams();
+                if (branchSel.value) qs.set('branchId', branchSel.value);
+                if (movieSel.value) qs.set('movieId', movieSel.value);
+                if (dateInput.value) qs.set('date', dateInput.value);
+                if (statusSel.value) qs.set('status', statusSel.value);
+                qs.set('limit', '100');
+                const data = await hub.api('/showtime/manage/search?' + qs.toString());
+                const items = (data && Array.isArray(data.items)) ? data.items : [];
+                if (!items.length) {
+                    tableRegion.replaceChildren(empty('Chưa có suất chiếu', 'Hãy tạo suất chiếu từ danh mục phim và phòng.'));
+                    return;
+                }
+                tableRegion.replaceChildren(hub.table(
+                    [{ label: 'Mã' }, { label: 'Phim' }, { label: 'Chi nhánh' }, { label: 'Phòng' }, { label: 'Bắt đầu' }, { label: 'Kết thúc' }, { label: 'Trạng thái' }],
+                    items,
+                    function (s) {
+                        return el('tr', {}, [
+                            el('td', {}, [text(s.id)]),
+                            el('td', {}, [text(s.movieTitle)]),
+                            el('td', {}, [text(s.branchName)]),
+                            el('td', {}, [text(s.screenName)]),
+                            el('td', {}, [hub.fmtDateTime(s.startTime)]),
+                            el('td', {}, [hub.fmtDateTime(s.endTime)]),
+                            el('td', {}, [hub.statusBadge(text(s.status, 'UNKNOWN'))])
+                        ]);
+                    }
+                ));
+            } catch (e) {
+                tableRegion.replaceChildren(flashErr(e.message));
+            }
+        }
+
+        applyBtn.addEventListener('click', load);
+        await load();
+    }
+
+    async function pageReport() {
+        const box = card('Báo cáo doanh thu & vận hành', 'Dữ liá»‡u giới hạn theo phạm vi chi nhánh.');
+        const from = el('input', { type: 'date', name: 'from', value: query.get('from') || '' });
+        const to = el('input', { type: 'date', name: 'to', value: query.get('to') || '' });
+        const run = el('button', { class: 'btn', type: 'button' }, ['Xem báo cáo']);
+        box.appendChild(el('div', { class: 'toolbar' }, [
+            el('label', {}, [el('span', {}, ['Từ ngày']), from]),
+            el('label', {}, [el('span', {}, ['Đến ngày']), to]),
+            run
+        ]));
+
+        const kpis = el('div', { class: 'kpi-grid' });
+        const tableRegion = el('div', { class: 'table-wrap' });
+        box.appendChild(kpis);
+        box.appendChild(tableRegion);
+        viewRoot.replaceChildren(box);
+
+        async function load() {
+            kpis.replaceChildren(el('div', { class: 'loading-state' }, [
+                el('span', { class: 'spinner', 'aria-hidden': 'true' }), el('span', {}, ['Đang tính toán…'])
+            ]));
+            tableRegion.replaceChildren();
+
+            const params = new URLSearchParams();
+            if (from.value) params.set('from', from.value);
+            if (to.value) params.set('to', to.value);
+
+            try {
+                const data = await hub.api('/report/summary' + (params.toString() ? '?' + params.toString() : ''));
+                const rev = (data && data.revenue) || {};
+                const ops = (data && data.operations) || [];
+
+                kpis.replaceChildren(
+                    el('div', { class: 'kpi' }, [el('span', {}, ['Doanh thu']), el('strong', {}, [hub.fmtMoney(rev.revenue)])]),
+                    el('div', { class: 'kpi' }, [el('span', {}, ['Vé đã bán']), el('strong', {}, [String(rev.ticketsSold || 0)])]),
+                    el('div', { class: 'kpi' }, [el('span', {}, ['Vé đã hủy']), el('strong', {}, [String(rev.ticketsCancelled || 0)])]),
+                    el('div', { class: 'kpi' }, [el('span', {}, ['Hoàn tiền']), el('strong', {}, [hub.fmtMoney(rev.refundTotal)])])
+                );
+
+                tableRegion.replaceChildren(ops.length
+                    ? hub.table(
+                        [{ label: 'Chi nhánh' }, { label: 'Số ca' }, { label: 'Chênh lá»‡ch' }, { label: 'Chờ duyá»‡t' }],
+                        ops,
+                        function (r) {
+                            return el('tr', {}, [
+                                el('td', {}, [r.branchName || '—']),
+                                el('td', {}, [String(r.shiftCount)]),
+                                el('td', {}, [hub.fmtMoney(r.totalDiscrepancy)]),
+                                el('td', {}, [String(r.pendingApprovalCount)])
+                            ]);
+                        })
+                    : empty('Chưa có dữ liá»‡u vận hành',
+                        'Báo cáo sẽ xuất hiá»‡n khi có ca đã đóng trong khoảng ngày đã chọn.'));
+            } catch (e) {
+                kpis.replaceChildren();
+                tableRegion.replaceChildren(flashErr(e.message));
+            }
+        }
+
+        run.addEventListener('click', load);
+        await load();
+    }
+
+    const PAGES = {
+        branch: pageBranch,
+        movie: pageMovie,
+        screen: pageScreen,
+        showtime: pageShowtime,
+        product: pageProduct,
+        pricing: pagePricing,
+        inventory: pageInventory,
+        report: pageReport,
+        shift: pageShift,
+        booking: pageBooking,
+        concession: pageConcession,
+        notification: pageNotification,
+        'fnb-catalog': pageFnbCatalog,
+        'fnb-cart': pageFnbCart,
+        'fnb-orders': pageFnbOrders
+    };
+
+    // Export đá»ƒ console.js tái dùng — tránh hai bản cài đặt cùng một bảng.
+    window.CinemaHubPages = PAGES;
+
+    // Trang danh mục standalone: chạy theo <meta name="rest-page">.
+    // Trên /console không có meta này — console.js tự gọi PAGES[module]().
+    if (!meta) return;
+
+    const run = PAGES[meta.content];
+    if (!run) {
+        viewRoot.replaceChildren(empty('Trang không tồn tại',
+            'Không tìm thấy trang danh mục "' + meta.content + '".',
+            'Về bảng điều khiá»ƒn', hub.ctx + '/console'));
+        return;
+    }
+
+    viewRoot.setAttribute('aria-busy', 'true');
+    Promise.resolve(run())
+        .catch(function (e) { viewRoot.replaceChildren(flashErr(e.message)); })
+        .finally(function () { viewRoot.setAttribute('aria-busy', 'false'); });
+})();

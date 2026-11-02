@@ -3,11 +3,7 @@
 <%--
   Mở app shell cho khu vực quản trị. Include SAU header.jsp.
   Request attrs tùy chọn: pageTitle, breadcrumb, activeNav, branchScopeName.
-<<<<<<< HEAD
-  Yêu cầu: app-shell styles được thêm trong header.jsp.
-=======
   Yêu cầu: <link> tới dashboard.css được thêm trong header.jsp.
->>>>>>> nhatnk
 --%>
 <div class="app-shell">
     <%@ include file="/WEB-INF/views/layout/workspace-sidebar.jsp" %>
@@ -21,7 +17,7 @@
                 <c:if test="${not empty requestScope.breadcrumb}">
                     <div class="breadcrumb">${requestScope.breadcrumb}</div>
                 </c:if>
-                <h1>${empty requestScope.pageTitle ? 'CinemaHub' : requestScope.pageTitle}</h1>
+                <h1>${empty requestScope.pageTitle ? 'Bảng điều khiển' : requestScope.pageTitle}</h1>
                 <p class="muted" style="margin:4px 0 0;font-size:.86rem">
                     <c:out value="${empty requestScope.pageSubtitle ? 'Dữ liệu được phân quyền theo phạm vi chi nhánh.' : requestScope.pageSubtitle}"/>
                 </p>

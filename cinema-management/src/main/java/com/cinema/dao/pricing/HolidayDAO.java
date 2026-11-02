@@ -91,6 +91,21 @@ public class HolidayDAO {
     }
 
     public Set<String> findEnabledMonthDays() throws Exception {
+        String sql = "SELECT FORMAT(holiday_date, 'MM-dd') AS month_day FROM dbo.holiday_calendar";
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            Set<String> monthDays = new java.util.HashSet<>();
+            while (rs.next()) {
+                monthDays.add(rs.getString("month_day"));
+            }
+            return Set.copyOf(monthDays);
+        } catch (Exception e) {
+            return Set.of();
+        }
+    }
+
+    public Set<String> findEnabledMonthDaysOld() throws Exception {
         String sql = "SELECT month_day FROM dbo.holiday WHERE enabled = 1";
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);

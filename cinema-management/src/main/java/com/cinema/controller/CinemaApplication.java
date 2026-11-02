@@ -236,6 +236,18 @@ public final class CinemaApplication {
             uploadWrapper.setMultipartConfigElement(mce);
         }
         context.addServletMappingDecoded("/upload", "uploadServlet");
+        // Dashboard endpoint cho Management workspace (KPI / Today's showtimes / Recent bookings)
+        Tomcat.addServlet(context, "dashboardServlet", new DashboardServlet());
+        context.addServletMappingDecoded("/api/dashboard", "dashboardServlet");
+        context.addServletMappingDecoded("/api/dashboard/*", "dashboardServlet");
+        // Concession controller cho F&B, catalog, pickup, orders
+        Tomcat.addServlet(context, "concessionController", new ConcessionController());
+        context.addServletMappingDecoded("/concession", "concessionController");
+        context.addServletMappingDecoded("/concession/*", "concessionController");
+        // Report controller cho sales, revenue, daily, breakdown
+        Tomcat.addServlet(context, "reportController", new ReportController());
+        context.addServletMappingDecoded("/report", "reportController");
+        context.addServletMappingDecoded("/report/*", "reportController");
         // Notification bell cho header workspace
         Tomcat.addServlet(context, "workspaceNotifServlet", new WorkspaceNotificationServlet());
         context.addServletMappingDecoded("/api/notification/*", "workspaceNotifServlet");

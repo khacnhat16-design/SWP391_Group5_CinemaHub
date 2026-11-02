@@ -1,4 +1,4 @@
-﻿/**
+/**
  * inventory-main.js — Bộ điều hướng Router (3 Màn hình Kho hàng CinemaHub).
  */
 (function () {
@@ -13,7 +13,7 @@
     var branchListApiPath = inv.branchListApiPath;
     var renderProductInventoryPage = inv.renderProductInventoryPage;
     var renderMaterialInventoryPage = inv.renderMaterialInventoryPage;
-    var renderRecipeProductionPage = inv.renderRecipeProductionPage || function () {};
+    var renderRecipeProductionPage = inv.renderRecipeProductionPage;
     var showProductRestockModal = inv.showProductRestockModal;
     var showProductAdjustModal = inv.showProductAdjustModal;
 
@@ -41,7 +41,7 @@
             hub.api(branchListApiPath(roleMeta)).then(function (branches) {
                 var params = new URLSearchParams(window.location.search);
                 var rawTab = params.get('tab');
-                var activeTab = rawTab === 'material' ? 'material' : 'product';
+                var activeTab = rawTab === 'material' ? 'material' : (rawTab === 'recipe' && !isStaff ? 'recipe' : 'product');
                 var branchId = params.get('branchId') || (branches && branches[0] ? branches[0].id : null);
 
                 function syncSidebarSubmenu(tab) {
@@ -64,10 +64,13 @@
                 }
 
                 function switchTab(newTab) {
-                    var safeTab = (newTab === 'material') ? 'material' : 'product';
+                    var safeTab = (newTab === 'material') ? 'material' : ((newTab === 'recipe' && !isStaff) ? 'recipe' : 'product');
                     activeTab = safeTab;
                     var newUrl = window.location.pathname + '?module=inventory&tab=' + activeTab + (branchId ? '&branchId=' + branchId : '');
                     window.history.replaceState(null, '', newUrl);
+                    if (window.CinemaHubUpdateActiveNavigation) {
+                        window.CinemaHubUpdateActiveNavigation('inventory');
+                    }
                     syncSidebarSubmenu(activeTab);
                     if (activeTab === 'material') {
                         renderMaterialInventoryPage(viewRoot, branchId, branches, isStaff, switchTab);
@@ -83,10 +86,20 @@
 
                 if (activeTab === 'material') {
                     renderMaterialInventoryPage(viewRoot, branchId, branches, isStaff, switchTab);
-                } else if (activeTab === 'recipe' && typeof renderRecipeProductionPage === 'function') {
+                } else if (activeTab === 'recipe') {
                     renderRecipeProductionPage(viewRoot, branchId, branches, isStaff, switchTab);
                 } else {
                     renderProductInventoryPage(viewRoot, branchId, branches, isStaff, switchTab);
+                }
+
+                // Tự động quét kiểm tra và đồng bộ cảnh báo tồn kho / cận date lên quả chuông thông báo
+                if (!isStaff && branchId) {
+                    hub.api('/inventory', {
+                        method: 'POST',
+                        body: { action: 'generate-alerts', branchId: branchId }
+                    }).then(function () {
+                        if (hub.refreshNotifications) hub.refreshNotifications();
+                    }).catch(function () {});
                 }
             }).catch(function (err) {
                 notifyError(err);
@@ -105,8 +118,8 @@
         },
         create: function () {
             var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
-            if (roleMeta === 'ADMIN' || roleMeta === 'STAFF' || roleMeta === 'BRANCH_STAFF') {
-                hub.notify('Chỉ Quản lý chi nhánh mới có quyền nhập kho.', 'warn');
+            if (roleMeta === 'STAFF' || roleMeta === 'BRANCH_STAFF') {
+                hub.notify('Nhân viên chi nhánh không có quyền nhập kho.', 'warn');
                 return;
             }
             var params = new URLSearchParams(window.location.search);
@@ -126,8 +139,8 @@
         },
         edit: function (id) {
             var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
-            if (roleMeta === 'ADMIN' || roleMeta === 'STAFF' || roleMeta === 'BRANCH_STAFF') {
-                hub.notify('Chỉ Quản lý chi nhánh mới có quyền điều chỉnh kho.', 'warn');
+            if (roleMeta === 'STAFF' || roleMeta === 'BRANCH_STAFF') {
+                hub.notify('Nhân viên chi nhánh không có quyền điều chỉnh kho.', 'warn');
                 return;
             }
             var params = new URLSearchParams(window.location.search);

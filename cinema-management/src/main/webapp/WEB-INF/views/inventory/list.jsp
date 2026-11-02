@@ -16,7 +16,7 @@
     <meta name="csrf-token" content="${sessionScope.csrfToken}">
     <title>Quản lý tồn kho | Khu vực quản lý CinemaHub</title>
     <link rel="stylesheet" href="${ctx}/assets/css/cinema.css">
-    <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261016-inv-accordion-1">
+    <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261004-branch-pricing-templates-1">
     <style>
         /* Đảm bảo giao diện ăn khớp 100% chuẩn Workspace */
         header.nav-wrapper, .nav-wrapper, footer { display: none !important; }
@@ -79,8 +79,27 @@
             <div class="ws-page-heading">
                 <span class="eyebrow">WORKSPACE</span>
                 <h1>Quản lý tồn kho</h1>
-                <p class="muted">Theo dõi số lượng hàng hóa và lịch sử biến động kho theo từng chi nhánh.</p>
+                <p class="muted">Theo dõi số lượng hàng hóa, nguyên liệu thô và công thức chế biến theo từng chi nhánh.</p>
             </div>
+
+            <%-- Tabs: Kho thành phẩm | Kho nguyên liệu | Công thức chế biến --%>
+            <div class="ws-tabs" style="display:flex; gap:6px; border-bottom:1px solid var(--ws-line, #e5e7eb); margin-bottom:18px;">
+                <button type="button" class="ws-tab ws-tab-active" data-tab="tab-finished"
+                    style="padding:10px 18px; background:transparent; border:none; border-bottom:2px solid var(--ws-accent, #d9363e); font-weight:600; color:var(--ws-accent, #d9363e); cursor:pointer;">
+                    Kho thành phẩm
+                </button>
+                <button type="button" class="ws-tab" data-tab="tab-material"
+                    style="padding:10px 18px; background:transparent; border:none; border-bottom:2px solid transparent; font-weight:600; color:var(--ws-text-muted, #6b7280); cursor:pointer;">
+                    Kho nguyên liệu
+                </button>
+                <button type="button" class="ws-tab" data-tab="tab-recipe"
+                    style="padding:10px 18px; background:transparent; border:none; border-bottom:2px solid transparent; font-weight:600; color:var(--ws-text-muted, #6b7280); cursor:pointer;">
+                    Công thức chế biến
+                </button>
+            </div>
+
+            <%-- TAB 1: KHO THÀNH PHẨM --%>
+            <div id="tab-finished" class="ws-tab-pane">
 
             <%-- Thanh công cụ (Toolbar) chuẩn Workspace --%>
             <div class="ws-list-toolbar">
@@ -143,7 +162,244 @@
                 </div>
             </div>
         </div>
-    </main>
+            </div>
+            <%-- /TAB 1: KHO THÀNH PHẨM --%>
+
+            <%-- TAB 2: KHO NGUYÊN LIỆU (GIAI ĐOẠN 2) --%>
+            <div id="tab-material" class="ws-tab-pane" style="display:none;">
+                <div class="ws-list-toolbar" style="margin-bottom:14px;">
+                    <div class="ws-list-toolbar-left">
+                        <div class="ws-search">
+                            <span aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                            </span>
+                            <input type="search" id="materialSearchInput" placeholder="Tìm nguyên liệu theo tên / mã…" aria-label="Tìm nguyên liệu">
+                        </div>
+                        <select id="materialCategoryFilter" class="ws-select" aria-label="Lọc theo loại">
+                            <option value="">Tất cả loại</option>
+                            <option value="POPCORN">Bắp (POPCORN)</option>
+                            <option value="DRINK">Nước (DRINK)</option>
+                            <option value="PACKAGING">Bao bì (PACKAGING)</option>
+                            <option value="INGREDIENT">Thành phần (INGREDIENT)</option>
+                            <option value="OTHER">Khác</option>
+                        </select>
+                    </div>
+                    <div class="ws-list-toolbar-right">
+                        <button id="btnOpenRestockMaterial" type="button" class="ws-btn primary">+ Nhập nguyên liệu</button>
+                        <button id="btnOpenAdjustMaterial" type="button" class="ws-btn secondary">Điều chỉnh tồn</button>
+                    </div>
+                </div>
+                <div class="ws-card" style="padding:0; overflow:hidden;">
+                    <div class="ws-table-wrap">
+                        <table class="ws-table">
+                            <thead>
+                                <tr>
+                                    <th style="min-width:200px">Nguyên liệu</th>
+                                    <th>Mã</th>
+                                    <th>Loại</th>
+                                    <th>Đơn vị</th>
+                                    <th>Tồn kho</th>
+                                    <th>Tồn tối thiểu</th>
+                                    <th>Nhà cung cấp</th>
+                                    <th class="ws-th-actions" style="text-align:right">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="materialTableBody">
+                                <tr><td colspan="8" style="padding:32px; text-align:center; color:var(--ws-text-muted);">Đang tải dữ liệu nguyên liệu…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <%-- /TAB 2 --%>
+
+            <%-- TAB 3: CÔNG THỨC CHẾ BIẾN (GIAI ĐOẠN 3) --%>
+            <div id="tab-recipe" class="ws-tab-pane" style="display:none;">
+                <div class="ws-list-toolbar" style="margin-bottom:14px;">
+                    <div class="ws-list-toolbar-left">
+                        <select id="recipeProductSelect" class="ws-select" aria-label="Chọn sản phẩm" style="min-width:240px;"></select>
+                        <input type="search" id="recipeSearch" class="ws-input" placeholder="Lọc nguyên liệu trong công thức…" style="padding:8px 12px; border:1px solid var(--ws-line-strong, #d8dce3); border-radius:8px; min-width:240px;">
+                    </div>
+                    <div class="ws-list-toolbar-right">
+                        <button id="btnOpenProduce" type="button" class="ws-btn primary">+ Chế biến / Sản xuất</button>
+                        <button id="btnAddRecipeItem" type="button" class="ws-btn secondary">+ Thêm nguyên liệu</button>
+                        <button id="btnSaveRecipe" type="button" class="ws-btn primary">💾 Lưu công thức</button>
+                    </div>
+                </div>
+                <div class="ws-card" style="padding:0; overflow:hidden;">
+                    <div class="ws-table-wrap">
+                        <table class="ws-table">
+                            <thead>
+                                <tr>
+                                    <th>Mã NL</th>
+                                    <th>Tên nguyên liệu</th>
+                                    <th>Định mức (cho 1 thành phẩm)</th>
+                                    <th>Đơn vị</th>
+                                    <th>Hao hụt (%)</th>
+                                    <th>Ghi chú</th>
+                                    <th class="ws-th-actions" style="text-align:right">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recipeTableBody">
+                                <tr><td colspan="7" style="padding:32px; text-align:center; color:var(--ws-text-muted);">Chọn sản phẩm để xem / sửa công thức.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <%-- /TAB 3 --%>
+        </main>
+
+    <%-- MODAL LỊCH SỬ BIẾN ĐỘNG NGUYÊN LIỆU --%>
+    <div id="modalMaterialHistory" class="ws-modal ws-modal-hidden">
+        <div class="ws-modal-backdrop" onclick="closeModal('modalMaterialHistory')"></div>
+        <div class="ws-modal-panel" style="max-width: 820px;">
+            <div class="ws-modal-head">
+                <h2 id="materialHistoryTitle">Lịch sử biến động nguyên liệu</h2>
+                <button type="button" class="ws-modal-x" onclick="closeModal('modalMaterialHistory')" aria-label="Đóng">&times;</button>
+            </div>
+            <div class="ws-modal-body" style="padding:0;">
+                <table class="ws-table" style="margin:0;">
+                    <thead>
+                        <tr>
+                            <th>Thời gian</th>
+                            <th>Biến động</th>
+                            <th>Lý do</th>
+                            <th>Ghi chú / NCC / PO</th>
+                            <th>Người thực hiện</th>
+                        </tr>
+                    </thead>
+                    <tbody id="materialHistoryTableBody">
+                        <tr><td colspan="5" style="text-align:center; padding:30px; color:var(--ws-text-muted);">Đang tải lịch sử…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="ws-modal-foot">
+                <button type="button" class="ws-btn secondary" onclick="closeModal('modalMaterialHistory')">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <%-- MODAL NHẬP KHO NGUYÊN LIỆU (M-R3) --%>
+    <div id="modalRestockMaterial" class="ws-modal ws-modal-hidden">
+        <div class="ws-modal-backdrop" onclick="closeModal('modalRestockMaterial')"></div>
+        <div class="ws-modal-panel" style="max-width: 560px;">
+            <div class="ws-modal-head">
+                <h2>Nhập kho nguyên liệu</h2>
+                <button type="button" class="ws-modal-x" onclick="closeModal('modalRestockMaterial')" aria-label="Đóng">&times;</button>
+            </div>
+            <div class="ws-modal-body">
+                <div class="ws-modal-form-group">
+                    <label for="restockMaterialSelect">Chọn nguyên liệu</label>
+                    <select id="restockMaterialSelect" class="ws-select" style="width:100%"></select>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <div class="ws-modal-form-group">
+                        <label for="restockMaterialQty">Số lượng nhập</label>
+                        <input type="number" id="restockMaterialQty" min="0.001" step="0.001" value="1">
+                    </div>
+                    <div class="ws-modal-form-group">
+                        <label for="restockMaterialReason">Lý do nhập</label>
+                        <input type="text" id="restockMaterialReason" placeholder="NHAP_HANG_TU_NCC" value="NHAP_HANG_TU_NCC">
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+                    <div class="ws-modal-form-group">
+                        <label for="restockMaterialCost">Giá nhập (đ)</label>
+                        <input type="number" id="restockMaterialCost" min="0" step="100" placeholder="0">
+                    </div>
+                    <div class="ws-modal-form-group">
+                        <label for="restockMaterialSupplier">Nhà cung cấp</label>
+                        <input type="text" id="restockMaterialSupplier" placeholder="NCC">
+                    </div>
+                    <div class="ws-modal-form-group">
+                        <label for="restockMaterialPo">Số PO</label>
+                        <input type="text" id="restockMaterialPo" placeholder="PO-...">
+                    </div>
+                </div>
+                <div class="ws-modal-form-group">
+                    <label for="restockMaterialNote">Ghi chú</label>
+                    <input type="text" id="restockMaterialNote" placeholder="Lô hàng, hạn dùng...">
+                </div>
+            </div>
+            <div class="ws-modal-foot">
+                <button type="button" class="ws-btn secondary" onclick="closeModal('modalRestockMaterial')">Hủy</button>
+                <button type="button" class="ws-btn primary" id="btnSubmitRestockMaterial">Xác nhận nhập</button>
+            </div>
+        </div>
+    </div>
+
+    <%-- MODAL ĐIỀU CHỈNH NGUYÊN LIỆU (M-R5) --%>
+    <div id="modalAdjustMaterial" class="ws-modal ws-modal-hidden">
+        <div class="ws-modal-backdrop" onclick="closeModal('modalAdjustMaterial')"></div>
+        <div class="ws-modal-panel" style="max-width: 520px;">
+            <div class="ws-modal-head">
+                <h2>Điều chỉnh tồn kho nguyên liệu</h2>
+                <button type="button" class="ws-modal-x" onclick="closeModal('modalAdjustMaterial')" aria-label="Đóng">&times;</button>
+            </div>
+            <div class="ws-modal-body">
+                <div class="ws-modal-form-group">
+                    <label for="adjustMaterialSelect">Chọn nguyên liệu</label>
+                    <select id="adjustMaterialSelect" class="ws-select" style="width:100%"></select>
+                </div>
+                <div class="ws-modal-form-group">
+                    <label>Hướng điều chỉnh</label>
+                    <div style="display:flex; gap:14px; padding-top:4px;">
+                        <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="adjustMatDir" value="PLUS" checked> Tăng</label>
+                        <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="adjustMatDir" value="MINUS"> Giảm</label>
+                    </div>
+                </div>
+                <div class="ws-modal-form-group">
+                    <label for="adjustMaterialQty">Số lượng điều chỉnh (lớn hơn 0)</label>
+                    <input type="number" id="adjustMaterialQty" min="0.001" step="0.001" value="1">
+                </div>
+                <div class="ws-modal-form-group">
+                    <label for="adjustMaterialReason">Lý do <span style="color:#ef4444">*</span></label>
+                    <input type="text" id="adjustMaterialReason" placeholder="Hao hụt, hư hỏng, sai lệch kiểm đếm..." required>
+                </div>
+                <div class="ws-modal-form-group">
+                    <label for="adjustMaterialNote">Ghi chú</label>
+                    <input type="text" id="adjustMaterialNote">
+                </div>
+            </div>
+            <div class="ws-modal-foot">
+                <button type="button" class="ws-btn secondary" onclick="closeModal('modalAdjustMaterial')">Hủy</button>
+                <button type="button" class="ws-btn primary" id="btnSubmitAdjustMaterial">Xác nhận</button>
+            </div>
+        </div>
+    </div>
+
+    <%-- MODAL CHẾ BIẾN / SẢN XUẤT (M-R4) --%>
+    <div id="modalProduce" class="ws-modal ws-modal-hidden">
+        <div class="ws-modal-backdrop" onclick="closeModal('modalProduce')"></div>
+        <div class="ws-modal-panel" style="max-width: 520px;">
+            <div class="ws-modal-head">
+                <h2>Chế biến / Sản xuất thành phẩm</h2>
+                <button type="button" class="ws-modal-x" onclick="closeModal('modalProduce')" aria-label="Đóng">&times;</button>
+            </div>
+            <div class="ws-modal-body">
+                <div class="ws-modal-form-group">
+                    <label for="produceProductSelect">Sản phẩm thành phẩm</label>
+                    <select id="produceProductSelect" class="ws-select" style="width:100%"></select>
+                </div>
+                <div class="ws-modal-form-group">
+                    <label for="produceQty">Số lượng cần chế biến</label>
+                    <input type="number" id="produceQty" min="1" value="10">
+                </div>
+                <div class="ws-modal-form-group">
+                    <label for="produceNote">Ghi chú</label>
+                    <input type="text" id="produceNote" placeholder="Ca sáng, phục vụ suất chiếu...">
+                </div>
+                <div id="produceRecipePreview" style="padding:10px 12px; background:#f8fafc; border-radius:8px; font-size:0.85rem; color:#475569; max-height:200px; overflow:auto;">
+                    <em>Chọn sản phẩm để xem trước nguyên liệu sẽ tiêu hao.</em>
+                </div>
+            </div>
+            <div class="ws-modal-foot">
+                <button type="button" class="ws-btn secondary" onclick="closeModal('modalProduce')">Hủy</button>
+                <button type="button" class="ws-btn primary" id="btnSubmitProduce">⚙ Chế biến</button>
+            </div>
+        </div>
+    </div>
 
     <%-- MODAL LỊCH SỬ BIẾN ĐỘNG (M-P2) --%>
     <div id="modalHistory" class="ws-modal ws-modal-hidden">
@@ -473,43 +729,13 @@
                         tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--ws-text-muted);">Chưa có lịch sử biến động nào cho sản phẩm này.</td></tr>';
                         return;
                     }
-                    function formatReasonText(reason) {
-                        if (!reason) return '—';
-                        var str = String(reason).trim();
-                        var map = {
-                            'NHAP_HANG_TU_NCC': 'Nhập hàng từ NCC',
-                            'NHAP_LAI_TU_NCC': 'Nhập đổi trả từ NCC',
-                            'NHAP_KHO': 'Nhập hàng vào kho',
-                            'RESTOCK': 'Nhập hàng',
-                            'KIEM_KE_THUA': 'Kiểm kê thừa',
-                            'KIEM_KE_THIEU': 'Kiểm kê thiếu',
-                            'HU_HONG': 'Hư hỏng / Rách bao bì',
-                            'HET_HAN': 'Hết hạn sử dụng',
-                            'MAT_DO_KHACH': 'Thất thoát / Đổ vỡ',
-                            'XUAT_CHE_BIEN': 'Xuất chế biến',
-                            'NHAP_TU_CHE_BIEN': 'Nhập từ chế biến',
-                            'XUAT_BAN': 'Xuất bán tại quầy',
-                            'BAN_HANG': 'Xuất bán tại quầy',
-                            'OTHER': 'Lý do khác',
-                            'ADJUST': 'Điều chỉnh kho'
-                        };
-                        var dashIdx = str.indexOf(' - ');
-                        if (dashIdx > 0) {
-                            var code = str.substring(0, dashIdx).trim().toUpperCase();
-                            var detail = str.substring(dashIdx + 3).trim();
-                            var label = map[code] || code;
-                            return '<div style="font-weight:600; color:#1e293b;">' + label + '</div>' + (detail ? ('<div style="color:#64748b; font-size:0.85rem; margin-top:2px;">' + detail + '</div>') : '');
-                        }
-                        return map[str.toUpperCase()] || str;
-                    }
-
                     tbody.innerHTML = list.map(function(h) {
                         var delta = h.deltaQty > 0 ? ('+' + h.deltaQty) : h.deltaQty;
                         var badgeClass = h.deltaQty > 0 ? 'ws-badge-green' : 'ws-badge-red';
                         return '<tr>' +
                             '<td style="color:var(--ws-text-muted); font-size:0.85rem;">' + (h.createdAt || '—') + '</td>' +
                             '<td><span class="ws-badge ws-status-pill ' + badgeClass + '">' + delta + '</span></td>' +
-                            '<td>' + formatReasonText(h.reason) + '</td>' +
+                            '<td>' + (h.reason || '—') + '</td>' +
                             '<td><strong>' + (h.actorName || ('ID: ' + h.actorId)) + '</strong></td>' +
                         '</tr>';
                     }).join('');
@@ -602,6 +828,361 @@
                     alert('Lỗi kết nối khi điều chỉnh kho: ' + err);
                 });
         };
+
+        // ============================================================
+        // TABS
+        // ============================================================
+        document.querySelectorAll('.ws-tab').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var target = this.getAttribute('data-tab');
+                document.querySelectorAll('.ws-tab').forEach(function(b) {
+                    b.classList.remove('ws-tab-active');
+                    b.style.color = 'var(--ws-text-muted, #6b7280)';
+                    b.style.borderBottomColor = 'transparent';
+                });
+                this.classList.add('ws-tab-active');
+                this.style.color = 'var(--ws-accent, #d9363e)';
+                this.style.borderBottomColor = 'var(--ws-accent, #d9363e)';
+                document.querySelectorAll('.ws-tab-pane').forEach(function(p) {
+                    p.style.display = 'none';
+                });
+                document.getElementById(target).style.display = 'block';
+                if (target === 'tab-material') loadMaterials(branchSelect.value);
+                if (target === 'tab-recipe') { loadAllRecipes(); loadProductsForRecipe(); }
+            });
+        });
+
+        // ============================================================
+        // TAB 2: KHO NGUYÊN LIỆU
+        // ============================================================
+        var materialsData = [];
+        function loadMaterials(branchId) {
+            var tbody = document.getElementById('materialTableBody');
+            if (!tbody) return;
+            tbody.innerHTML = '<tr><td colspan="8" style="padding:24px; text-align:center;"><div class="ws-list-loading"><div class="ws-spinner"></div><span>Đang tải…</span></div></td></tr>';
+            fetch(ctx + '/inventory?type=material&branchId=' + encodeURIComponent(branchId))
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    materialsData = Array.isArray(res) ? res : (res.data || []);
+                    renderMaterialTable();
+                    populateMaterialSelects();
+                })
+                .catch(function(err) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px; text-align:center; color:#dc2626;">Không thể tải dữ liệu nguyên liệu.</td></tr>';
+                });
+        }
+        function renderMaterialTable() {
+            var tbody = document.getElementById('materialTableBody');
+            var search = (document.getElementById('materialSearchInput').value || '').toLowerCase();
+            var cat = document.getElementById('materialCategoryFilter').value;
+            var filtered = materialsData.filter(function(m) {
+                var matchS = !search || (m.name && m.name.toLowerCase().includes(search)) || (m.code && m.code.toLowerCase().includes(search));
+                var matchC = !cat || m.category === cat;
+                return matchS && matchC;
+            });
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--ws-text-muted);">Chưa có nguyên liệu nào.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = filtered.map(function(m) {
+                var qty = m.qty != null ? m.qty : 0;
+                var min = m.minStock != null ? m.minStock : 0;
+                var low = min > 0 && qty < min;
+                var badge = low ? '<span class="ws-badge ws-status-pill ws-badge-orange">Dưới mức tối thiểu</span>'
+                               : (qty <= 0 ? '<span class="ws-badge ws-status-pill ws-badge-red">Hết</span>'
+                                            : '<span class="ws-badge ws-status-pill ws-badge-green">Còn</span>');
+                return '<tr>' +
+                    '<td><strong>' + (m.name || '—') + '</strong></td>' +
+                    '<td><code style="font-size:0.8rem;">' + (m.code || '—') + '</code></td>' +
+                    '<td>' + (m.category || '—') + '</td>' +
+                    '<td>' + (m.unit || '—') + '</td>' +
+                    '<td><strong style="font-size:1rem;">' + qty + '</strong></td>' +
+                    '<td>' + min + '</td>' +
+                    '<td style="color:var(--ws-text-muted)">' + (m.supplier || '—') + '</td>' +
+                    '<td style="text-align:right;">' +
+                        '<button type="button" class="ws-btn ws-btn-sm secondary" onclick="showMaterialHistory(' + m.materialId + ', \'' + (m.name || '').replace(/'/g, "\\'") + '\')">Lịch sử</button> ' +
+                        '<button type="button" class="ws-btn ws-btn-sm primary" onclick="quickRestockMaterial(' + m.materialId + ')">Nhập</button> ' +
+                        '<button type="button" class="ws-btn ws-btn-sm danger" onclick="quickAdjustMaterial(' + m.materialId + ')">Điều chỉnh</button>' +
+                    '</td></tr>';
+            }).join('');
+        }
+        function populateMaterialSelects() {
+            var rSel = document.getElementById('restockMaterialSelect');
+            var aSel = document.getElementById('adjustMaterialSelect');
+            var opts = materialsData.map(function(m) {
+                return '<option value="' + m.materialId + '">' + (m.code || ('#' + m.materialId)) + ' — ' + (m.name || '') + ' (tồn: ' + m.qty + ' ' + (m.unit || '') + ')</option>';
+            }).join('');
+            if (rSel) rSel.innerHTML = '<option value="">Chọn nguyên liệu…</option>' + opts;
+            if (aSel) aSel.innerHTML = '<option value="">Chọn nguyên liệu…</option>' + opts;
+        }
+        document.getElementById('materialSearchInput').addEventListener('input', renderMaterialTable);
+        document.getElementById('materialCategoryFilter').addEventListener('change', renderMaterialTable);
+
+        window.quickRestockMaterial = function(materialId) {
+            document.getElementById('restockMaterialSelect').value = String(materialId);
+            openModal('modalRestockMaterial');
+        };
+        window.quickAdjustMaterial = function(materialId) {
+            document.getElementById('adjustMaterialSelect').value = String(materialId);
+            openModal('modalAdjustMaterial');
+        };
+        window.showMaterialHistory = function(materialId, name) {
+            document.getElementById('materialHistoryTitle').textContent = 'Lịch sử biến động: ' + (name || ('NL #' + materialId));
+            openModal('modalMaterialHistory');
+            var tbody = document.getElementById('materialHistoryTableBody');
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--ws-text-muted);">Đang tải…</td></tr>';
+            fetch(ctx + '/inventory?type=material&action=history&branchId=' + branchSelect.value + '&materialId=' + materialId)
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    var list = Array.isArray(res) ? res : (res.data || []);
+                    if (list.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--ws-text-muted);">Chưa có lịch sử.</td></tr>';
+                        return;
+                    }
+                    tbody.innerHTML = list.map(function(h) {
+                        var d = h.deltaQty;
+                        var delta = d > 0 ? ('+' + d) : d;
+                        var bc = d > 0 ? 'ws-badge-green' : 'ws-badge-red';
+                        var info = h.supplier || h.note || h.poNumber || '—';
+                        if (h.costPrice != null) info += ' (' + Number(h.costPrice).toLocaleString('vi-VN') + 'đ)';
+                        var when = h.createdAt || '—';
+                        return '<tr>' +
+                            '<td style="color:var(--ws-text-muted); font-size:0.85rem;">' + when + '</td>' +
+                            '<td><span class="ws-badge ws-status-pill ' + bc + '">' + delta + '</span></td>' +
+                            '<td>' + (h.reason || '—') + '</td>' +
+                            '<td style="font-size:0.85rem;">' + info + '</td>' +
+                            '<td><strong>' + (h.actorName || ('ID: ' + h.actorId)) + '</strong></td>' +
+                        '</tr>';
+                    }).join('');
+                });
+        };
+
+        document.getElementById('btnOpenRestockMaterial').onclick = function() { openModal('modalRestockMaterial'); };
+        document.getElementById('btnOpenAdjustMaterial').onclick = function() { openModal('modalAdjustMaterial'); };
+
+        document.getElementById('btnSubmitRestockMaterial').onclick = function() {
+            var bId = branchSelect.value;
+            var mId = document.getElementById('restockMaterialSelect').value;
+            var qty = parseFloat(document.getElementById('restockMaterialQty').value);
+            var reason = (document.getElementById('restockMaterialReason').value || '').trim();
+            var cost = document.getElementById('restockMaterialCost').value;
+            var supplier = document.getElementById('restockMaterialSupplier').value;
+            var po = document.getElementById('restockMaterialPo').value;
+            var note = document.getElementById('restockMaterialNote').value;
+            if (!mId) { alert('Vui lòng chọn nguyên liệu.'); return; }
+            if (!(qty > 0)) { alert('Số lượng phải lớn hơn 0.'); return; }
+            if (!reason) reason = 'NHAP_HANG_TU_NCC';
+            var body = new URLSearchParams({ type: 'material', branchId: bId, materialId: mId, quantity: qty, reason: reason, supplier: supplier, poNumber: po, note: note });
+            if (cost) body.set('costPrice', cost);
+            var btn = this; btn.disabled = true; btn.textContent = 'Đang lưu…';
+            fetch(ctx + '/inventory', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    btn.disabled = false; btn.textContent = 'Xác nhận nhập';
+                    if (res.code && res.code !== 'OK' && res.code !== 200) { alert('Lỗi: ' + (res.message || res.code)); return; }
+                    alert('Nhập kho nguyên liệu thành công!');
+                    closeModal('modalRestockMaterial');
+                    loadMaterials(bId);
+                })
+                .catch(function(err) { btn.disabled = false; btn.textContent = 'Xác nhận nhập'; alert('Lỗi: ' + err); });
+        };
+
+        document.getElementById('btnSubmitAdjustMaterial').onclick = function() {
+            var bId = branchSelect.value;
+            var mId = document.getElementById('adjustMaterialSelect').value;
+            var dir = (document.querySelector('input[name="adjustMatDir"]:checked') || {}).value || 'PLUS';
+            var qty = parseFloat(document.getElementById('adjustMaterialQty').value);
+            var reason = (document.getElementById('adjustMaterialReason').value || '').trim();
+            var note = document.getElementById('adjustMaterialNote').value;
+            if (!mId) { alert('Vui lòng chọn nguyên liệu.'); return; }
+            if (!(qty > 0)) { alert('Số lượng phải lớn hơn 0.'); return; }
+            if (!reason) { alert('Lý do là bắt buộc.'); return; }
+            var finalQty = dir === 'MINUS' ? -qty : qty;
+            var btn = this; btn.disabled = true; btn.textContent = 'Đang lưu…';
+            fetch(ctx + '/inventory', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ action: 'adjust', type: 'material', branchId: bId, materialId: mId, quantity: finalQty, reason: reason, note: note }) })
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    btn.disabled = false; btn.textContent = 'Xác nhận';
+                    if (res.code && res.code !== 'OK' && res.code !== 200) { alert('Lỗi: ' + (res.message || res.code)); return; }
+                    alert('Điều chỉnh nguyên liệu thành công!');
+                    closeModal('modalAdjustMaterial');
+                    loadMaterials(bId);
+                })
+                .catch(function(err) { btn.disabled = false; btn.textContent = 'Xác nhận'; alert('Lỗi: ' + err); });
+        };
+
+        // ============================================================
+        // TAB 3: CÔNG THỨC CHẾ BIẾN & SẢN XUẤT
+        // ============================================================
+        var allRecipesData = [];
+        var recipeProductList = [];
+        function loadAllRecipes() {
+            return fetch(ctx + '/inventory?action=recipes')
+                .then(function(r) { return r.json(); })
+                .then(function(res) { allRecipesData = Array.isArray(res) ? res : (res.data || []); renderRecipeTable(); });
+        }
+        function loadProductsForRecipe() {
+            if (recipeProductList.length > 0) return Promise.resolve();
+            return fetch(ctx + '/concession/products')
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    recipeProductList = Array.isArray(res) ? res : (res.data || []);
+                    var sels = [document.getElementById('recipeProductSelect'), document.getElementById('produceProductSelect')];
+                    sels.forEach(function(sel) {
+                        if (!sel) return;
+                        sel.innerHTML = '<option value="">Chọn sản phẩm…</option>' +
+                            recipeProductList.map(function(p) { return '<option value="' + p.id + '">' + (p.name || ('SP #' + p.id)) + ' (' + (p.type || '') + ')</option>'; }).join('');
+                    });
+                })
+                .catch(function() { /* fallback: dùng stockData nếu có */ });
+        }
+        function renderRecipeTable() {
+            var tbody = document.getElementById('recipeTableBody');
+            var pid = document.getElementById('recipeProductSelect').value;
+            var search = (document.getElementById('recipeSearch').value || '').toLowerCase();
+            if (!pid) {
+                tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--ws-text-muted);">Chọn sản phẩm để xem / sửa công thức.</td></tr>';
+                return;
+            }
+            var rows = allRecipesData.filter(function(r) { return String(r.productId) === String(pid); })
+                .filter(function(r) { return !search || (r.materialName && r.materialName.toLowerCase().includes(search)) || (r.materialCode && r.materialCode.toLowerCase().includes(search)); });
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--ws-text-muted);">Sản phẩm này chưa có công thức. Nhấn <strong>+ Thêm nguyên liệu</strong> để bắt đầu.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = rows.map(function(r, idx) {
+                return '<tr data-recipe-rid="' + r.id + '">' +
+                    '<td><code style="font-size:0.8rem;">' + (r.materialCode || '—') + '</code></td>' +
+                    '<td><strong>' + (r.materialName || '—') + '</strong></td>' +
+                    '<td><input type="number" class="ws-input recipe-dosage" min="0.001" step="0.001" value="' + r.quantityRequired + '" style="width:120px; padding:6px 8px; border:1px solid var(--ws-line-strong, #d8dce3); border-radius:6px;"></td>' +
+                    '<td>' + (r.unit || '') + '</td>' +
+                    '<td><input type="number" class="ws-input recipe-loss" min="0" max="0.95" step="0.01" value="' + r.lossRate + '" style="width:80px; padding:6px 8px; border:1px solid var(--ws-line-strong, #d8dce3); border-radius:6px;"></td>' +
+                    '<td><input type="text" class="ws-input recipe-note" value="' + (r.note || '').replace(/"/g, '&quot;') + '" placeholder="—" style="width:180px; padding:6px 8px; border:1px solid var(--ws-line-strong, #d8dce3); border-radius:6px;"></td>' +
+                    '<td style="text-align:right;"><button type="button" class="ws-btn ws-btn-sm danger" onclick="removeRecipeRow(this)">Xóa</button></td>' +
+                '</tr>';
+            }).join('');
+        }
+        window.removeRecipeRow = function(btn) {
+            var tr = btn.closest('tr');
+            var rid = tr.getAttribute('data-recipe-rid');
+            // Xóa khỏi allRecipesData để khi lưu không gửi lại
+            allRecipesData = allRecipesData.filter(function(r) { return String(r.id) !== String(rid); });
+            tr.remove();
+        };
+        document.getElementById('recipeProductSelect').addEventListener('change', renderRecipeTable);
+        document.getElementById('recipeSearch').addEventListener('input', renderRecipeTable);
+
+        document.getElementById('btnAddRecipeItem').onclick = function() {
+            var pid = document.getElementById('recipeProductSelect').value;
+            if (!pid) { alert('Vui lòng chọn sản phẩm trước.'); return; }
+            // Thêm 1 dòng trống với danh sách nguyên liệu làm option
+            var tbody = document.getElementById('recipeTableBody');
+            var opts = materialsData.map(function(m) { return '<option value="' + m.materialId + '">' + (m.code || '') + ' — ' + (m.name || '') + '</option>'; }).join('');
+            var tr = document.createElement('tr');
+            tr.setAttribute('data-recipe-new', '1');
+            tr.innerHTML = '<td colspan="2"><select class="ws-select recipe-mat" style="width:100%; padding:6px; border:1px solid var(--ws-line-strong, #d8dce3); border-radius:6px;"><option value="">-- chọn NL --</option>' + opts + '</select></td>' +
+                '<td><input type="number" class="ws-input recipe-dosage" min="0.001" step="0.001" value="1" style="width:120px; padding:6px 8px; border:1px solid var(--ws-line-strong, #d8dce3); border-radius:6px;"></td>' +
+                '<td><input type="text" class="ws-input recipe-unit" value="" placeholder="đơn vị" style="width:80px; padding:6px 8px; border:1px solid var(--ws-line-strong, #d8dce3); border-radius:6px;"></td>' +
+                '<td><input type="number" class="ws-input recipe-loss" min="0" max="0.95" step="0.01" value="0" style="width:80px; padding:6px 8px; border:1px solid var(--ws-line-strong, #d8dce3); border-radius:6px;"></td>' +
+                '<td><input type="text" class="ws-input recipe-note" placeholder="—" style="width:180px; padding:6px 8px; border:1px solid var(--ws-line-strong, #d8dce3); border-radius:6px;"></td>' +
+                '<td style="text-align:right;"><button type="button" class="ws-btn ws-btn-sm danger" onclick="this.closest(\'tr\').remove()">Xóa</button></td>';
+            // Nếu tbody chỉ có placeholder row thì xóa
+            if (tbody.children.length === 1 && tbody.firstElementChild.children[0].getAttribute('colspan') === '7') tbody.innerHTML = '';
+            tbody.appendChild(tr);
+        };
+
+        document.getElementById('btnSaveRecipe').onclick = function() {
+            var pid = document.getElementById('recipeProductSelect').value;
+            if (!pid) { alert('Vui lòng chọn sản phẩm.'); return; }
+            var rows = document.querySelectorAll('#recipeTableBody tr');
+            var items = [];
+            rows.forEach(function(tr) {
+                if (tr.getAttribute('data-recipe-new') === '1') {
+                    var sel = tr.querySelector('.recipe-mat');
+                    var mId = sel ? sel.value : '';
+                    if (!mId) return;
+                } else {
+                    var rid = tr.getAttribute('data-recipe-rid');
+                    var rec = allRecipesData.find(function(r) { return String(r.id) === String(rid); });
+                    if (!rec) return;
+                    var mId = rec.materialId;
+                }
+                items.push({
+                    materialId: mId,
+                    dosage: parseFloat(tr.querySelector('.recipe-dosage').value) || 0,
+                    lossRate: parseFloat(tr.querySelector('.recipe-loss').value) || 0,
+                    note: tr.querySelector('.recipe-note').value || '',
+                    unit: (tr.querySelector('.recipe-unit') && tr.querySelector('.recipe-unit').value) || ''
+                });
+            });
+            var btn = this; btn.disabled = true; btn.textContent = 'Đang lưu…';
+            fetch(ctx + '/inventory', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ action: 'save_recipe', productId: pid, items: JSON.stringify(items) }) })
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    btn.disabled = false; btn.textContent = '💾 Lưu công thức';
+                    if (res.code && res.code !== 'OK' && res.code !== 200) { alert('Lỗi: ' + (res.message || res.code)); return; }
+                    alert((res.message || 'Đã lưu công thức!'));
+                    loadAllRecipes();
+                })
+                .catch(function(err) { btn.disabled = false; btn.textContent = '💾 Lưu công thức'; alert('Lỗi: ' + err); });
+        };
+
+        // Preview nguyên liệu cần dùng khi chọn sản phẩm chế biến
+        document.getElementById('produceProductSelect').addEventListener('change', updateProducePreview);
+        document.getElementById('produceQty').addEventListener('input', updateProducePreview);
+        function updateProducePreview() {
+            var pid = document.getElementById('produceProductSelect').value;
+            var qty = parseFloat(document.getElementById('produceQty').value) || 0;
+            var box = document.getElementById('produceRecipePreview');
+            if (!pid) { box.innerHTML = '<em>Chọn sản phẩm để xem trước nguyên liệu sẽ tiêu hao.</em>'; return; }
+            var rows = allRecipesData.filter(function(r) { return String(r.productId) === String(pid); });
+            if (rows.length === 0) { box.innerHTML = '<em style="color:#dc2626;">Sản phẩm chưa có công thức — hãy tạo công thức trước khi chế biến.</em>'; return; }
+            box.innerHTML = '<strong>Sẽ tiêu hao:</strong><ul style="margin:6px 0 0 16px; padding:0;">' +
+                rows.map(function(r) {
+                    return '<li>' + (r.materialName || r.materialCode) + ': <strong>' + (r.quantityRequired * qty).toFixed(3) + '</strong> ' + (r.unit || '') + '</li>';
+                }).join('') + '</ul>';
+        }
+
+        document.getElementById('btnOpenProduce').onclick = function() {
+            if (allRecipesData.length === 0) loadAllRecipes();
+            if (recipeProductList.length === 0) loadProductsForRecipe();
+            updateProducePreview();
+            openModal('modalProduce');
+        };
+
+        document.getElementById('btnSubmitProduce').onclick = function() {
+            var bId = branchSelect.value;
+            var pid = document.getElementById('produceProductSelect').value;
+            var qty = parseInt(document.getElementById('produceQty').value, 10);
+            var note = document.getElementById('produceNote').value;
+            if (!pid) { alert('Vui lòng chọn sản phẩm.'); return; }
+            if (!(qty > 0)) { alert('Số lượng phải lớn hơn 0.'); return; }
+            var btn = this; btn.disabled = true; btn.textContent = 'Đang chế biến…';
+            fetch(ctx + '/inventory', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ action: 'produce', branchId: bId, productId: pid, productQty: qty, note: note }) })
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    btn.disabled = false; btn.textContent = '⚙ Chế biến';
+                    if (res.code && res.code !== 'OK' && res.code !== 200) { alert('Lỗi: ' + (res.message || res.code)); return; }
+                    alert((res.message || 'Chế biến thành công!'));
+                    closeModal('modalProduce');
+                    loadStock(bId); loadMaterials(bId);
+                })
+                .catch(function(err) { btn.disabled = false; btn.textContent = '⚙ Chế biến'; alert('Lỗi: ' + err); });
+        };
+
+        // Load materials & recipes khi đổi chi nhánh
+        var _origBranchHandler = branchSelect.onchange;
+        branchSelect.addEventListener('change', function() {
+            if (document.getElementById('tab-material').style.display !== 'none') loadMaterials(this.value);
+        });
+
+        // Khi bật tab recipe lần đầu, tải materials để dùng cho "thêm nguyên liệu"
+        document.querySelector('[data-tab="tab-recipe"]').addEventListener('click', function() {
+            if (materialsData.length === 0) loadMaterials(branchSelect.value);
+        });
 
         // Khởi động
         loadBranches();

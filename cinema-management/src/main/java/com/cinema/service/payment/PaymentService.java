@@ -25,12 +25,19 @@ import com.cinema.model.auth.Transaction;
 import com.cinema.model.branch.Branch;
 import com.cinema.model.payment.Payment;
 import com.cinema.model.screen.Seat;
+import com.cinema.model.concession.ConcessionOrder;
+import com.cinema.service.concession.ConcessionService;
 
 /**
  * Payment orchestration for core booking flow.
  * Simplified to VNPAY and BANK_TRANSFER methods only (wallet feature removed).
  */
 public class PaymentService {
+    private ConcessionService concessionService;
+
+    public void setConcessionService(ConcessionService concessionService) {
+        this.concessionService = concessionService;
+    }
     private static final Logger logger = Logger.getLogger(PaymentService.class.getName());
     public static final String ALREADY_PROCESSED = "ALREADY_PROCESSED";
 
@@ -449,4 +456,151 @@ public class PaymentService {
 
     /** Kết quả tạo phiên: payment + redirect URL (mock gateway) nếu có. */
     public record PaymentOutcome(Payment payment, String redirectUrl) { }
+
+    public PaymentOutcome createFnbPaymentSession(long concessionOrderId, long userId,
+                                                   String successUrl, String cancelUrl) throws Exception {
+        return createFnbPaymentSession(concessionOrderId, userId, null, successUrl, cancelUrl);
+    }
+
+    public PaymentOutcome createFnbPaymentSession(long concessionOrderId, long userId,
+                                                   String returnUrl, String successUrl,
+                                                   String cancelUrl) throws Exception {
+        try (Connection conn = DBContext.getConnection()) {
+            ConcessionOrder order = loadConcessionOrder(null, concessionOrderId);
+            if (order == null) {
+                throw new ServiceException.NotFound("ÄÆ¡n báº¯p nÆ°á»›c khÃ´ng tá»“n táº¡i");
+            }
+            if (order.userId() == null || !order.userId().equals(userId)) {
+                throw new ServiceException.Forbidden("Chá»‰ chá»§ Ä‘Æ¡n má»›i Ä‘Æ°á»£c thanh toÃ¡n Ä‘Æ¡n nÃ y");
+            }
+            if (!ConcessionOrder.STATUS_PENDING.equals(order.status())) {
+                throw new ServiceException.Conflict("ÄÆ¡n khÃ´ng á»Ÿ tráº¡ng thÃ¡i chá» thanh toÃ¡n ("
+                        + order.status() + ")");
+            }
+
+            long amountToCharge = order.amountAfterPointsDiscount();
+            if (amountToCharge <= 0) {
+                throw new ServiceException.Validation("Sá»‘ tiá»n thanh toÃ¡n pháº£i lá»›n hÆ¡n 0");
+            }
+
+            Payment payment = new Payment();
+            payment.setConcessionOrderId(concessionOrderId);
+            payment.setMethod(VnPayProvider.METHOD);
+            payment.setAmount(amountToCharge);
+            payment.setStatus(Payment.STATUS_PENDING);
+            String idempotencyKey = "FNB-" + concessionOrderId + "-" + UUID.randomUUID();
+            payment.setIdempotencyKey(idempotencyKey);
+            paymentDao.insert(payment);
+
+            VnPayProvider vnPayProvider = (VnPayProvider) providers.get(VnPayProvider.METHOD);
+            if (vnPayProvider == null) {
+                throw new ServiceException.BusinessRule("VNPAY_NOT_CONFIGURED",
+                        "PhÆ°Æ¡ng thá»©c thanh toÃ¡n VNPay chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh");
+            }
+
+            String safeOrderCode = order.orderCode().replaceAll("[^A-Za-z0-9]", "");
+            String orderInfo = "Thanh toan don FNB " + safeOrderCode;
+
+            Map<String, String> vnpParams = new LinkedHashMap<>();
+            vnpParams.put("vnp_Version", "2.1.0");
+            vnpParams.put("vnp_Command", "pay");
+            vnpParams.put("vnp_TmnCode", vnPayProvider.config().tmnCode());
+            vnpParams.put("vnp_Amount", VnPayUtil.toVnpAmount(amountToCharge));
+            vnpParams.put("vnp_CurrCode", "VND");
+            vnpParams.put("vnp_TxnRef", idempotencyKey);
+            vnpParams.put("vnp_OrderInfo", orderInfo);
+            vnpParams.put("vnp_OrderType", "other");
+            vnpParams.put("vnp_Locale", "vn");
+            vnpParams.put("vnp_ReturnUrl", returnUrl == null || returnUrl.isBlank()
+                    ? vnPayProvider.config().returnUrl() : returnUrl);
+            vnpParams.put("vnp_IpAddr", "127.0.0.1");
+            vnpParams.putAll(VnPayUtil.paymentWindow(vnPayProvider.config().expireMinutes()));
+
+            String redirectUrl = VnPayUtil.buildRedirectUrl(
+                    vnPayProvider.config().payUrl(), vnpParams, vnPayProvider.config().hashSecret());
+
+            logger.info("[VNPAY-FNB] Created payment session " + payment.id()
+                    + " for order " + order.orderCode()
+                    + " amount=" + amountToCharge);
+
+            return new PaymentOutcome(payment, redirectUrl);
+        }
+    }
+
+    public PaymentStatusResult getFnbPaymentStatus(long concessionOrderId) throws Exception {
+        try (Connection conn = DBContext.getConnection()) {
+            String sql = """
+                SELECT p.id, p.status, p.method, p.amount, p.provider_reference, p.confirmed_at
+                FROM dbo.payment p
+                WHERE p.concession_order_id = ? AND p.method = 'VNPAY'
+                ORDER BY p.id DESC
+                """;
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setLong(1, concessionOrderId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return new PaymentStatusResult(
+                                rs.getLong("id"),
+                                rs.getString("status"),
+                                rs.getString("method"),
+                                rs.getLong("amount"),
+                                rs.getString("provider_reference"),
+                                rs.getTimestamp("confirmed_at") != null
+                                        ? rs.getTimestamp("confirmed_at").toLocalDateTime() : null);
+                    }
+                }
+            }
+            return new PaymentStatusResult(null, "NOT_FOUND", null, 0, null, null);
+        }
+    }
+
+    private ConcessionOrder loadConcessionOrder(Connection conn, long orderId) throws Exception {
+        String sql = """
+            SELECT id, order_code, branch_id, user_id, status, total_amount,
+                   points_used, points_discount, pickup_code, pickup_deadline, created_at
+            FROM dbo.concession_order WHERE id = ?
+            """;
+        if (conn != null) {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setLong(1, orderId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return mapConcessionOrder(rs);
+                }
+            }
+        } else {
+            try (Connection c = DBContext.getConnection();
+                 PreparedStatement ps = c.prepareStatement(sql)) {
+                ps.setLong(1, orderId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return mapConcessionOrder(rs);
+                }
+            }
+        }
+        return null;
+    }
+
+    private ConcessionOrder mapConcessionOrder(ResultSet rs) throws Exception {
+        ConcessionOrder order = new ConcessionOrder();
+        order.setId(rs.getLong("id"));
+        order.setOrderCode(rs.getString("order_code"));
+        order.setBranchId(rs.getLong("branch_id"));
+        long userId = rs.getLong("user_id");
+        order.setUserId(rs.wasNull() ? null : userId);
+        order.setStatus(rs.getString("status"));
+        order.setTotalAmount(rs.getLong("total_amount"));
+        order.setPointsUsed(rs.getInt("points_used"));
+        order.setPointsDiscount(rs.getLong("points_discount"));
+        order.setPickupCode(rs.getString("pickup_code"));
+        if (rs.getTimestamp("pickup_deadline") != null) {
+            order.setPickupDeadline(rs.getTimestamp("pickup_deadline").toLocalDateTime());
+        }
+        if (rs.getTimestamp("created_at") != null) {
+            order.setCreatedAt(rs.getTimestamp("created_at").toLocalDateTime());
+        }
+        return order;
+    }
+
+    public record PaymentStatusResult(Long paymentId, String status, String method,
+                                     long amount, String txnRef,
+                                     java.time.LocalDateTime confirmedAt) { }
 }

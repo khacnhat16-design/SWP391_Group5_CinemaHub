@@ -41,7 +41,10 @@
     // ─── helpers ────────────────────────────────────────────────────────────
 
     function buildField(field) {
-        const wrap = el('div', { class: 'ws-field' + (field.fullWidth ? ' full' : '') });
+        const wrap = el('div', {
+            class: 'ws-field' + (field.fullWidth ? ' full' : '')
+                + (field.className ? ' ' + field.className : '')
+        });
 
         // Label gồm tên field + dấu * nếu required; aria-required để screen reader
         // vẫn báo lỗi khi user để trống.
@@ -71,22 +74,28 @@
             wrap.classList.add('ws-field-hidden');
             wrap.appendChild(control);
             return wrap;
-        } else if (field.type === 'select') {
+        } else if (field.type === 'select' || field.type === 'multiselect') {
             control = el('select', {
                 id: 'fld-' + field.name,
                 name: field.name,
                 required: field.required || false
             });
+            if (field.type === 'multiselect') {
+                control.multiple = true;
+                control.size = field.size || 5;
+            }
             const opts = field.options || [];
-            if (!field.required) {
+            if (!field.required && field.type !== 'multiselect') {
                 control.appendChild(el('option', { value: '' }, ['— Chọn —']));
             }
+            const selectedValues = Array.isArray(field.value) ? field.value.map(String)
+                : field.value == null ? [] : [String(field.value)];
             opts.forEach(o => {
                 const value = typeof o === 'string' ? o : o.value;
                 const labelText = typeof o === 'string' ? o : o.label;
                 control.appendChild(el('option', {
                     value: value,
-                    selected: String(value) === String(field.value ?? '')
+                    selected: selectedValues.includes(String(value))
                 }, [labelText]));
             });
         } else if (field.type === 'textarea') {
@@ -95,7 +104,8 @@
                 name: field.name,
                 rows: field.rows || 4,
                 placeholder: field.placeholder || '',
-                required: field.required || false
+                required: field.required || false,
+                maxlength: field.maxLength
             });
             control.value = field.value ?? '';
         } else if (field.type === 'file') {
@@ -106,6 +116,28 @@
                 accept: field.accept || 'image/*',
                 required: field.required || false
             });
+        } else if (field.type === 'checkbox-group') {
+            control = el('div', { class: 'ws-checkbox-group', role: 'group', 'aria-label': field.label });
+            const selectedValues = Array.isArray(field.value) ? field.value.map(String) : [];
+            (field.options || []).forEach((option, index) => {
+                const value = typeof option === 'string' ? option : option.value;
+                const labelText = typeof option === 'string' ? option : option.label;
+                const id = 'fld-' + field.name + '-' + index;
+                const checkbox = el('input', {
+                    id: id,
+                    name: field.name,
+                    type: 'checkbox',
+                    value: value
+                });
+                checkbox.checked = selectedValues.includes(String(value));
+                const optionLabel = el('label', { class: 'ws-checkbox-option', for: id });
+                optionLabel.appendChild(checkbox);
+                optionLabel.appendChild(el('span', {}, [labelText]));
+                control.appendChild(optionLabel);
+            });
+            wrap.appendChild(control);
+            wrap.appendChild(el('div', { class: 'ws-field-error', 'data-error-for': field.name }));
+            return wrap;
         } else if (field.type === 'checkbox') {
             const cbWrap = el('div', { class: 'ws-checkbox' });
             control = el('input', {
@@ -133,8 +165,10 @@
                 min: field.min,
                 max: field.max,
                 step: field.step,
+                readonly: field.readonly || false,
                 pattern: field.pattern,
-                autocomplete: field.autocomplete
+                autocomplete: field.autocomplete,
+                maxlength: field.maxLength
             });
         }
 
@@ -152,6 +186,36 @@
 
                 if (f.type === 'checkbox') {
                     return; // optional field, validate by required attr
+                }
+                if (f.type === 'checkbox-group') {
+                    const selected = form.querySelectorAll(`[name="${f.name}"]:checked`);
+                    const group = form.querySelector(`[role="group"][aria-label="${f.label}"]`);
+                    const error = f.required && selected.length === 0 ? 'Chọn ít nhất một thể loại' : '';
+                    if (error && errorBox) {
+                        errorBox.textContent = error;
+                        if (group) group.classList.add('ws-field-invalid');
+                        const firstCheckbox = form.querySelector(`[name="${f.name}"]`);
+                        if (!firstInvalid) firstInvalid = firstCheckbox;
+                    } else if (group) {
+                        group.classList.remove('ws-field-invalid');
+                    }
+                    return;
+                }
+                if (f.type === 'multiselect') {
+                    const selected = form.querySelectorAll(`[name="${f.name}"] option:checked`);
+                    const error = f.required && selected.length === 0 ? 'Chọn ít nhất một thể loại' : '';
+                    if (error && errorBox) {
+                        errorBox.textContent = error;
+                        const select = form.querySelector(`[name="${f.name}"]`);
+                        if (select) {
+                            select.classList.add('ws-field-invalid');
+                            if (!firstInvalid) firstInvalid = select;
+                        }
+                    } else {
+                        const select = form.querySelector(`[name="${f.name}"]`);
+                        if (select) select.classList.remove('ws-field-invalid');
+                    }
+                    return;
                 }
 
                 const input = form.querySelector(`[name="${f.name}"]`);
@@ -175,7 +239,8 @@
                     error = `Tối thiểu ${f.minLength} ký tự`;
                 } else if (f.maxLength && value.length > f.maxLength) {
                     error = `Tối đa ${f.maxLength} ký tự`;
-                } else if (f.customValidate) {
+                }
+                if (!error && f.customValidate) {
                     const customError = f.customValidate(value);
                     if (customError) error = customError;
                 }
@@ -198,11 +263,21 @@
         const data = {};
         const fd = new FormData(form);
         for (const [k, v] of fd.entries()) {
-            data[k] = v;
+            const multipleSelect = form.querySelector(`select[multiple][name="${k}"]`);
+            const checkboxGroup = form.querySelector(`.ws-checkbox-group input[name="${k}"]`);
+            if (multipleSelect) {
+                data[k] = Array.from(multipleSelect.selectedOptions).map(option => option.value).join(', ');
+            } else if (checkboxGroup) {
+                data[k] = Array.from(form.querySelectorAll(`.ws-checkbox-group input[name="${k}"]:checked`))
+                    .map(input => input.value).join(', ');
+            } else {
+                data[k] = v;
+            }
         }
         // Checkbox unchecked không xuất hiện trong FormData.entries() → cần loop
         // riêng để set giá trị '' (để backend parse/check nullable) thay vì undefined.
         form.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            if (cb.closest('.ws-checkbox-group')) return;
             data[cb.name] = cb.checked ? (cb.value || 'true') : '';
         });
         return data;
@@ -219,10 +294,12 @@
             sections = [],
             onSubmit,
             onCancel,
+            onReady,
             submitLabel = 'Lưu',
             cancelLabel = 'Hủy',
             backUrl, // optional: explicit back URL (default history.back)
-            renderFooter // optional: hook to inject extra sections into the form (e.g. poster uploader)
+            renderFooter, // optional: hook to inject extra sections into the form (e.g. poster uploader)
+            hideActions = false // optional: hide default action bar (form-page tự build footer)
         } = opts;
 
         // Đồng bộ topbar `<h1>` + `<title>` với title của form page — fix trường hợp
@@ -284,23 +361,33 @@
             renderFooter(form);
         }
 
-        const actions = el('div', { class: 'ws-form-actions' });
-        const cancelBtn = el('button', {
-            type: 'button',
-            class: 'ws-btn secondary'
-        }, [cancelLabel]);
-        cancelBtn.addEventListener('click', () => {
-            if (typeof onCancel === 'function') onCancel();
-            else if (backUrl) window.location.href = backUrl;
-            else history.back();
-        });
-        const submitBtn = el('button', {
-            type: 'submit',
-            class: 'ws-btn primary'
-        }, [submitLabel]);
-        actions.appendChild(cancelBtn);
-        actions.appendChild(submitBtn);
-        form.appendChild(actions);
+        // submitBtn/cancelBtn khai báo ở scope ngoài block hideActions để handler
+        // submit bên dưới luôn truy cập được — trước đây bị khai báo trong `else`
+        // nên khi hideActions=true hoặc renderFooter không gọi actions.appendChild
+        // thì handler throw ReferenceError: submitBtn is not defined.
+        let submitBtn = null;
+        let cancelBtn = null;
+        if (hideActions) {
+            // Caller (vd. màn hình phân công nhân sự) tự build action bar riêng.
+        } else {
+            const actions = el('div', { class: 'ws-form-actions' });
+            cancelBtn = el('button', {
+                type: 'button',
+                class: 'ws-btn secondary'
+            }, [cancelLabel]);
+            cancelBtn.addEventListener('click', () => {
+                if (typeof onCancel === 'function') onCancel();
+                else if (backUrl) window.location.href = backUrl;
+                else history.back();
+            });
+            submitBtn = el('button', {
+                type: 'submit',
+                class: 'ws-btn primary'
+            }, [submitLabel]);
+            actions.appendChild(cancelBtn);
+            actions.appendChild(submitBtn);
+            form.appendChild(actions);
+        }
 
         form.addEventListener('submit', function (e) {
             e.preventDefault();
@@ -311,15 +398,15 @@
                 return;
             }
             var data = collectData(form);
-            submitBtn.disabled = true;
-            cancelBtn.disabled = true;
+            if (submitBtn) submitBtn.disabled = true;
+            if (cancelBtn) cancelBtn.disabled = true;
             Promise.resolve().then(function () { return onSubmit(data); }).then(function () {
                 hub.notify('Đã lưu thay đổi.', 'ok');
             }).catch(function (err) {
                 serverError.textContent = err.message || 'Lỗi hệ thống. Vui lòng thử lại.';
                 serverError.hidden = false;
-                submitBtn.disabled = false;
-                cancelBtn.disabled = false;
+                if (submitBtn) submitBtn.disabled = false;
+                if (cancelBtn) cancelBtn.disabled = false;
                 hub.notify(err.message || 'Không thể lưu dữ liệu.', 'err');
             });
         });
@@ -332,6 +419,8 @@
         page.appendChild(card);
 
         viewRoot.replaceChildren(page);
+
+        if (typeof onReady === 'function') onReady(form);
 
         // Focus vào input đầu tiên để keyboard user có thể gõ ngay, không cần Tab.
         const firstInput = form.querySelector('input, select, textarea');

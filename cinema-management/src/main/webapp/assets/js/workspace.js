@@ -75,21 +75,32 @@
             // Render items
             const items = (data && Array.isArray(data.recent)) ? data.recent : [];
             if (items.length === 0) {
-                bellList.innerHTML = '<div class="ws-popover-empty">Khong co thong bao moi.</div>';
+                bellList.innerHTML = '<div class="ws-popover-empty">Không có thông báo mới.</div>';
             } else {
                 bellList.innerHTML = items.map(function (it) {
-                    const title = String(it.title || it.message || 'Thong bao');
+                    const title = String(it.title || it.message || 'Thông báo');
+                    const body = String(it.body || '');
                     const type = String(it.type || 'info');
                     const time = it.createdAt || it.time || '';
-                    return '<div class="ws-popover-item">' +
-                        '<div class="type">' + escapeHtml(type) + '</div>' +
-                        '<div class="title">' + escapeHtml(title) + '</div>' +
-                        '<div class="time">' + escapeHtml(time) + '</div>' +
+                    return '<div class="ws-popover-item" data-id="' + it.id + '" style="cursor:pointer;padding:10px 12px;border-bottom:1px solid #f3f4f6;">' +
+                        '<div class="type" style="font-size:11px;font-weight:600;color:#ef4444;text-transform:uppercase;">' + escapeHtml(type) + '</div>' +
+                        '<div class="title" style="font-weight:600;font-size:13px;color:#111827;margin-top:2px;">' + escapeHtml(title) + '</div>' +
+                        (body ? '<div class="body" style="font-size:12px;color:#4b5563;margin:4px 0;line-height:1.4;">' + escapeHtml(body) + '</div>' : '') +
+                        '<div class="time" style="font-size:11px;color:#9ca3af;">' + escapeHtml(time) + '</div>' +
                         '</div>';
                 }).join('');
+                bellList.querySelectorAll('.ws-popover-item').forEach(function (node) {
+                    node.addEventListener('click', function () {
+                        var id = this.getAttribute('data-id');
+                        if (id) {
+                            fetch(ctx + '/api/notification/mark-read/' + id, { method: 'POST', credentials: 'same-origin' })
+                                .then(function () { loadBell(); });
+                        }
+                    });
+                });
             }
         }).catch(function (e) {
-            bellList.innerHTML = '<div class="ws-popover-empty">Khong tai duoc thong bao.</div>';
+            bellList.innerHTML = '<div class="ws-popover-empty">Không tải được thông báo.</div>';
         });
     }
 
@@ -110,6 +121,9 @@
         });
     }
 
-    // Initial load (badge only) — silent fail OK
-    if (bellBadge && ctx) loadBell();
+    // Initial load (badge only) & định kỳ 15 giây cập nhật chuông
+    if (bellBadge && ctx) {
+        loadBell();
+        setInterval(loadBell, 15000);
+    }
 })();
