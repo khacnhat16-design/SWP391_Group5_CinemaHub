@@ -48,6 +48,7 @@ public final class CinemaApplication {
     }
 
     public static void main(String[] args) throws Exception {
+        System.setProperty("java.net.preferIPv4Stack", "true");
         loadEnvFile();
         int port = resolvePort(
                 System.getProperty("cinema.port"),

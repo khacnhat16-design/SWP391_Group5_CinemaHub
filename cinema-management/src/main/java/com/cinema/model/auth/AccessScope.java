@@ -80,10 +80,6 @@ public final class AccessScope {
             return PUBLIC_PERMISSIONS.contains(permission);
         }
         if (role == Role.ADMIN) {
-            // Admin khÃ´ng liÃªn quan Ä‘áº¿n kho hÃ ng chi nhÃ¡nh
-            if ("INVENTORY_VIEW".equals(permission) || "INVENTORY_MANAGE".equals(permission)) {
-                return false;
-            }
             return true;
         }
         return permissionsFor(role).contains(permission);

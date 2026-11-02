@@ -25,13 +25,7 @@
             var viewRoot = document.getElementById('viewRoot');
             if (!viewRoot) return;
 
-            if (isAdmin) {
-                viewRoot.replaceChildren(hub.el('div', { class: 'ws-empty', style: 'padding: 48px 24px; text-align: center;' }, [
-                    hub.el('h3', {}, ['Không có quyền truy cập']),
-                    hub.el('p', { class: 'muted', style: 'margin: 8px 0 16px;' }, ['Admin hệ thống không quản lý trực tiếp kho hàng chi nhánh. Kho hàng do Quản lý và Nhân viên chi nhánh vận hành.'])
-                ]));
-                return;
-            }
+            // Admin co the xem tong quan kho, cong thuc va canh bao
 
             viewRoot.replaceChildren(hub.el('div', { class: 'ws-list-loading', style: 'padding: 48px 24px; text-align: center;' }, [
                 hub.el('div', { class: 'ws-spinner' }),

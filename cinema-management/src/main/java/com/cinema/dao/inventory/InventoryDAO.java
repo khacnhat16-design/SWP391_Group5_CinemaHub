@@ -986,13 +986,18 @@ public class InventoryDAO {
 
     /** Kiểm tra xem thông báo loại này cho món này đã được gửi cho user trong vòng 24h chưa để tránh spam. */
     public boolean hasRecentNotification(long userId, String type, String itemIdentifier) throws SQLException {
+        try (Connection conn = DBContext.getConnection()) {
+            return hasRecentNotification(conn, userId, type, itemIdentifier);
+        }
+    }
+
+    public boolean hasRecentNotification(Connection conn, long userId, String type, String itemIdentifier) throws SQLException {
         String sql = """
                 SELECT TOP 1 id FROM dbo.notification
                 WHERE user_id = ? AND type = ? AND body LIKE ?
                   AND created_at >= DATEADD(hour, -24, SYSUTCDATETIME())
                 """;
-        try (Connection conn = DBContext.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, userId);
             ps.setString(2, type);
             ps.setString(3, "%" + itemIdentifier + "%");
