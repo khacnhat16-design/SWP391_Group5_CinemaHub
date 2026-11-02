@@ -444,7 +444,11 @@ public class PricingService {
     private AllRules loadAllRules() throws Exception {
         List<PriceRule> all = priceRuleDao.findAll();
         AllRules result = new AllRules();
-        result.holidayMonthDays = holidayDao == null ? Set.of() : holidayDao.findEnabledMonthDays();
+        try {
+            result.holidayMonthDays = holidayDao == null ? Set.of() : holidayDao.findEnabledMonthDays();
+        } catch (Exception e) {
+            result.holidayMonthDays = Set.of();
+        }
         for (PriceRule rule : all) {
             switch (rule.scope()) {
                 case PriceRule.SCOPE_SHOWTIME -> result.showtime.add(rule);

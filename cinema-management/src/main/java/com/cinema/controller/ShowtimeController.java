@@ -330,6 +330,7 @@ public class ShowtimeController extends HttpServlet {
     }
 
     private void handleException(HttpServletResponse response, Exception e) throws IOException {
+        e.printStackTrace();
         if (e instanceof ServiceException service) {
             response.setStatus(service.httpStatus());
             response.setContentType("application/json;charset=UTF-8");
