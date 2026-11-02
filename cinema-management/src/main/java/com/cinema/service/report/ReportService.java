@@ -49,11 +49,14 @@ public class ReportService {
         StringBuilder sql = new StringBuilder("""
             SELECT
               COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') THEN t.total_amount END), 0) AS revenue,
-              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) END), 0) AS tickets_sold,
-              COALESCE(SUM(CASE WHEN t.status = 'CANCELLED' THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) END), 0) AS tickets_cancelled,
+              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') THEN tc.seat_count END), 0) AS tickets_sold,
+              COALESCE(SUM(CASE WHEN t.status = 'CANCELLED' THEN tc.seat_count END), 0) AS tickets_cancelled,
               COALESCE(SUM(CASE WHEN t.status = 'CANCELLED' THEN t.refund_amount END), 0) AS refund_total
             FROM dbo.ticket t
             JOIN dbo.showtime s ON s.id = t.showtime_id
+            OUTER APPLY (
+                SELECT COUNT(*) AS seat_count FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id
+            ) tc
             WHERE CAST(t.created_at AS DATE) BETWEEN ? AND ?
             """);
         if (effectiveBranch != null) sql.append(" AND t.branch_id = ?");
@@ -198,10 +201,13 @@ public class ReportService {
         StringBuilder sql = new StringBuilder("""
             SELECT s.movie_id, m.title,
                    COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') THEN t.total_amount END), 0) AS revenue,
-                   COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) END), 0) AS tickets_sold
+                   COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') THEN tc.seat_count END), 0) AS tickets_sold
             FROM dbo.ticket t
             JOIN dbo.showtime s ON s.id = t.showtime_id
             JOIN dbo.movie m ON m.id = s.movie_id
+            OUTER APPLY (
+                SELECT COUNT(*) AS seat_count FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id
+            ) tc
             WHERE CAST(t.created_at AS DATE) BETWEEN ? AND ?
             """);
         if (effectiveBranch != null) sql.append(" AND t.branch_id = ?");
@@ -643,16 +649,25 @@ public class ReportService {
         Long eff = resolveBranchScope(branchScope, branchFilter);
         StringBuilder sql = new StringBuilder("""
             SELECT
-              COALESCE(SUM((SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id)), 0) AS total,
-              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) ELSE 0 END), 0) AS confirmed,
-              COALESCE(SUM(CASE WHEN t.status = 'PENDING' THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) ELSE 0 END), 0) AS pending,
-              COALESCE(SUM(CASE WHEN t.status = 'CANCELLED' THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) ELSE 0 END), 0) AS cancelled,
-              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') AND NOT (t.user_id IS NULL OR EXISTS (SELECT 1 FROM dbo.payment p WHERE p.ticket_id = t.id AND (p.method IN ('CASH','BANK_TRANSFER') OR p.idempotency_key LIKE 'POS-%'))) THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) ELSE 0 END), 0) AS online_cnt,
-              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') AND (t.user_id IS NULL OR EXISTS (SELECT 1 FROM dbo.payment p WHERE p.ticket_id = t.id AND (p.method IN ('CASH','BANK_TRANSFER') OR p.idempotency_key LIKE 'POS-%'))) THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) ELSE 0 END), 0) AS pos_cnt,
-              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') AND (s.start_time IS NULL OR CAST(s.start_time AS DATE) > CAST(t.created_at AS DATE)) THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) ELSE 0 END), 0) AS advance_cnt,
-              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') AND s.start_time IS NOT NULL AND CAST(s.start_time AS DATE) <= CAST(t.created_at AS DATE) THEN (SELECT COUNT(*) FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id) ELSE 0 END), 0) AS walkin_cnt
+              COALESCE(SUM(tc.seat_count), 0) AS total,
+              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') THEN tc.seat_count ELSE 0 END), 0) AS confirmed,
+              COALESCE(SUM(CASE WHEN t.status = 'PENDING' THEN tc.seat_count ELSE 0 END), 0) AS pending,
+              COALESCE(SUM(CASE WHEN t.status = 'CANCELLED' THEN tc.seat_count ELSE 0 END), 0) AS cancelled,
+              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') AND NOT (t.user_id IS NULL OR pay.has_pos = 1) THEN tc.seat_count ELSE 0 END), 0) AS online_cnt,
+              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') AND (t.user_id IS NULL OR pay.has_pos = 1) THEN tc.seat_count ELSE 0 END), 0) AS pos_cnt,
+              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') AND (s.start_time IS NULL OR CAST(s.start_time AS DATE) > CAST(t.created_at AS DATE)) THEN tc.seat_count ELSE 0 END), 0) AS advance_cnt,
+              COALESCE(SUM(CASE WHEN t.status IN ('CONFIRMED','USED') AND s.start_time IS NOT NULL AND CAST(s.start_time AS DATE) <= CAST(t.created_at AS DATE) THEN tc.seat_count ELSE 0 END), 0) AS walkin_cnt
             FROM dbo.ticket t
             LEFT JOIN dbo.showtime s ON s.id = t.showtime_id
+            OUTER APPLY (
+                SELECT COUNT(*) AS seat_count FROM dbo.ticket_seat ts WHERE ts.ticket_id = t.id
+            ) tc
+            OUTER APPLY (
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1 FROM dbo.payment p
+                    WHERE p.ticket_id = t.id AND (p.method IN ('CASH','BANK_TRANSFER') OR p.idempotency_key LIKE 'POS-%')
+                ) THEN 1 ELSE 0 END AS has_pos
+            ) pay
             WHERE CAST(t.created_at AS DATE) BETWEEN ? AND ?
             """);
         if (eff != null) sql.append(" AND t.branch_id = ?");
