@@ -85,6 +85,10 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h6M7 16h4"/></svg>
                         Mẫu giá vé
                     </a>
+                    <a class="ws-menu-link ${wsActive == 'report' ? 'active' : ''}" href="${wsCtx}/console?module=report">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                        Báo cáo
+                    </a>
                 </div>
 
                 <div class="ws-menu-group">
@@ -171,6 +175,10 @@
                     <a class="ws-menu-link ${wsActive == 'pricing-templates' ? 'active' : ''}" href="${wsCtx}/console?module=pricing-templates">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h6M7 16h4"/></svg>
                         Mẫu giá vé
+                    </a>
+                    <a class="ws-menu-link ${wsActive == 'report' ? 'active' : ''}" href="${wsCtx}/console?module=report">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                        Báo cáo
                     </a>
                 </div>
 

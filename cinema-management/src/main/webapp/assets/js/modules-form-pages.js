@@ -4838,4 +4838,575 @@
         }
     });
 
+
+    // ================================================================
+    //  REPORT (Admin + Manager) - Feature 11 Row 55
+    // ================================================================
+    router.register('report', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            var params = new URLSearchParams(window.location.search);
+            var now = new Date();
+            var today = now.toISOString().slice(0, 10);
+            var monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+
+            var page = hub.el('div', { class: 'ws-page', style: 'max-width:1200px;margin:0 auto;padding-bottom:40px;' });
+            page.appendChild(hub.el('div', { class: 'ws-page-header', style: 'margin-bottom:20px;' }, [
+                hub.el('h1', { class: 'ws-page-title', style: 'font-size:1.6rem;font-weight:700;color:#1e293b;margin:0 0 6px 0;' }, ['Báo cáo doanh thu & vận hành']),
+                hub.el('p', { class: 'ws-page-subtitle', style: 'color:#64748b;margin:0;font-size:0.9rem;' }, ['Tổng hợp dữ liệu bán vé, doanh số bắp nước (F&B) và vận hành theo chi nhánh.'])
+            ]));
+
+            // Toolbar chọn khoảng thời gian + phím tắt nhanh
+            var toolbar = hub.el('div', { class: 'ws-card', style: 'background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);' });
+            var left = hub.el('div', { style: 'display:flex;align-items:center;flex-wrap:wrap;gap:12px;' });
+
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || document.querySelector('meta[name="role"]') || {}).content || '';
+            var isAdmin = (roleMeta === 'ADMIN');
+            var branchSelect = null;
+            if (isAdmin) {
+                var curBranch = params.get('branchId') || (window.__currentDashboardBranchId || '');
+                branchSelect = hub.el('select', { style: 'padding:7px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:0.9rem;background:#fff;font-weight:600;color:#1e293b;cursor:pointer;' }, [
+                    hub.el('option', { value: '', selected: !curBranch }, ['Tất cả chi nhánh (Toàn chuỗi)'])
+                ]);
+                if (curBranch) {
+                    branchSelect.appendChild(hub.el('option', { value: curBranch, selected: true }, ['Chi nhánh #' + curBranch]));
+                }
+                hub.api('/branch').then(function (branches) {
+                    var branchList = Array.isArray(branches) ? branches : [];
+                    branchSelect.innerHTML = '';
+                    branchSelect.appendChild(hub.el('option', { value: '', selected: !curBranch }, ['Tất cả chi nhánh (Toàn chuỗi)']));
+                    branchList.forEach(function (b) {
+                        var isSel = String(curBranch) === String(b.id);
+                        var opt = hub.el('option', { value: String(b.id) }, [b.name ? b.name : '#' + b.id]);
+                        if (isSel) opt.selected = true;
+                        branchSelect.appendChild(opt);
+                    });
+                    if (curBranch) branchSelect.value = curBranch;
+                }).catch(function () {});
+                branchSelect.addEventListener('change', function () {
+                    window.__currentDashboardBranchId = branchSelect.value;
+                    load();
+                });
+                left.appendChild(hub.el('label', { style: 'display:flex;align-items:center;gap:6px;font-size:0.88rem;font-weight:600;color:#475569;' }, ['Chi nhánh:', branchSelect]));
+            }
+
+            var fromInput = hub.el('input', { type: 'date', value: params.get('from') || monthAgo, 'aria-label': 'Từ ngày', style: 'padding:7px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:0.9rem;background:#f8fafc;' });
+            var toInput = hub.el('input', { type: 'date', value: params.get('to') || today, 'aria-label': 'Đến ngày', style: 'padding:7px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:0.9rem;background:#f8fafc;' });
+            left.appendChild(hub.el('label', { style: 'display:flex;align-items:center;gap:6px;font-size:0.88rem;font-weight:600;color:#475569;' }, ['Từ ngày:', fromInput]));
+            left.appendChild(hub.el('label', { style: 'display:flex;align-items:center;gap:6px;font-size:0.88rem;font-weight:600;color:#475569;' }, ['Đến ngày:', toInput]));
+
+            // Nút bấm nhanh
+            var quickFilters = hub.el('div', { style: 'display:flex;align-items:center;gap:6px;' });
+            function makeQuickBtn(text, getRange) {
+                var btn = hub.el('button', { type: 'button', class: 'ws-btn secondary small', style: 'padding:6px 12px;font-size:0.8rem;border-radius:6px;background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;cursor:pointer;' }, [text]);
+                btn.addEventListener('click', function () {
+                    var r = getRange();
+                    fromInput.value = r.from;
+                    toInput.value = r.to;
+                    load();
+                });
+                return btn;
+            }
+            quickFilters.appendChild(makeQuickBtn('Hôm nay', function () {
+                var t = new Date().toISOString().slice(0, 10);
+                return { from: t, to: t };
+            }));
+            quickFilters.appendChild(makeQuickBtn('7 ngày qua', function () {
+                var t = new Date().toISOString().slice(0, 10);
+                var f = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+                return { from: f, to: t };
+            }));
+            quickFilters.appendChild(makeQuickBtn('30 ngày qua', function () {
+                var t = new Date().toISOString().slice(0, 10);
+                var f = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+                return { from: f, to: t };
+            }));
+            quickFilters.appendChild(makeQuickBtn('Tháng này', function () {
+                var d = new Date();
+                var f = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+                var t = d.toISOString().slice(0, 10);
+                return { from: f, to: t };
+            }));
+            left.appendChild(quickFilters);
+            toolbar.appendChild(left);
+
+            var right = hub.el('div', { style: 'display:flex;align-items:center;gap:10px;' });
+            var runBtn = hub.el('button', { class: 'ws-btn primary', type: 'button', style: 'padding:8px 20px;font-weight:600;border-radius:8px;background:#2563eb;color:#fff;border:none;cursor:pointer;' }, ['Xem báo cáo']);
+            right.appendChild(runBtn);
+            toolbar.appendChild(right);
+            page.appendChild(toolbar);
+
+            // Container thẻ KPI 6 ô đẹp mắt
+            var kpis = hub.el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:14px;margin-bottom:24px;' });
+            page.appendChild(kpis);
+
+            // Tabs chuyển đổi bảng chi tiết
+            var tabsContainer = hub.el('div', { style: 'display:flex;gap:8px;margin-bottom:16px;border-bottom:2px solid #e2e8f0;padding-bottom:8px;flex-wrap:wrap;' });
+            var currentTab = 'orders'; // 'orders' | 'fnb' | 'movies' | 'daily'
+            var tabBtnOrders = hub.el('button', { type: 'button', class: 'ws-tab-btn active', style: 'padding:8px 18px;border-radius:8px;font-weight:600;font-size:0.92rem;border:none;cursor:pointer;background:#2563eb;color:#fff;transition:all .15s;' }, ['Đơn hàng F&B']);
+            var tabBtnFnb = hub.el('button', { type: 'button', class: 'ws-tab-btn', style: 'padding:8px 18px;border-radius:8px;font-weight:600;font-size:0.92rem;border:none;cursor:pointer;background:#f1f5f9;color:#475569;transition:all .15s;' }, ['Sản phẩm F&B']);
+            var tabBtnMovies = hub.el('button', { type: 'button', class: 'ws-tab-btn', style: 'padding:8px 18px;border-radius:8px;font-weight:600;font-size:0.92rem;border:none;cursor:pointer;background:#f1f5f9;color:#475569;transition:all .15s;' }, ['Vé xem phim']);
+            var tabBtnDaily = hub.el('button', { type: 'button', class: 'ws-tab-btn', style: 'padding:8px 18px;border-radius:8px;font-weight:600;font-size:0.92rem;border:none;cursor:pointer;background:#f1f5f9;color:#475569;transition:all .15s;' }, ['Chi tiết theo Ngày']);
+            tabsContainer.appendChild(tabBtnOrders);
+            tabsContainer.appendChild(tabBtnFnb);
+            tabsContainer.appendChild(tabBtnMovies);
+            tabsContainer.appendChild(tabBtnDaily);
+            page.appendChild(tabsContainer);
+
+            var tableWrap = hub.el('div', { class: 'ws-card', style: 'background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.04);padding:0;' });
+            page.appendChild(tableWrap);
+            viewRoot.replaceChildren(page);
+
+            var reportData = null;
+
+            function renderTabsHeader() {
+                var orderCount = (reportData && reportData.orders && reportData.orders.length) || 0;
+                var fnbCount = (reportData && reportData.products && reportData.products.length) || 0;
+                var movCount = (reportData && reportData.movies && reportData.movies.length) || 0;
+                var dayCount = (reportData && reportData.daily && reportData.daily.length) || 0;
+
+                tabBtnOrders.textContent = 'Đơn hàng F&B (' + orderCount + ')';
+                tabBtnFnb.textContent = 'Món & Combo (' + fnbCount + ')';
+                tabBtnMovies.textContent = 'Vé xem phim (' + movCount + ')';
+                tabBtnDaily.textContent = 'Chi tiết theo Ngày (' + dayCount + ')';
+
+                var activeStyle = 'padding:8px 18px;border-radius:8px;font-weight:600;font-size:0.92rem;border:none;cursor:pointer;background:#2563eb;color:#fff;';
+                var inactiveStyle = 'padding:8px 18px;border-radius:8px;font-weight:600;font-size:0.92rem;border:none;cursor:pointer;background:#f1f5f9;color:#475569;';
+
+                tabBtnOrders.style.cssText = currentTab === 'orders' ? activeStyle : inactiveStyle;
+                tabBtnFnb.style.cssText = (currentTab === 'fnb' ? activeStyle : inactiveStyle) + (fnbCount > 0 ? '' : 'display:none;');
+                tabBtnMovies.style.cssText = currentTab === 'movies' ? activeStyle : inactiveStyle;
+                tabBtnDaily.style.cssText = currentTab === 'daily' ? activeStyle : inactiveStyle;
+            }
+
+            var PAGE_SIZE = 10;
+            var tabPages = { orders: 0, fnb: 0, movies: 0, daily: 0 };
+
+            function renderPagination(total, page, pageSize, onPageChange) {
+                if (total <= pageSize) return null;
+                var totalPages = Math.ceil(total / pageSize);
+                var wrap = hub.el('div', { class: 'ws-pagination', style: 'padding:12px 18px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid #e2e8f0;background:#fff;' });
+                var from = page * pageSize + 1;
+                var to = Math.min((page + 1) * pageSize, total);
+                var info = hub.el('div', { class: 'ws-pagination-info', style: 'font-size:0.85rem;color:#64748b;font-weight:500;' }, [from + '–' + to + ' / ' + total + ' mục']);
+                wrap.appendChild(info);
+
+                var controls = hub.el('div', { class: 'ws-pagination-controls', style: 'display:flex;align-items:center;gap:6px;' });
+                var prevBtn = hub.el('button', {
+                    class: 'ws-pagination-btn',
+                    type: 'button',
+                    style: 'padding:4px 12px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;cursor:pointer;font-size:0.85rem;color:#334155;',
+                    'aria-label': 'Trang trước'
+                }, ['Trước']);
+                prevBtn.disabled = page === 0;
+                if (page === 0) prevBtn.style.opacity = '0.5';
+                prevBtn.addEventListener('click', function () { onPageChange(page - 1); });
+                controls.appendChild(prevBtn);
+
+                for (var p = 0; p < totalPages; p++) {
+                    if (totalPages > 7) {
+                        if (p > 0 && p < page - 1 && p !== 0) {
+                            if (p === 1) controls.appendChild(hub.el('span', { style: 'padding:0 4px;color:#9ca3af;' }, ['…']));
+                            continue;
+                        }
+                        if (p < totalPages - 1 && p > page + 1 && p !== totalPages - 1) {
+                            if (p === totalPages - 2) controls.appendChild(hub.el('span', { style: 'padding:0 4px;color:#9ca3af;' }, ['…']));
+                            continue;
+                        }
+                    }
+                    (function (pg) {
+                        var isActive = (pg === page);
+                        var btn = hub.el('button', {
+                            class: 'ws-pagination-btn' + (isActive ? ' active' : ''),
+                            type: 'button',
+                            style: 'min-width:32px;height:32px;padding:0 8px;border-radius:6px;font-size:0.85rem;font-weight:600;cursor:pointer;' +
+                                (isActive ? 'background:#2563eb;color:#fff;border:1px solid #2563eb;' : 'background:#fff;color:#334155;border:1px solid #cbd5e1;')
+                        }, [String(pg + 1)]);
+                        btn.addEventListener('click', function () { onPageChange(pg); });
+                        controls.appendChild(btn);
+                    })(p);
+                }
+
+                var nextBtn = hub.el('button', {
+                    class: 'ws-pagination-btn',
+                    type: 'button',
+                    style: 'padding:4px 12px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;cursor:pointer;font-size:0.85rem;color:#334155;',
+                    'aria-label': 'Trang sau'
+                }, ['Sau']);
+                nextBtn.disabled = page >= totalPages - 1;
+                if (page >= totalPages - 1) nextBtn.style.opacity = '0.5';
+                nextBtn.addEventListener('click', function () { onPageChange(page + 1); });
+                controls.appendChild(nextBtn);
+
+                wrap.appendChild(controls);
+                return wrap;
+            }
+
+            tabBtnOrders.addEventListener('click', function () { currentTab = 'orders'; tabPages.orders = 0; renderTabsHeader(); renderTable(); });
+            tabBtnFnb.addEventListener('click', function () { currentTab = 'fnb'; tabPages.fnb = 0; renderTabsHeader(); renderTable(); });
+            tabBtnMovies.addEventListener('click', function () { currentTab = 'movies'; tabPages.movies = 0; renderTabsHeader(); renderTable(); });
+            tabBtnDaily.addEventListener('click', function () { currentTab = 'daily'; tabPages.daily = 0; renderTabsHeader(); renderTable(); });
+
+            function createKpiCard(label, valStr, accentColor) {
+                var card = hub.el('div', {
+                    style: 'background:#ffffff;border:1px solid #e2e8f0;border-top:4px solid ' + accentColor + ';border-radius:10px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,0.04);'
+                });
+                card.appendChild(hub.el('div', { style: 'font-size:0.8rem;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:0.3px;margin-bottom:6px;' }, [label]));
+                card.appendChild(hub.el('div', { style: 'font-size:1.45rem;font-weight:700;color:' + accentColor + ';line-height:1.2;' }, [valStr]));
+                return card;
+            }
+
+            function renderTable() {
+                if (!reportData) return;
+                tableWrap.replaceChildren();
+
+                if (currentTab === 'orders') {
+                    var allOrders = reportData.orders || [];
+                    if (!allOrders.length) {
+                        tableWrap.appendChild(hub.el('div', { class: 'ws-empty', style: 'padding:40px 20px;text-align:center;' }, [
+                            hub.el('h3', { style: 'color:#475569;font-size:1.1rem;margin-bottom:6px;' }, ['Chưa có đơn F&B nào trong khoảng ngày đã chọn']),
+                            hub.el('p', { style: 'color:#94a3b8;font-size:0.88rem;margin:0;' }, ['Dữ liệu đơn bắp nước sẽ hiển thị khi khách mua tại quầy POS hoặc đặt trực tuyến trên web.'])
+                        ]));
+                        return;
+                    }
+                    var totalOrderRev = 0;
+                    allOrders.forEach(function (o) {
+                        var netAmount = (o.totalAmount || 0) - (o.pointsDiscount || 0);
+                        if (o.status === 'READY_FOR_PICKUP' || o.status === 'FULFILLED') {
+                            totalOrderRev += netAmount;
+                        }
+                    });
+
+                    var curPage = tabPages.orders || 0;
+                    var maxPage = Math.max(0, Math.ceil(allOrders.length / PAGE_SIZE) - 1);
+                    if (curPage > maxPage) curPage = maxPage;
+                    tabPages.orders = curPage;
+
+                    var pagedOrders = allOrders.slice(curPage * PAGE_SIZE, (curPage + 1) * PAGE_SIZE);
+
+                    var table = hub.el('table', { class: 'ws-table', style: 'width:100%;margin:0;' });
+                    table.innerHTML = '<thead style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">' +
+                        '<tr>' +
+                        '<th style="padding:12px 16px;text-align:left;font-size:0.85rem;color:#475569;">Mã đơn</th>' +
+                        '<th style="padding:12px 16px;text-align:left;font-size:0.85rem;color:#475569;">Khách hàng</th>' +
+                        '<th style="padding:12px 16px;text-align:left;font-size:0.85rem;color:#475569;">Chi nhánh</th>' +
+                        '<th style="padding:12px 16px;text-align:right;font-size:0.85rem;color:#475569;">Doanh thu</th>' +
+                        '<th style="padding:12px 16px;text-align:center;font-size:0.85rem;color:#475569;">Trạng thái</th>' +
+                        '<th style="padding:12px 16px;text-align:center;font-size:0.85rem;color:#475569;">Thời gian đặt</th>' +
+                        '<th style="padding:12px 16px;text-align:center;font-size:0.85rem;color:#475569;">Thao tác</th>' +
+                        '</tr></thead>';
+                    var tbody = hub.el('tbody');
+                    pagedOrders.forEach(function (o) {
+                        var netAmount = (o.totalAmount || 0) - (o.pointsDiscount || 0);
+                        var statusLabel = (o.status === 'READY_FOR_PICKUP')
+                            ? '<span style="background:#e0f2fe;color:#0284c7;padding:3px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;">Chờ nhận</span>'
+                            : (o.status === 'FULFILLED'
+                                ? '<span style="background:#ecfdf5;color:#059669;padding:3px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;">Đã nhận</span>'
+                                : (o.status === 'CANCELLED'
+                                    ? '<span style="background:#fef2f2;color:#dc2626;padding:3px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;">Đã hủy</span>'
+                                    : '<span style="background:#f1f5f9;color:#475569;padding:3px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;">' + (o.status || '—') + '</span>'));
+
+                        var tr = hub.el('tr', { style: 'border-bottom:1px solid #f1f5f9;' });
+                        var timeStr = '—';
+                        if (o.createdAt) {
+                            if (hub.fmtNotificationDateTime) timeStr = hub.fmtNotificationDateTime(o.createdAt);
+                            else if (hub.fmtDateTime) timeStr = hub.fmtDateTime(o.createdAt);
+                            else timeStr = String(o.createdAt).replace('T', ' ').slice(0, 19);
+                        }
+                        tr.innerHTML = '<td style="padding:12px 16px;font-weight:700;color:#2563eb;">' + (o.orderCode || ('#' + o.id)) + '</td>' +
+                            '<td style="padding:12px 16px;color:#1e293b;font-weight:500;">' + (o.customerName || 'Khách vãng lai') + '</td>' +
+                            '<td style="padding:12px 16px;color:#64748b;">' + (o.branchName || '—') + '</td>' +
+                            '<td style="padding:12px 16px;text-align:right;font-weight:700;color:#059669;font-size:1rem;">' + hub.fmtMoney(netAmount) + '</td>' +
+                            '<td style="padding:12px 16px;text-align:center;">' + statusLabel + '</td>' +
+                            '<td style="padding:12px 16px;text-align:center;color:#64748b;font-size:0.85rem;">' + timeStr + '</td>' +
+                            '<td style="padding:12px 16px;text-align:center;">' +
+                            '<a href="' + ctx + '/console?module=concession-orders&action=view&id=' + o.id + '" class="ws-btn secondary" style="padding:4px 10px;font-size:0.78rem;font-weight:600;border-radius:6px;text-decoration:none;display:inline-block;border:1px solid #cbd5e1;background:#fff;color:#334155;">Chi tiết</a>' +
+                            '</td>';
+                        tbody.appendChild(tr);
+                    });
+                    var tfoot = hub.el('tfoot', { style: 'background:#f8fafc;border-top:2px solid #cbd5e1;' });
+                    tfoot.innerHTML = '<tr>' +
+                        '<td colspan="3" style="padding:12px 16px;font-weight:700;color:#1e293b;text-transform:uppercase;">Tổng cộng (' + allOrders.length + ' đơn)</td>' +
+                        '<td style="padding:12px 16px;text-align:right;font-weight:700;color:#059669;font-size:1.1rem;">' + hub.fmtMoney(totalOrderRev) + '</td>' +
+                        '<td colspan="3"></td>' +
+                        '</tr>';
+                    table.appendChild(tbody);
+                    table.appendChild(tfoot);
+                    tableWrap.appendChild(table);
+
+                    var pag = renderPagination(allOrders.length, curPage, PAGE_SIZE, function (newPage) {
+                        tabPages.orders = newPage;
+                        renderTable();
+                    });
+                    if (pag) tableWrap.appendChild(pag);
+
+                } else if (currentTab === 'fnb') {
+                    var allProds = reportData.products || [];
+                    if (!allProds.length) {
+                        tableWrap.appendChild(hub.el('div', { class: 'ws-empty', style: 'padding:40px 20px;text-align:center;' }, [
+                            hub.el('h3', { style: 'color:#475569;font-size:1.1rem;margin-bottom:6px;' }, ['Chưa có thống kê theo món trong khoảng ngày đã chọn']),
+                            hub.el('p', { style: 'color:#94a3b8;font-size:0.88rem;margin:0;' }, ['Vui lòng chuyển qua tab "Đơn hàng F&B" để xem chi tiết danh sách từng đơn hàng.'])
+                        ]));
+                        return;
+                    }
+                    var totalQty = 0;
+                    var totalFnbRev = 0;
+                    allProds.forEach(function (p) {
+                        totalQty += (p.qtySold || 0);
+                        totalFnbRev += (p.revenue || 0);
+                    });
+
+                    var curPage = tabPages.fnb || 0;
+                    var maxPage = Math.max(0, Math.ceil(allProds.length / PAGE_SIZE) - 1);
+                    if (curPage > maxPage) curPage = maxPage;
+                    tabPages.fnb = curPage;
+
+                    var pagedProds = allProds.slice(curPage * PAGE_SIZE, (curPage + 1) * PAGE_SIZE);
+
+                    var table = hub.el('table', { class: 'ws-table', style: 'width:100%;margin:0;' });
+                    table.innerHTML = '<thead style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">' +
+                        '<tr>' +
+                        '<th style="padding:12px 16px;text-align:left;font-size:0.85rem;color:#475569;">Sản phẩm / Combo</th>' +
+                        '<th style="padding:12px 16px;text-align:center;font-size:0.85rem;color:#475569;">Phân loại</th>' +
+                        '<th style="padding:12px 16px;text-align:center;font-size:0.85rem;color:#475569;">Đơn vị</th>' +
+                        '<th style="padding:12px 16px;text-align:center;font-size:0.85rem;color:#475569;">Số lượng đã bán</th>' +
+                        '<th style="padding:12px 16px;text-align:right;font-size:0.85rem;color:#475569;">Doanh thu</th>' +
+                        '</tr></thead>';
+                    var tbody = hub.el('tbody');
+                    pagedProds.forEach(function (p) {
+                        var typeBadge = (p.type === 'COMBO')
+                            ? '<span style="background:#e0e7ff;color:#4338ca;padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:700;">COMBO</span>'
+                            : (p.type === 'DRINK' ? '<span style="background:#ecfdf5;color:#047857;padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:600;">NƯỚC UỐNG</span>'
+                            : (p.type === 'POPCORN' ? '<span style="background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:600;">BẮP RANG</span>'
+                            : '<span style="background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:600;">KHÁC</span>'));
+
+                        var tr = hub.el('tr', { style: 'border-bottom:1px solid #f1f5f9;' });
+                        tr.innerHTML = '<td style="padding:12px 16px;font-weight:600;color:#1e293b;">' + (p.name || '—') + '</td>' +
+                            '<td style="padding:12px 16px;text-align:center;">' + typeBadge + '</td>' +
+                            '<td style="padding:12px 16px;text-align:center;color:#64748b;">' + (p.unit || 'Phần') + '</td>' +
+                            '<td style="padding:12px 16px;text-align:center;font-weight:700;font-size:1.05rem;color:#1e293b;">' + (p.qtySold || 0) + '</td>' +
+                            '<td style="padding:12px 16px;text-align:right;font-weight:700;color:#059669;font-size:1rem;">' + hub.fmtMoney(p.revenue || 0) + '</td>';
+                        tbody.appendChild(tr);
+                    });
+                    var tfoot = hub.el('tfoot', { style: 'background:#f8fafc;border-top:2px solid #cbd5e1;' });
+                    tfoot.innerHTML = '<tr>' +
+                        '<td colspan="3" style="padding:12px 16px;font-weight:700;color:#1e293b;text-transform:uppercase;">Tổng cộng F&B</td>' +
+                        '<td style="padding:12px 16px;text-align:center;font-weight:700;font-size:1.1rem;color:#1e293b;">' + totalQty + '</td>' +
+                        '<td style="padding:12px 16px;text-align:right;font-weight:700;color:#059669;font-size:1.1rem;">' + hub.fmtMoney(totalFnbRev) + '</td>' +
+                        '</tr>';
+                    table.appendChild(tbody);
+                    table.appendChild(tfoot);
+                    tableWrap.appendChild(table);
+
+                    var pag = renderPagination(allProds.length, curPage, PAGE_SIZE, function (newPage) {
+                        tabPages.fnb = newPage;
+                        renderTable();
+                    });
+                    if (pag) tableWrap.appendChild(pag);
+
+                } else if (currentTab === 'movies') {
+                    var allMovies = reportData.movies || [];
+                    if (!allMovies.length) {
+                        tableWrap.appendChild(hub.el('div', { class: 'ws-empty', style: 'padding:40px 20px;text-align:center;' }, [
+                            hub.el('h3', { style: 'color:#475569;font-size:1.1rem;margin-bottom:6px;' }, ['Chưa có dữ liệu bán vé trong khoảng ngày đã chọn']),
+                            hub.el('p', { style: 'color:#94a3b8;font-size:0.88rem;margin:0;' }, ['Báo cáo vé sẽ xuất hiện khi có vé được xác nhận hoặc sử dụng.'])
+                        ]));
+                        return;
+                    }
+                    var totalTickets = 0;
+                    var totalMovieRev = 0;
+                    allMovies.forEach(function (r) {
+                        totalTickets += (r.ticketsSold || 0);
+                        totalMovieRev += (r.revenue || 0);
+                    });
+
+                    var curPage = tabPages.movies || 0;
+                    var maxPage = Math.max(0, Math.ceil(allMovies.length / PAGE_SIZE) - 1);
+                    if (curPage > maxPage) curPage = maxPage;
+                    tabPages.movies = curPage;
+
+                    var pagedMovies = allMovies.slice(curPage * PAGE_SIZE, (curPage + 1) * PAGE_SIZE);
+
+                    var table = hub.el('table', { class: 'ws-table', style: 'width:100%;margin:0;' });
+                    table.innerHTML = '<thead style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">' +
+                        '<tr>' +
+                        '<th style="padding:12px 16px;text-align:left;font-size:0.85rem;color:#475569;">Tên phim</th>' +
+                        '<th style="padding:12px 16px;text-align:center;font-size:0.85rem;color:#475569;">Số vé đã bán</th>' +
+                        '<th style="padding:12px 16px;text-align:right;font-size:0.85rem;color:#475569;">Doanh thu bán vé</th>' +
+                        '</tr></thead>';
+                    var tbody = hub.el('tbody');
+                    pagedMovies.forEach(function (r) {
+                        var tr = hub.el('tr', { style: 'border-bottom:1px solid #f1f5f9;' });
+                        tr.innerHTML = '<td style="padding:12px 16px;font-weight:600;color:#1e293b;">' + (r.title || '—') + '</td>' +
+                            '<td style="padding:12px 16px;text-align:center;font-weight:700;font-size:1.05rem;color:#1e293b;">' + (r.ticketsSold || 0) + '</td>' +
+                            '<td style="padding:12px 16px;text-align:right;font-weight:700;color:#2563eb;font-size:1rem;">' + hub.fmtMoney(r.revenue || 0) + '</td>';
+                        tbody.appendChild(tr);
+                    });
+                    var tfoot = hub.el('tfoot', { style: 'background:#f8fafc;border-top:2px solid #cbd5e1;' });
+                    tfoot.innerHTML = '<tr>' +
+                        '<td style="padding:12px 16px;font-weight:700;color:#1e293b;text-transform:uppercase;">Tổng cộng Vé</td>' +
+                        '<td style="padding:12px 16px;text-align:center;font-weight:700;font-size:1.1rem;color:#1e293b;">' + totalTickets + '</td>' +
+                        '<td style="padding:12px 16px;text-align:right;font-weight:700;color:#2563eb;font-size:1.1rem;">' + hub.fmtMoney(totalMovieRev) + '</td>' +
+                        '</tr>';
+                    table.appendChild(tbody);
+                    table.appendChild(tfoot);
+                    tableWrap.appendChild(table);
+
+                    var pag = renderPagination(allMovies.length, curPage, PAGE_SIZE, function (newPage) {
+                        tabPages.movies = newPage;
+                        renderTable();
+                    });
+                    if (pag) tableWrap.appendChild(pag);
+
+                } else if (currentTab === 'daily') {
+                    var allDaily = reportData.daily || [];
+                    if (!allDaily.length) {
+                        tableWrap.appendChild(hub.el('div', { class: 'ws-empty', style: 'padding:40px 20px;text-align:center;' }, [
+                            hub.el('h3', { style: 'color:#475569;font-size:1.1rem;margin-bottom:6px;' }, ['Chưa có dữ liệu theo ngày trong khoảng đã chọn']),
+                            hub.el('p', { style: 'color:#94a3b8;font-size:0.88rem;margin:0;' }, ['Dữ liệu sẽ xuất hiện khi có phát sinh bán vé hoặc bắp nước.'])
+                        ]));
+                        return;
+                    }
+
+                    var curPage = tabPages.daily || 0;
+                    var maxPage = Math.max(0, Math.ceil(allDaily.length / PAGE_SIZE) - 1);
+                    if (curPage > maxPage) curPage = maxPage;
+                    tabPages.daily = curPage;
+
+                    var pagedDaily = allDaily.slice(curPage * PAGE_SIZE, (curPage + 1) * PAGE_SIZE);
+
+                    var table = hub.el('table', { class: 'ws-table', style: 'width:100%;margin:0;' });
+                    table.innerHTML = '<thead style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">' +
+                        '<tr>' +
+                        '<th style="padding:12px 16px;text-align:left;font-size:0.85rem;color:#475569;">Ngày</th>' +
+                        '<th style="padding:12px 16px;text-align:right;font-size:0.85rem;color:#475569;">Tổng doanh thu</th>' +
+                        '<th style="padding:12px 16px;text-align:center;font-size:0.85rem;color:#475569;">Số vé bán</th>' +
+                        '<th style="padding:12px 16px;text-align:right;font-size:0.85rem;color:#475569;">Tiền hoàn trả</th>' +
+                        '</tr></thead>';
+                    var tbody = hub.el('tbody');
+                    pagedDaily.forEach(function (d) {
+                        var dayStr = d.day ? (typeof d.day === 'string' ? d.day : d.day.year + '-' + String(d.day.month).padStart(2, '0') + '-' + String(d.day.day).padStart(2, '0')) : '—';
+                        var tr = hub.el('tr', { style: 'border-bottom:1px solid #f1f5f9;' });
+                        tr.innerHTML = '<td style="padding:12px 16px;font-weight:600;color:#1e293b;">' + dayStr + '</td>' +
+                            '<td style="padding:12px 16px;text-align:right;font-weight:700;color:#dc2626;font-size:1rem;">' + hub.fmtMoney(d.revenue || 0) + '</td>' +
+                            '<td style="padding:12px 16px;text-align:center;font-weight:600;color:#1e293b;">' + (d.ticketsSold || 0) + '</td>' +
+                            '<td style="padding:12px 16px;text-align:right;color:#ea580c;font-weight:600;">' + hub.fmtMoney(d.refundTotal || 0) + '</td>';
+                        tbody.appendChild(tr);
+                    });
+                    table.appendChild(tbody);
+                    tableWrap.appendChild(table);
+
+                    var pag = renderPagination(allDaily.length, curPage, PAGE_SIZE, function (newPage) {
+                        tabPages.daily = newPage;
+                        renderTable();
+                    });
+                    if (pag) tableWrap.appendChild(pag);
+                }
+            }
+
+            function load() {
+                tabPages = { orders: 0, fnb: 0, movies: 0, daily: 0 };
+                kpis.replaceChildren(hub.el('div', { class: 'ws-list-loading', style: 'grid-column: 1 / -1;padding:30px;text-align:center;' }, [hub.el('div', { class: 'ws-spinner' })]));
+                tableWrap.replaceChildren(hub.el('div', { class: 'ws-list-loading', style: 'padding:40px;text-align:center;' }, [hub.el('div', { class: 'ws-spinner' })]));
+                var qs = new URLSearchParams();
+                if (fromInput.value) qs.set('from', fromInput.value);
+                if (toInput.value) qs.set('to', toInput.value);
+                if (branchSelect && branchSelect.value) qs.set('branchId', branchSelect.value);
+
+                var orderQs = new URLSearchParams();
+                if (fromInput.value) orderQs.set('from', fromInput.value);
+                if (toInput.value) orderQs.set('to', toInput.value);
+                if (branchSelect && branchSelect.value) orderQs.set('branchId', branchSelect.value);
+                orderQs.set('limit', '100');
+
+                Promise.all([
+                    hub.api('/report/summary?' + qs.toString()),
+                    hub.api('/concession/orders?' + orderQs.toString()).catch(function () { return { items: [] }; })
+                ]).then(function (results) {
+                    reportData = results[0] || {};
+                    var ordResp = results[1] || {};
+                    var concessionOrders = (ordResp && ordResp.items) || [];
+                    if (!reportData.orders || !reportData.orders.length) {
+                        reportData.orders = concessionOrders;
+                    }
+
+                    var rev = reportData.revenue || {};
+                    var ticketRev = typeof rev.ticketRevenue === 'number' ? rev.ticketRevenue : (rev.revenue || 0);
+                    var fnbRev = typeof rev.fnbRevenue === 'number' ? rev.fnbRevenue : 0;
+                    var fnbOrders = typeof rev.fnbOrdersSold === 'number' ? rev.fnbOrdersSold : 0;
+
+                    // Đối soát nếu backend trả về fnbOrders = 0 nhưng có danh sách đơn F&B thực tế
+                    if ((!fnbOrders || !fnbRev) && reportData.orders && reportData.orders.length) {
+                        var soldFnbCount = 0;
+                        var calcFnbRev = 0;
+                        reportData.orders.forEach(function (o) {
+                            if (o.status === 'READY_FOR_PICKUP' || o.status === 'FULFILLED') {
+                                soldFnbCount++;
+                                calcFnbRev += ((o.totalAmount || 0) - (o.pointsDiscount || 0));
+                            }
+                        });
+                        if (!fnbOrders) fnbOrders = soldFnbCount;
+                        if (!fnbRev) fnbRev = calcFnbRev;
+                    }
+
+                    kpis.replaceChildren(
+                        createKpiCard('Tổng doanh thu', hub.fmtMoney(rev.revenue || ((ticketRev || 0) + (fnbRev || 0))), '#dc2626'),
+                        createKpiCard('Doanh thu vé', hub.fmtMoney(ticketRev), '#2563eb'),
+                        createKpiCard('Doanh thu F&B', hub.fmtMoney(fnbRev), '#059669'),
+                        createKpiCard('Số vé bán', String(rev.ticketsSold || 0), '#7c3aed'),
+                        createKpiCard('Số đơn F&B', String(fnbOrders), '#0891b2'),
+                        createKpiCard('Tiền hoàn trả', hub.fmtMoney(rev.refundTotal || 0), '#ea580c')
+                    );
+
+                    // Tổng hợp theo ngày nếu API backend chưa có bảng ngày
+                    if ((!reportData.daily || !reportData.daily.length) && (reportData.orders && reportData.orders.length)) {
+                        var dayMap = {};
+                        reportData.orders.forEach(function (o) {
+                            var day = o.createdAt ? String(o.createdAt).substring(0, 10) : 'Khác';
+                            if (!dayMap[day]) dayMap[day] = { day: day, revenue: 0, ticketsSold: 0, refundTotal: 0 };
+                            var net = (o.totalAmount || 0) - (o.pointsDiscount || 0);
+                            if (o.status === 'READY_FOR_PICKUP' || o.status === 'FULFILLED') {
+                                dayMap[day].revenue += net;
+                            } else if (o.status === 'CANCELLED') {
+                                dayMap[day].refundTotal += net;
+                            }
+                        });
+                        if (reportData.movies && reportData.movies.length) {
+                            var targetDay = toInput.value || fromInput.value || Object.keys(dayMap)[0] || '2026-11-01';
+                            if (!dayMap[targetDay]) dayMap[targetDay] = { day: targetDay, revenue: 0, ticketsSold: 0, refundTotal: 0 };
+                            reportData.movies.forEach(function (m) {
+                                dayMap[targetDay].revenue += (m.revenue || 0);
+                                dayMap[targetDay].ticketsSold += (m.ticketsSold || 0);
+                            });
+                        }
+                        reportData.daily = Object.values(dayMap).sort(function (a, b) { return a.day > b.day ? -1 : 1; });
+                    }
+
+                    // Tự động chuyển tab: ưu tiên tab có dữ liệu để người dùng thấy ngay
+                    if (reportData.orders && reportData.orders.length > 0) {
+                        currentTab = 'orders';
+                    } else if (reportData.movies && reportData.movies.length > 0) {
+                        currentTab = 'movies';
+                    } else if (reportData.products && reportData.products.length > 0) {
+                        currentTab = 'fnb';
+                    } else if (reportData.daily && reportData.daily.length > 0) {
+                        currentTab = 'daily';
+                    }
+                    renderTabsHeader();
+                    renderTable();
+                }).catch(function (e) {
+                    notifyError(e);
+                    kpis.replaceChildren();
+                    tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty', style: 'padding:30px;text-align:center;' }, [
+                        hub.el('h3', { style: 'color:#dc2626;' }, ['Không tải được dữ liệu báo cáo']),
+                        hub.el('p', {}, [e.message])
+                    ]));
+                });
+            }
+
+            runBtn.addEventListener('click', load);
+            load();
+        }
+    });
+
 })();

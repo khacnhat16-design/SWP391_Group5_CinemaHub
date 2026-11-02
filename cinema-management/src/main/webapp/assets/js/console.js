@@ -276,10 +276,10 @@
                 ], totalCh)
             ]));
             breakdownCard.appendChild(el('div', { class: 'ws-dashboard-channel-row' }, [
-                el('span', { class: 'ws-dashboard-channel-label' }, ['Đặt trước vs Đặt tại quầy']),
+                el('span', { class: 'ws-dashboard-channel-label' }, ['Đặt trước ngày chiếu vs Xem trong ngày']),
                 renderStackedBar([
-                    { label: 'Đặt trước',  value: bd.advance || 0, color: '#10b981' },
-                    { label: 'Tại quầy',   value: bd.walkIn || 0,  color: '#f59e0b' }
+                    { label: 'Trước ngày', value: bd.advance || 0, color: '#10b981' },
+                    { label: 'Trong ngày', value: bd.walkIn || 0,  color: '#f59e0b' }
                 ], totalAdvance)
             ]));
         } else {

@@ -236,6 +236,9 @@ public final class CinemaApplication {
             uploadWrapper.setMultipartConfigElement(mce);
         }
         context.addServletMappingDecoded("/upload", "uploadServlet");
+        // Dashboard endpoint cho Management workspace (KPI / Today's showtimes / Recent bookings)
+        Tomcat.addServlet(context, "dashboardServlet", new DashboardServlet());
+        context.addServletMappingDecoded("/api/dashboard/*", "dashboardServlet");
         // Notification bell cho header workspace
         Tomcat.addServlet(context, "workspaceNotifServlet", new WorkspaceNotificationServlet());
         context.addServletMappingDecoded("/api/notification/*", "workspaceNotifServlet");
