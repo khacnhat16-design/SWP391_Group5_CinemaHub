@@ -1,4 +1,4 @@
-﻿<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
+<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
 <%@ taglib prefix="c" uri="jakarta.tags.core" %>
 <%@ taglib prefix="fn" uri="jakarta.tags.functions" %>
 <%--
@@ -73,40 +73,6 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v2a3 3 0 0 0 0 6v2a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-2a3 3 0 0 0 0-6z"/><line x1="13" y1="6" x2="13" y2="12"/></svg>
                         Đặt vé
                     </a>
-                    <%-- Cụm Kho hàng có menu con (collapsible accordion) --%>
-                    <div class="ws-menu-accordion ${wsActive == 'inventory' ? 'open' : ''}">
-                        <button type="button" 
-                                class="ws-menu-accordion-toggle ${wsActive == 'inventory' ? 'active' : ''}" 
-                                aria-expanded="${wsActive == 'inventory' ? 'true' : 'false'}"
-                                onclick="toggleWsMenuAccordion(this, event)">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                            </svg>
-                            <span class="ws-menu-title">Kho hàng</span>
-                            <svg class="ws-accordion-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <polyline points="9 18 15 12 9 6"></polyline>
-                            </svg>
-                        </button>
-                        <div class="ws-menu-sub" role="region" aria-label="Menu con Kho hàng">
-                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and (wsTab == 'product' or empty param.tab) ? 'active' : ''}" 
-                               href="${wsCtx}/console?module=inventory&tab=product"
-                               data-tab="product">
-                                Kho thành phẩm
-                            </a>
-                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'material' ? 'active' : ''}" 
-                               href="${wsCtx}/console?module=inventory&tab=material"
-                               data-tab="material">
-                                Kho nguyên liệu
-                            </a>
-<%--
-                            <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'recipe' ? 'active' : ''}" 
-                               href="${wsCtx}/console?module=inventory&tab=recipe"
-                               data-tab="recipe">
-                                Công thức & Sản xuất
-                            </a>
---%>
-                        </div>
-                    </div>
                 </div>
 
                 <div class="ws-menu-group">
@@ -166,7 +132,6 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v2a3 3 0 0 0 0 6v2a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-2a3 3 0 0 0 0-6z"/></svg>
                         Đặt vé
                     </a>
-                    <%-- Cụm Kho hàng có menu con (collapsible accordion) --%>
                     <div class="ws-menu-accordion ${wsActive == 'inventory' ? 'open' : ''}">
                         <button type="button" 
                                 class="ws-menu-accordion-toggle ${wsActive == 'inventory' ? 'active' : ''}" 
@@ -191,7 +156,6 @@
                                data-tab="material">
                                 Kho nguyên liệu
                             </a>
-<%--
                             <a class="ws-menu-sub-link ${wsActive == 'inventory' and wsTab == 'recipe' ? 'active' : ''}" 
                                href="${wsCtx}/console?module=inventory&tab=recipe"
                                data-tab="recipe">

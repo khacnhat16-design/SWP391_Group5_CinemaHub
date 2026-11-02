@@ -22,6 +22,10 @@ public class Notification {
     public static final String TYPE_FNB_CANCELLED = "FNB_CANCELLED";
     public static final String TYPE_FNB_REFUNDED = "FNB_REFUNDED";
 
+    /** Loai thong bao kho hang (Feature 13 Inventory Management: Low-Stock & Expiry). */
+    public static final String TYPE_INVENTORY_LOW_STOCK = "INVENTORY_LOW_STOCK";
+    public static final String TYPE_INVENTORY_EXPIRY_WARNING = "INVENTORY_EXPIRY_WARNING";
+
     private Long id;
     private long userId;
     private String type;

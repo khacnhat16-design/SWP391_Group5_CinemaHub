@@ -18,8 +18,23 @@
     var formatMaterialCategory = inv.formatMaterialCategory;
     var formatInventoryReason = inv.formatInventoryReason;
     var formatMoneyVnd = inv.formatMoneyVnd;
+    var formatVietnamTime = inv.formatVietnamTime;
     var setFieldError = inv.setFieldError;
     var clearFieldError = inv.clearFieldError;
+
+    function formatShortDate(dateStr) {
+        if (!dateStr || dateStr === '-' || dateStr === '—') return '—';
+        var str = String(dateStr).trim();
+        var iso = str.indexOf('T') !== -1 ? str : str.replace(' ', 'T') + 'Z';
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return str;
+        var dd = ('0' + d.getDate()).slice(-2);
+        var MM = ('0' + (d.getMonth() + 1)).slice(-2);
+        var yyyy = d.getFullYear();
+        var hh = ('0' + d.getHours()).slice(-2);
+        var mm = ('0' + d.getMinutes()).slice(-2);
+        return dd + '/' + MM + '/' + yyyy + ' ' + hh + ':' + mm;
+    }
 
     function showMaterialMinStockModal(material, onReload, branchId) {
         var mId = material.materialId || material.id;
@@ -189,7 +204,7 @@
 
         var footBtns = [];
         if (!isStaff && rawMaterials) {
-            var btnRestock = hub.el('button', { class: 'ws-inv-btn ws-inv-btn-primary green', type: 'button' }, ['Nhập thêm']);
+            var btnRestock = hub.el('button', { class: 'ws-inv-btn ws-inv-btn-primary', type: 'button' }, ['Nhập thêm']);
             btnRestock.addEventListener('click', function () {
                 modal.close();
                 showMaterialRestockModal(branchId, rawMaterials, onReload, material);
@@ -284,7 +299,7 @@
                     pageItems.forEach(function (h) {
                         var isPlus = h.deltaQty > 0;
                         var absQty = Math.abs(h.deltaQty);
-                        var typeLabel = isPlus ? '+ Nhập' : '- Xuất';
+                        var typeLabel = isPlus ? '+ ' : '- ';
 
                         tbody.appendChild(hub.el('tr', {}, [
                             hub.el('td', { class: 'muted', style: 'white-space: nowrap;' }, [h.createdAt || '—']),
@@ -394,6 +409,13 @@
             makeInvField('Số hóa đơn / PO', poInput, false)
         ]);
 
+        var expiryInput = hub.el('input', { type: 'date', class: 'ws-input' });
+        var batchInput = hub.el('input', { type: 'text', placeholder: 'Mã lô (ví dụ: LOT-202611-01)', class: 'ws-input' });
+        var rowExpiryBatch = hub.el('div', { class: 'ws-inv-grid-2' }, [
+            makeInvField('Hạn sử dụng (HSD)', expiryInput, false),
+            makeInvField('Mã lô hàng', batchInput, false)
+        ]);
+
         var noteInput = hub.el('input', { type: 'text', placeholder: 'Nhập ghi chú (bắt buộc nếu chọn Điều chỉnh khác)…', class: 'ws-input' });
 
         var previewBox = hub.el('div', { class: 'ws-inv-preview-box' }, ['Sau khi nhập: Tồn mới = —']);
@@ -443,7 +465,7 @@
 
         var modal = createInventoryModal({
             title: 'Nhập nguyên liệu',
-            subtitle: 'Tăng số lượng tồn kho nguyên liệu chi nhánh',
+            subtitle: 'Tăng số lượng tồn kho nguyên liệu chi nhánh (kèm HSD & Mã lô)',
             theme: 'green',
             maxWidth: '520px',
             body: [
@@ -452,6 +474,7 @@
                 makeInvField('Số lượng nhập', qtyInput, true),
                 rowCostSupplier,
                 rowReasonPo,
+                rowExpiryBatch,
                 makeInvField('Ghi chú', noteInput, false),
                 previewBox
             ],
@@ -522,6 +545,8 @@
                     costPrice: costInput.value ? costInput.value.trim() : '',
                     supplier: supplierInput.value ? supplierInput.value.trim() : '',
                     poNumber: poInput.value ? poInput.value.trim() : '',
+                    expiryDate: expiryInput.value || '',
+                    batchNo: (batchInput.value || '').trim(),
                     note: noteVal
                 }
             }).then(function () {
@@ -851,7 +876,9 @@
             { value: '', label: 'Tất cả trạng thái' },
             { value: 'IN_STOCK', label: 'Còn hàng' },
             { value: 'LOW_STOCK', label: 'Sắp hết' },
-            { value: 'OUT_OF_STOCK', label: 'Hết hàng' }
+            { value: 'OUT_OF_STOCK', label: 'Hết hàng' },
+            { value: 'EXPIRED', label: 'Đã hết hạn' },
+            { value: 'EXPIRING_SOON', label: 'Cận hạn (≤ 7 ngày)' }
         ].forEach(function (s) {
             statusSelect.appendChild(hub.el('option', { value: s.value }, [s.label]));
         });
@@ -871,7 +898,14 @@
 
         var tbRight = hub.el('div', { class: 'ws-list-toolbar-right' });
         if (!isStaff) {
-            var btnTopRestock = hub.el('button', { class: 'ws-btn primary', type: 'button', style: 'background: #16a34a; border-color: #16a34a;' }, ['+ Nhập Nguyên Liệu']);
+            var btnTopAdjust = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Điều chỉnh kho']);
+            btnTopAdjust.addEventListener('click', function () {
+                var curBranchObj = (branches || []).find(function (b) { return String(b.id) === String(branchSelect.value); });
+                var curBranchId = curBranchObj ? curBranchObj.id : branchId;
+                showMaterialAdjustModal(curBranchId, null, rawMaterials, loadData);
+            });
+
+            var btnTopRestock = hub.el('button', { class: 'ws-btn primary', type: 'button' }, ['+ Nhập nguyên liệu']);
             btnTopRestock.addEventListener('click', function () {
                 var curBranchObj = (branches || []).find(function (b) { return String(b.id) === String(branchSelect.value); });
                 var curBranchId = curBranchObj ? curBranchObj.id : branchId;
@@ -879,21 +913,14 @@
                 showMaterialRestockModal(curBranchId, curBranchName, rawMaterials, loadData);
             });
 
-            var btnTopAdjust = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Điều chỉnh']);
-            btnTopAdjust.addEventListener('click', function () {
-                var curBranchObj = (branches || []).find(function (b) { return String(b.id) === String(branchSelect.value); });
-                var curBranchId = curBranchObj ? curBranchObj.id : branchId;
-                showMaterialAdjustModal(curBranchId, null, rawMaterials, loadData);
-            });
-
-            tbRight.appendChild(btnTopRestock);
             tbRight.appendChild(btnTopAdjust);
+            tbRight.appendChild(btnTopRestock);
         }
         toolbar.appendChild(tbRight);
         page.appendChild(toolbar);
 
-        var tableCard = hub.el('div', { class: 'ws-card', style: 'padding: 0; overflow: hidden;' });
-        var tableRegion = hub.el('div');
+        var tableCard = hub.el('div', { class: 'ws-card', style: 'padding: 0; width: 100%;' });
+        var tableRegion = hub.el('div', { style: 'width: 100%;' });
         tableCard.appendChild(tableRegion);
         page.appendChild(tableCard);
 
@@ -906,10 +933,10 @@
         cardOutOfStock.addEventListener('click', function () { statusSelect.value = 'OUT_OF_STOCK'; applyFilters(); });
 
         function highlightCard(selectedVal) {
-            cardTotal.style.boxShadow = selectedVal === '' ? '0 0 0 2px #1d4ed8' : 'none';
-            cardInStock.style.boxShadow = selectedVal === 'IN_STOCK' ? '0 0 0 2px #16a34a' : 'none';
-            cardLowStock.style.boxShadow = selectedVal === 'LOW_STOCK' ? '0 0 0 2px #ea580c' : 'none';
-            cardOutOfStock.style.boxShadow = selectedVal === 'OUT_OF_STOCK' ? '0 0 0 2px #dc2626' : 'none';
+            cardTotal.classList.toggle('active', selectedVal === '');
+            cardInStock.classList.toggle('active', selectedVal === 'IN_STOCK');
+            cardLowStock.classList.toggle('active', selectedVal === 'LOW_STOCK');
+            cardOutOfStock.classList.toggle('active', selectedVal === 'OUT_OF_STOCK');
         }
 
         function loadData() {
@@ -987,6 +1014,12 @@
                     if (stFilter === 'OUT_OF_STOCK' && q > 0) return false;
                     if (stFilter === 'LOW_STOCK' && (q <= 0 || q > minQ)) return false;
                     if (stFilter === 'IN_STOCK' && q <= minQ) return false;
+                    if (stFilter === 'EXPIRED') {
+                        if (it.daysUntilExpiry == null || it.daysUntilExpiry >= 0) return false;
+                    }
+                    if (stFilter === 'EXPIRING_SOON') {
+                        if (it.daysUntilExpiry == null || it.daysUntilExpiry < 0 || it.daysUntilExpiry > 7) return false;
+                    }
                 }
                 return true;
             });
@@ -1011,24 +1044,22 @@
                 return;
             }
 
-            var table = hub.el('table', { class: 'ws-table' });
-            var chkAll = hub.el('input', { type: 'checkbox' });
+            var table = hub.el('table', { class: 'ws-table', style: 'width: 100%; min-width: 960px; border-collapse: separate;' });
             var thead = hub.el('thead', {}, [
                 hub.el('tr', {}, [
-                    hub.el('th', { style: 'width: 40px; text-align: center;' }, [chkAll]),
-                    hub.el('th', {}, ['Tên nguyên liệu']),
-                    hub.el('th', {}, ['Phân loại']),
-                    hub.el('th', { style: 'text-align: center;' }, ['Đơn vị tính']),
-                    hub.el('th', { style: 'text-align: right;' }, ['Tồn kho']),
-                    hub.el('th', { style: 'text-align: right;' }, ['Tồn tối thiểu']),
-                    hub.el('th', {}, ['Cập nhật lúc']),
-                    hub.el('th', { style: 'text-align: center;' }, ['Trạng thái']),
-                    hub.el('th', { style: 'text-align: right; width: ' + (isStaff ? '100px' : '200px') + ';' }, ['Thao tác'])
+                    hub.el('th', { style: 'white-space: nowrap; padding: 12px 14px;' }, ['Tên nguyên liệu']),
+                    hub.el('th', { style: 'white-space: nowrap; padding: 12px 14px;' }, ['Phân loại']),
+                    hub.el('th', { style: 'text-align: center; white-space: nowrap; padding: 12px 14px;' }, ['ĐVT']),
+                    hub.el('th', { style: 'text-align: right; white-space: nowrap; padding: 12px 14px;' }, ['Tồn kho']),
+                    hub.el('th', { style: 'text-align: right; white-space: nowrap; padding: 12px 14px;' }, ['Tồn tối thiểu']),
+                    hub.el('th', { style: 'text-align: center; white-space: nowrap; padding: 12px 14px;' }, ['Hạn sử dụng']),
+                    hub.el('th', { style: 'white-space: nowrap; padding: 12px 14px;' }, ['Cập nhật']),
+                    hub.el('th', { style: 'text-align: center; white-space: nowrap; padding: 12px 14px;' }, ['Trạng thái']),
+                    hub.el('th', { style: 'text-align: right; white-space: nowrap; padding: 12px 14px; min-width: ' + (isStaff ? '90px' : '200px') + ';' }, ['Thao tác'])
                 ])
             ]);
 
             var tbody = hub.el('tbody');
-            var itemCheckboxes = [];
 
             var totalItems = items.length;
             var totalPages = Math.ceil(totalItems / pageSize) || 1;
@@ -1044,68 +1075,68 @@
                 var unit = s.unit || '';
                 var unitFormatted = formatMaterialUnit(unit);
 
-                var rowChk = hub.el('input', { type: 'checkbox' });
-                itemCheckboxes.push(rowChk);
-
-                var nameEl = hub.el('div', { class: 'ws-link', style: 'font-weight: 700; cursor: pointer;' }, [s.name || ('NL #' + (s.materialId || s.id))]);
+                var nameEl = hub.el('div', { class: 'ws-inv-item-name' }, [s.name || ('NL #' + (s.materialId || s.id))]);
                 nameEl.addEventListener('click', function () {
                     showMaterialDetailModal(branchSelect.value || branchId, s, rawMaterials, loadData, isStaff);
                 });
 
-                var catBadge = hub.el('span', { class: 'ws-badge', style: 'background: #f1f5f9; color: #334155;' }, [formatMaterialCategory(s.category)]);
+                var catBadge = hub.el('span', { class: 'ws-badge', style: 'background: #f1f5f9; color: #334155; white-space: nowrap;' }, [formatMaterialCategory(s.category)]);
 
-                var unitTd = hub.el('div', { style: 'text-align: center;' }, [
+                var unitTd = hub.el('div', { style: 'text-align: center; white-space: nowrap;' }, [
                     hub.el('span', { class: 'ws-badge' }, [unitFormatted])
                 ]);
 
-                var qtyTd = hub.el('div', { style: 'text-align: right;' }, [
+                var qtyTd = hub.el('div', { style: 'text-align: right; white-space: nowrap;' }, [
                     hub.el('strong', { style: 'color: #0f172a; font-size: 0.98rem;' }, [Number(q).toLocaleString('vi-VN')]),
                     hub.el('span', { class: 'muted', style: 'margin-left: 4px;' }, [unitFormatted])
                 ]);
 
-                var minTd = hub.el('div', { style: 'text-align: right;' }, [
+                var minTd = hub.el('div', { style: 'text-align: right; white-space: nowrap;' }, [
                     hub.el('span', { class: 'muted' }, [Number(minQ).toLocaleString('vi-VN')]),
                     hub.el('span', { class: 'muted', style: 'font-size: 0.78rem; margin-left: 3px;' }, [unitFormatted])
                 ]);
 
-                var updatedTd = hub.el('span', { class: 'muted', style: 'font-size: 0.84rem; white-space: nowrap;' }, [s.updatedAt || '—']);
+                var expiryTd = hub.el('div', { style: 'text-align: center; white-space: nowrap;' }, [
+                    inv.renderExpiryBadge(s.daysUntilExpiry, s.expiryDate)
+                ]);
+
+                var updatedTd = hub.el('span', { class: 'muted', style: 'font-size: 0.84rem; white-space: nowrap;' }, [formatShortDate(s.updatedAt)]);
 
                 var stBadge;
                 if (q <= 0) stBadge = hub.el('span', { class: 'ws-badge ws-status-pill ws-badge-red' }, ['Hết hàng']);
                 else if (q <= minQ) stBadge = hub.el('span', { class: 'ws-badge ws-status-pill ws-badge-orange' }, ['Sắp hết']);
                 else stBadge = hub.el('span', { class: 'ws-badge ws-status-pill ws-badge-green' }, ['Còn hàng']);
 
-                var stWrap = hub.el('div', { style: 'text-align: center;' }, [stBadge]);
+                var stWrap = hub.el('div', { style: 'text-align: center; white-space: nowrap;' }, [stBadge]);
 
-                var btnHist = hub.el('button', { type: 'button', class: 'ws-btn secondary small' }, ['Lịch sử']);
+                var btnHist = hub.el('button', { type: 'button', class: 'ws-btn secondary small', style: 'white-space: nowrap;' }, ['Lịch sử']);
                 btnHist.addEventListener('click', function () {
                     showMaterialDetailModal(branchSelect.value || branchId, s, rawMaterials, loadData, isStaff);
                 });
                 var actionBtns = [btnHist];
                 if (!isStaff) {
-                    var btnEditMin = hub.el('button', { type: 'button', class: 'ws-btn secondary small', style: 'margin-left: 6px;' }, ['Sửa định mức']);
+                    var btnEditMin = hub.el('button', { type: 'button', class: 'ws-btn secondary small', style: 'white-space: nowrap;' }, ['Sửa định mức']);
                     btnEditMin.addEventListener('click', function () {
                         showMaterialMinStockModal(s, loadData, branchSelect.value || branchId);
                     });
                     actionBtns.push(btnEditMin);
                 }
 
-                tbody.appendChild(hub.el('tr', {}, [
-                    hub.el('td', { style: 'text-align: center;' }, [rowChk]),
-                    hub.el('td', {}, [nameEl]),
-                    hub.el('td', {}, [catBadge]),
-                    hub.el('td', {}, [unitTd]),
-                    hub.el('td', {}, [qtyTd]),
-                    hub.el('td', {}, [minTd]),
-                    hub.el('td', {}, [updatedTd]),
-                    hub.el('td', {}, [stWrap]),
-                    hub.el('td', { style: 'text-align: right;' }, actionBtns)
-                ]));
-            });
+                var actionWrap = hub.el('div', {
+                    style: 'display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap;'
+                }, actionBtns);
 
-            chkAll.addEventListener('change', function () {
-                var checked = chkAll.checked;
-                itemCheckboxes.forEach(function (c) { c.checked = checked; });
+                tbody.appendChild(hub.el('tr', {}, [
+                    hub.el('td', { style: 'padding: 12px 14px;' }, [nameEl]),
+                    hub.el('td', { style: 'padding: 12px 14px;' }, [catBadge]),
+                    hub.el('td', { style: 'padding: 12px 14px;' }, [unitTd]),
+                    hub.el('td', { style: 'padding: 12px 14px;' }, [qtyTd]),
+                    hub.el('td', { style: 'padding: 12px 14px;' }, [minTd]),
+                    hub.el('td', { style: 'padding: 12px 14px; text-align: center;' }, [expiryTd]),
+                    hub.el('td', { style: 'padding: 12px 14px;' }, [updatedTd]),
+                    hub.el('td', { style: 'padding: 12px 14px;' }, [stWrap]),
+                    hub.el('td', { style: 'padding: 12px 14px; text-align: right; white-space: nowrap;' }, [actionWrap])
+                ]));
             });
 
             table.appendChild(thead);
@@ -1163,7 +1194,13 @@
             var sizeWrap = hub.el('label', { class: 'ws-page-size' }, ['Mỗi trang:', sizeSel]);
             paginationWrap.appendChild(sizeWrap);
 
-            tableRegion.replaceChildren(table, paginationWrap);
+            var tableWrap = hub.el('div', {
+                class: 'ws-table-wrap',
+                style: 'border: none; border-radius: 0; box-shadow: none; max-height: none; overflow-x: auto; width: 100%;'
+            });
+            tableWrap.appendChild(table);
+
+            tableRegion.replaceChildren(tableWrap, paginationWrap);
         }
 
         if (branchSelect.tagName === 'SELECT') branchSelect.addEventListener('change', loadData);

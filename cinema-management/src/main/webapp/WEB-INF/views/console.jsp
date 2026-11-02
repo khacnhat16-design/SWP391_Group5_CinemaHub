@@ -1,4 +1,4 @@
-﻿<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
+<%@ page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8" %>
 <%@ taglib prefix="c" uri="jakarta.tags.core" %>
 <%--
   Khu vực quản lý CinemaHub.
@@ -51,7 +51,7 @@
             <script src="${ctx}/assets/js/inventory/inventory-shared.js?v=20261026-mod-6" defer></script>
             <script src="${ctx}/assets/js/inventory/inventory-product.js?v=20261026-mod-6" defer></script>
             <script src="${ctx}/assets/js/inventory/inventory-material.js?v=20261026-mod-6" defer></script>
-            <%-- <script src="${ctx}/assets/js/inventory/inventory-recipe.js?v=20261026-mod-6" defer></script> --%>
+            <script src=/assets/js/inventory/inventory-recipe.js?v=20261026-mod-6 defer></script>
             <script src="${ctx}/assets/js/inventory/inventory-main.js?v=20261026-mod-6" defer></script>
         </body>
         </html>
