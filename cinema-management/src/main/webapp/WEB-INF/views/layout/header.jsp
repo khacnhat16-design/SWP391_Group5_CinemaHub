@@ -11,16 +11,16 @@
     <meta name="user-role" content="${empty sessionScope.role ? 'GUEST' : sessionScope.role}">
     <meta name="user-id" content="${sessionScope.role == 'CUSTOMER' || sessionScope.role == 'ADMIN' || sessionScope.role == 'BRANCH_MANAGER' || sessionScope.role == 'BRANCH_STAFF' ? sessionScope.userId : ''}">
     <title>${empty pageTitle ? 'CinemaHub - Quản lý rạp phim' : pageTitle} | CinemaHub</title>
-    <link rel="stylesheet" href="${ctx}/assets/css/cinema.css?v=20260525-fnb-points-1">
+    <link rel="stylesheet" href="${ctx}/assets/css/cinema.css?v=20261011-user-id-meta-1">
     <c:if test="${useWorkspaceCss}">
         <%-- App shell + workspace light theme. Chỉ nạp cho trang quản trị:
              dashboard.css định nghĩa .empty-state/.loading-state nền trắng, sẽ phá
              giao diện dark của trang public (discovery.jsp). --%>
         <link rel="stylesheet" href="${ctx}/assets/css/dashboard.css?v=20260927-4">
-            <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261031-fnb-orders-branch-validation-1">
+            <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261013-bsap-4">
     </c:if>
     <c:if test="${loadRscCss}">
-        <%-- CSS riêng cho module RSC (support, complaints, reviews).
+        <%-- CSS riêng cho module hỗ trợ và đánh giá.
              Customer area cũng cần vì các module này dùng ws-card/ws-label/ws-btn.
              workspace.css toàn phần sẽ phá theme discovery (background dark) và
              làm sidebar admin bị include — chỉ load rsc.css vừa đủ. --%>
@@ -43,19 +43,19 @@
                 <c:when test="${currentRole == 'ADMIN'}">
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
                     <a href="${ctx}/console/branch/list">Chi nhánh</a>
-                    <a href="${ctx}/console/report/list">Báo cáo</a>
                 </c:when>
                 <c:when test="${currentRole == 'BRANCH_MANAGER'}">
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
-                    <a href="${ctx}/console/report/list">Báo cáo</a>
+                    <a href="${ctx}/console/shift/list">Ca làm việc</a>
                 </c:when>
                 <c:when test="${currentRole == 'BRANCH_STAFF'}">
                     <a href="${ctx}/console?module=pos-ticket">Bán vé</a>
+                    <a href="${ctx}/console?module=ticket">Lịch sử vé</a>
+                    <a href="${ctx}/console/shift/list">Ca làm việc</a>
                 </c:when>
                 <c:when test="${currentRole == 'CUSTOMER'}">
                     <a href="${ctx}/console?module=dashboard">Bảng điều khiển</a>
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
-                    <a href="${ctx}/console?module=fnb-orders">Đơn F&amp;B của tôi</a>
                 </c:when>
                 <c:otherwise>
                     <a href="${ctx}/console?module=discovery">Lịch chiếu</a>
@@ -68,9 +68,6 @@
                 </c:when>
                 <c:otherwise>
                     <c:if test="${currentRole == 'CUSTOMER'}">
-                        <span class="customer-nav-summary" aria-label="Điểm tài khoản">
-                            <span><small>Điểm</small><strong id="customerPoints">—</strong></span>
-                        </span>
                         <span class="nav-notif-wrap">
                             <button class="nav-bell" type="button" id="notificationBell"
                                     aria-label="Thông báo" aria-expanded="false" title="Thông báo">
@@ -93,7 +90,7 @@
                             <a class="btn ghost" href="${ctx}/logout">Thoát</a>
                         </c:when>
                         <c:otherwise>
-                            <a href="${ctx}/console">Dashboard</a>
+                            <a href="${ctx}/console">Quản lý</a>
                             <a class="btn ghost" href="${ctx}/logout">Thoát (<c:out value="${sessionScope.username}"/>)</a>
                         </c:otherwise>
                     </c:choose>

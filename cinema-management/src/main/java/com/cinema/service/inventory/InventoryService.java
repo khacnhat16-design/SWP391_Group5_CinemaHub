@@ -284,25 +284,31 @@ public class InventoryService {
         List<Long> staffIds = inventoryDao.findStaffUserIdsForBranch(branchId);
 
         int sentCount = 0;
-        for (InventoryDAO.InventoryAlertItem alert : alerts) {
-            String notifType = (alert.alertType().equals("EXPIRED") || alert.alertType().equals("EXPIRING_SOON"))
-                    ? Notification.TYPE_INVENTORY_EXPIRY_WARNING
-                    : Notification.TYPE_INVENTORY_LOW_STOCK;
-            String title = (alert.alertType().equals("EXPIRED"))
-                    ? "Cảnh báo hết hạn: " + alert.itemName()
-                    : (alert.alertType().equals("EXPIRING_SOON"))
-                    ? "Cảnh báo cận hạn: " + alert.itemName()
-                    : "Cảnh báo tồn kho: " + alert.itemName();
+        if (!alerts.isEmpty() && !staffIds.isEmpty()) {
+            try (java.sql.Connection conn = com.cinema.infrastructure.database.DBContext.getConnection()) {
+                for (InventoryDAO.InventoryAlertItem alert : alerts) {
+                    String notifType = (alert.alertType().equals("EXPIRED") || alert.alertType().equals("EXPIRING_SOON"))
+                            ? Notification.TYPE_INVENTORY_EXPIRY_WARNING
+                            : Notification.TYPE_INVENTORY_LOW_STOCK;
+                    String title = (alert.alertType().equals("EXPIRED"))
+                            ? "Cảnh báo hết hạn: " + alert.itemName()
+                            : (alert.alertType().equals("EXPIRING_SOON"))
+                            ? "Cảnh báo cận hạn: " + alert.itemName()
+                            : "Cảnh báo tồn kho: " + alert.itemName();
 
-            for (Long userId : staffIds) {
-                try {
-                    if (!inventoryDao.hasRecentNotification(userId, notifType, alert.itemName())) {
-                        notificationDao.insert(null, userId, notifType, title, alert.message());
-                        sentCount++;
+                    for (Long userId : staffIds) {
+                        try {
+                            if (!inventoryDao.hasRecentNotification(conn, userId, notifType, alert.itemName())) {
+                                notificationDao.insert(conn, userId, notifType, title, alert.message());
+                                sentCount++;
+                            }
+                        } catch (Exception e) {
+                            logger.warning("Không thể gửi thông báo kho cho user " + userId + ": " + e.getMessage());
+                        }
                     }
-                } catch (Exception e) {
-                    logger.warning("Không thể gửi thông báo kho cho user " + userId + ": " + e.getMessage());
                 }
+            } catch (Exception e) {
+                logger.warning("Lỗi xử lý gửi thông báo cảnh báo kho: " + e.getMessage());
             }
         }
 
