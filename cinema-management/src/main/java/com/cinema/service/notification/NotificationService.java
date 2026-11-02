@@ -1,15 +1,12 @@
 package com.cinema.service.notification;
 
+import com.cinema.dao.notification.NotificationDAO;
+import com.cinema.model.notification.Notification;
+
 import com.cinema.model.booking.Ticket;
 import com.cinema.dao.booking.TicketDAO;
 import com.cinema.common.ServiceException;
 import com.cinema.infrastructure.database.DBContext;
-import com.cinema.dao.notification.NotificationDAO;
-import com.cinema.model.auth.Transaction;
-import com.cinema.model.auth.User;
-import com.cinema.model.branch.Branch;
-import com.cinema.model.notification.Notification;
-import com.cinema.model.screen.Seat;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -183,15 +180,41 @@ public class NotificationService {
     }
 
     /**
-     * Thông báo F&B thanh toán thành công qua VNPay (Req 21.x).
+     * Thông báo F&B thanh toán thành công qua VNPay hoặc quầy (Req 21.x).
      * Gọi best-effort sau commit transaction.
      */
     public void notifyFnbOrderConfirmed(long userId, long orderId, String orderCode, long totalAmount) {
+        notifyFnbOrderConfirmed(userId, orderId, orderCode, null, totalAmount, null);
+    }
+
+    public void notifyFnbOrderConfirmed(long userId, long orderId, String orderCode,
+                                        String pickupCode, long totalAmount, String branchName) {
         if (userId <= 0) return;
+        String formattedAmount = String.format("%,d", totalAmount).replace(',', '.') + " đ";
+        StringBuilder sb = new StringBuilder();
+        sb.append("Đơn ").append(orderCode);
+        if (pickupCode != null && !pickupCode.isBlank()) {
+            sb.append(" · Mã nhận: ").append(pickupCode);
+        }
+        sb.append(" · Tổng tiền: ").append(formattedAmount);
+        if (branchName != null && !branchName.isBlank()) {
+            sb.append(" · Chi nhánh: ").append(branchName);
+        }
+        sb.append(" · Đơn của bạn đã sẵn sàng nhận tại quầy.");
         sendSafely(null, userId, Notification.TYPE_FNB_CONFIRMED,
-                "Thanh toán Bắp & Nước thành công",
-                "Đơn " + orderCode + " · Tổng tiền " + totalAmount + "đ · "
-                        + "Đơn của bạn đang được chuẩn bị");
+                "Thanh toán Bắp & Nước thành công", sb.toString());
+    }
+
+    /**
+     * Thông báo tới nhân viên & quản lý chi nhánh khi có đơn F&B mới được thanh toán.
+     */
+    public void notifyBranchFnbOrderCreated(long branchId, String orderCode, String pickupCode, long totalAmount) {
+        if (branchId <= 0) return;
+        String formattedAmount = String.format("%,d", totalAmount).replace(',', '.') + " đ";
+        String body = "Đơn " + orderCode + " · Mã nhận: " + (pickupCode != null ? pickupCode : "Tại quầy")
+                + " · Tổng tiền: " + formattedAmount + ". Khách hàng vừa thanh toán thành công, vui lòng chuẩn bị món.";
+        notifyBranchStaffAndManagers(branchId, Notification.TYPE_FNB_READY,
+                "Đơn Bắp & Nước mới", body);
     }
 
     /**
@@ -254,12 +277,44 @@ public class NotificationService {
     }
 
     /**
-     * Gửi thông báo generic cho 1 user — dùng cho payroll complaint, support...
-     * (REQ-PR-060, RSC-5).
+     * Gửi thông báo generic cho 1 user — dùng cho hỗ trợ, khiếu nại, khuyến mãi...
+     * (RSC-5).
      */
     public void notifyUser(Long userId, String type, String title, String body) {
         if (userId == null || userId <= 0) return;
         sendSafely(null, userId, type, title, body);
+    }
+
+    /**
+     * Gửi thông báo cho tất cả nhân viên và quản lý của 1 chi nhánh (Req 21/20).
+     * Best-effort: lỗi 1 user không chặn các user khác.
+     */
+    public void notifyBranchStaffAndManagers(Long branchId, String type, String title, String body) {
+        if (branchId == null || branchId <= 0) return;
+        String sql = """
+                SELECT DISTINCT ua.id
+                FROM dbo.user_account ua
+                JOIN dbo.staff_branch_assignment sba ON sba.user_id = ua.id
+                JOIN dbo.branch b ON b.id = sba.branch_id
+                WHERE sba.branch_id = ?
+                  AND ua.status = 'ACTIVE'
+                  AND ua.role_code IN ('BRANCH_STAFF', 'BRANCH_MANAGER')
+                  AND sba.status = 'ACTIVE'
+                  AND sba.effective_from <= SYSUTCDATETIME()
+                  AND (sba.effective_to IS NULL OR sba.effective_to > SYSUTCDATETIME())
+                  AND b.status = 'ACTIVE'
+                """;
+        try (Connection conn = DBContext.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, branchId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    sendSafely(null, rs.getLong(1), type, title, body);
+                }
+            }
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Không gửi được thông báo tới staff/manager branch " + branchId, e);
+        }
     }
 
     /**
@@ -315,6 +370,47 @@ public class NotificationService {
             notificationDao.insert(conn, managerId, type, title, body);
         }
         return managerIds.size();
+    }
+
+    /** Gửi yêu cầu hoàn tiền mới tới Admin và các quản lý đang phụ trách chi nhánh. */
+    public int notifyRefundApprovers(Connection conn, long branchId, String title,
+                                     String body) throws SQLException {
+        String sql = """
+                SELECT DISTINCT ua.id AS user_id
+                FROM dbo.user_account ua
+                WHERE ua.status = 'ACTIVE'
+                  AND (
+                    ua.role_code = 'ADMIN'
+                    OR (
+                      ua.role_code = 'BRANCH_MANAGER'
+                      AND EXISTS (
+                        SELECT 1
+                        FROM dbo.staff_branch_assignment sba
+                        JOIN dbo.branch b ON b.id = sba.branch_id
+                        WHERE sba.user_id = ua.id
+                          AND sba.branch_id = ?
+                          AND sba.status = 'ACTIVE'
+                          AND sba.effective_from <= SYSUTCDATETIME()
+                          AND (sba.effective_to IS NULL
+                               OR sba.effective_to > SYSUTCDATETIME())
+                          AND b.status = 'ACTIVE'
+                      )
+                    )
+                  )
+                ORDER BY ua.id
+                """;
+        List<Long> approverIds = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, branchId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) approverIds.add(rs.getLong("user_id"));
+            }
+        }
+        for (long approverId : approverIds) {
+            notificationDao.insert(conn, approverId, Notification.TYPE_REFUND_REQUEST,
+                    title, body);
+        }
+        return approverIds.size();
     }
 
     // ---- internals ----

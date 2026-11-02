@@ -205,7 +205,7 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72"/></svg>
                         Bán bắp nước (POS)
                     </a>
-                    <a class="ws-menu-link ${wsActive == 'scan-fnb' ? 'active' : ''}" href="${wsCtx}/console?module=scan-fnb">
+                    <a class="ws-menu-link ${wsActive == 'scan-fnb' ? 'active' : ''}" href="${wsCtx}/console?module=concession-pickup">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h3v3H7z"/><path d="M14 7h3v3h-3z"/><path d="M7 14h3v3H7z"/><path d="M14 14h3v3h-3z"/></svg>
                         Quét mã F&amp;B
                     </a>

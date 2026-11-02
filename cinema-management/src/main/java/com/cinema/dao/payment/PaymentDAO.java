@@ -190,4 +190,36 @@ public class PaymentDAO {
         if (confirmed != null) payment.setConfirmedAt(confirmed.toLocalDateTime());
         return payment;
     }
+    public void insertConfirmed(Connection conn, Payment payment) throws Exception {
+        String sql = """
+            INSERT INTO dbo.payment (ticket_id, concession_order_id, method, amount, status,
+                                     idempotency_key, provider_reference, hmac, confirmed_at)
+            VALUES (?, ?, ?, ?, 'SUCCESS', ?, ?, ?, SYSUTCDATETIME())
+            """;
+        try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            setNullableLong(ps, 1, payment.ticketId());
+            setNullableLong(ps, 2, payment.concessionOrderId());
+            ps.setString(3, payment.method());
+            ps.setLong(4, payment.amount());
+            ps.setString(5, payment.idempotencyKey());
+            ps.setString(6, payment.providerReference());
+            ps.setString(7, payment.hmac());
+            ps.executeUpdate();
+            try (ResultSet rs = ps.getGeneratedKeys()) {
+                if (rs.next()) payment.setId(rs.getLong(1));
+            }
+        }
+    }
+
+    public int markConcessionPaymentsRefunded(Connection conn, long orderId) throws SQLException {
+        String sql = """
+            UPDATE dbo.payment
+            SET status = 'REFUNDED', confirmed_at = COALESCE(confirmed_at, SYSUTCDATETIME())
+            WHERE concession_order_id = ? AND status = 'SUCCESS'
+            """;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, orderId);
+            return ps.executeUpdate();
+        }
+    }
 }

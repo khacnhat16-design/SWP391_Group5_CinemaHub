@@ -4,8 +4,9 @@ import java.time.LocalDateTime;
 
 /** Entity thanh toán (Req 9) — 4 method, idempotency qua unique key. */
 public class Payment {
-    public static final String METHOD_MOCK_GATEWAY = "MOCK_GATEWAY";
+    public static final String METHOD_CASH = "CASH";
     public static final String METHOD_BANK_TRANSFER = "BANK_TRANSFER";
+    public static final String METHOD_MOCK_GATEWAY = "MOCK_GATEWAY";
     public static final String METHOD_WALLET = "WALLET";
 
     public static final String STATUS_PENDING = "PENDING";

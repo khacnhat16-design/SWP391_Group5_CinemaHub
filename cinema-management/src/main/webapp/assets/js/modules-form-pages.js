@@ -4381,4 +4381,461 @@
         }
     });
 
+
+    // ================================================================
+    //  PRODUCT (F&B Catalog Admin)
+    // ================================================================
+    function renderProductForm(product) {
+        var isEdit = !!product;
+        form.renderFormPage({
+            breadcrumb: ['Quáº£n lÃ½', { label: 'Sáº£n pháº©m F&B', href: ctx + '/console?module=product' }, isEdit ? 'Chá»‰nh sá»­a' : 'Táº¡o má»›i'],
+            title: isEdit ? 'Chá»‰nh sá»­a sáº£n pháº©m' : 'Táº¡o sáº£n pháº©m má»›i',
+            subtitle: isEdit ? product.name : 'ThÃªm sáº£n pháº©m hoáº·c combo báº¯p nÆ°á»›c.',
+            submitLabel: isEdit ? 'LÆ°u thay Ä‘á»•i' : 'Táº¡o sáº£n pháº©m',
+            sections: [{
+                title: 'ThÃ´ng tin sáº£n pháº©m',
+                fields: [
+                    { name: 'name', label: 'TÃªn sáº£n pháº©m', required: true, value: product && product.name, fullWidth: true },
+                    { name: 'description', label: 'MÃ´ táº£', type: 'textarea', required: false, value: product && product.description, rows: 3, fullWidth: true },
+                    { name: 'price', label: 'GiÃ¡ bÃ¡n (VND)', type: 'number', required: true, min: 0, step: 1000, value: product && product.price },
+                    { name: 'unit', label: 'ÄÆ¡n vá»‹', value: (product && product.unit) || 'pháº§n', placeholder: 'pháº§n, ly, há»™pâ€¦' },
+                    { name: 'type', label: 'Loáº¡i', type: 'select', required: true, value: (product && product.type) || 'POPCORN', options: [
+                        { value: 'POPCORN', label: 'Báº¯p rang' },
+                        { value: 'DRINK', label: 'NÆ°á»›c uá»‘ng' },
+                        { value: 'COMBO', label: 'Combo' },
+                        { value: 'OTHER', label: 'KhÃ¡c' }
+                    ]}
+                ]
+            }],
+            onSubmit: function (data) {
+                var url = isEdit ? '/concession/products/' + product.id : '/concession/products';
+                var method = isEdit ? 'PUT' : 'POST';
+                hub.api(url, { method: method, body: data })
+                    .then(function () { router.go('product'); })
+                    .catch(notifyError);
+            },
+            onCancel: function () { router.go('product'); }
+        });
+    }
+
+    router.register('product', {
+        list: function () {
+            list.render({
+                title: 'Sáº£n pháº©m F&B',
+                subtitle: 'Danh má»¥c báº¯p nÆ°á»›c vÃ  combo Ä‘ang Ä‘Æ°á»£c quáº£n lÃ½.',
+                addUrl: ctx + '/console?module=product&action=create',
+                addLabel: 'Táº¡o sáº£n pháº©m',
+                searchPlaceholder: 'TÃ¬m theo tÃªn sáº£n pháº©mâ€¦',
+                pageSize: 20,
+                filters: [{
+                    name: 'type', label: 'Loáº¡i',
+                    options: [
+                        { value: 'POPCORN', label: 'Báº¯p rang' },
+                        { value: 'DRINK', label: 'NÆ°á»›c uá»‘ng' },
+                        { value: 'COMBO', label: 'Combo' },
+                        { value: 'OTHER', label: 'KhÃ¡c' }
+                    ]
+                }],
+                sortable: true,
+                sortOptions: [
+                    { value: 'name', label: 'TÃªn Aâ†’Z' },
+                    { value: 'price', label: 'GiÃ¡' }
+                ],
+                fetcher: function (qs) {
+                    return hub.api('/concession/products').then(function (list) {
+                        var items = Array.isArray(list) ? list : [];
+                        var q = (qs.get('q') || '').trim().toLowerCase();
+                        var type = qs.get('type') || '';
+                        if (type) {
+                            items = items.filter(function (p) { return p.type === type; });
+                        }
+                        if (q) {
+                            items = items.filter(function (p) {
+                                return (p.name || '').toLowerCase().indexOf(q) !== -1;
+                            });
+                        }
+                        return { items: items, total: items.length };
+                    });
+                },
+                emptyTitle: 'ChÆ°a cÃ³ sáº£n pháº©m',
+                emptyMessage: 'Danh má»¥c báº¯p nÆ°á»›c Ä‘ang trá»‘ng.',
+                columns: [
+                    { label: 'TÃªn sáº£n pháº©m', key: 'name' },
+                    { label: 'Loáº¡i', key: 'type' },
+                    { label: 'ÄÆ¡n vá»‹', key: 'unit' },
+                    { label: 'GiÃ¡ bÃ¡n', render: function (r) { return hub.fmtMoney(r.price); } },
+                    { label: 'Tráº¡ng thÃ¡i', render: function (r) { return statusBadge(r.status); } }
+                ],
+                actions: function (row) {
+                    var arr = [{ label: 'Sá»­a', class: 'secondary', href: ctx + '/console?module=product&action=edit&id=' + row.id }];
+                    if (row.status === 'ACTIVE') {
+                        arr.push({ label: 'NgÆ°ng', class: 'danger', onClick: function () {
+                            confirmAction('NgÆ°ng kinh doanh sáº£n pháº©m nÃ y?', function () {
+                                hub.api('/concession/products/' + row.id, { method: 'PUT', body: { action: 'deactivate' } })
+                                    .then(function () {
+                                        hub.notify('ÄÃ£ ngÆ°ng sáº£n pháº©m.', 'ok');
+                                        router.go('product');
+                                    })
+                                    .catch(notifyError);
+                            });
+                        }});
+                    } else {
+                        arr.push({ label: 'Má»Ÿ láº¡i', class: 'primary', onClick: function () {
+                            confirmAction('Má»Ÿ láº¡i kinh doanh sáº£n pháº©m nÃ y?', function () {
+                                hub.api('/concession/products/' + row.id, { method: 'PUT', body: { action: 'activate' } })
+                                    .then(function () {
+                                        hub.notify('ÄÃ£ má»Ÿ láº¡i sáº£n pháº©m.', 'ok');
+                                        router.go('product');
+                                    })
+                                    .catch(notifyError);
+                            });
+                        }});
+                    }
+                    return arr;
+                }
+            });
+        },
+        create: function () { renderProductForm(null); },
+        edit: function (id) {
+            hub.api('/concession/products').then(function (list) {
+                var product = (list || []).find(function (p) { return String(p.id) === String(id); });
+                if (!product) throw new Error('KhÃ´ng tÃ¬m tháº¥y sáº£n pháº©m');
+                renderProductForm(product);
+            }).catch(notifyError);
+        }
+    });
+
+    // ================================================================
+    //  CONCESSION-REFUNDS (F&B refund approval)
+    // ================================================================
+    router.register('concession-refunds', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            hub.setWorkspaceHeader('YÃªu cáº§u hoÃ n tiá»n F&B');
+            var page = hub.el('div', { class: 'ws-page' });
+            page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
+                hub.el('h1', { class: 'ws-page-title' }, ['YÃªu cáº§u hoÃ n tiá»n F&B']),
+                hub.el('p', { class: 'ws-page-subtitle' }, [
+                    'HoÃ n 100% sá»‘ tiá»n Ä‘Ã£ thanh toÃ¡n vÃ  Ä‘iá»ƒm Ä‘Ã£ sá»­ dá»¥ng; khÃ´ng giá»›i háº¡n thá»i gian yÃªu cáº§u.'
+                ])
+            ]));
+            var tableWrap = hub.el('div', { class: 'ws-card', style: 'padding:0;overflow:auto' });
+            page.appendChild(tableWrap);
+            viewRoot.replaceChildren(page);
+
+            function load() {
+                tableWrap.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [
+                    hub.el('div', { class: 'ws-spinner' })
+                ]));
+                hub.api('/concession/refunds/console?status=PENDING').then(function (data) {
+                    var requests = (data && data.items) || [];
+                    if (!requests.length) {
+                        tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                            hub.el('h3', {}, ['KhÃ´ng cÃ³ yÃªu cáº§u Ä‘ang chá»']),
+                            hub.el('p', {}, ['YÃªu cáº§u hoÃ n tiá»n F&B má»›i sáº½ xuáº¥t hiá»‡n táº¡i Ä‘Ã¢y.'])
+                        ]));
+                        return;
+                    }
+                    var table = hub.el('table', { class: 'ws-table' });
+                    table.innerHTML = '<thead><tr><th>ÄÆ¡n</th><th>NgÃ¢n hÃ ng nháº­n tiá»n</th>'
+                        + '<th>LÃ½ do</th><th>HoÃ n tiá»n</th><th>YÃªu cáº§u lÃºc</th><th></th></tr></thead>';
+                    var tbody = hub.el('tbody');
+                    requests.forEach(function (request) {
+                        var bank = request.bankName + ' Â· ' + request.bankAccountName
+                            + ' Â· ' + request.bankAccountNumber;
+                        var amount = hub.fmtMoney(request.refundAmount || 0)
+                            + (request.refundPoints > 0 ? ' + ' + request.refundPoints + ' Ä‘iá»ƒm' : '');
+                        var actions = hub.el('td');
+                        var note = hub.el('textarea', {
+                            class: 'ws-input',
+                            rows: '2',
+                            maxlength: '500',
+                            placeholder: 'Ghi chÃº xá»­ lÃ½ / lÃ½ do tá»« chá»‘i'
+                        });
+                        var approve = hub.el('button', { class: 'ws-btn primary', type: 'button' }, ['Duyá»‡t hoÃ n']);
+                        var reject = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Tá»« chá»‘i']);
+                        approve.addEventListener('click', function () {
+                            if (!window.confirm('XÃ¡c nháº­n chuyá»ƒn ' + hub.fmtMoney(request.refundAmount)
+                                    + ' vá» tÃ i khoáº£n ' + request.bankAccountNumber + '?')) return;
+                            approve.disabled = true;
+                            hub.api('/concession/refunds/' + request.id + '/approve', {
+                                method: 'POST',
+                                body: { managerNote: note.value.trim() || 'ÄÃ£ xá»­ lÃ½ hoÃ n tiá»n 100% qua ngÃ¢n hÃ ng.' }
+                            }).then(load).catch(function (error) {
+                                approve.disabled = false;
+                                notifyError(error);
+                            });
+                        });
+                        reject.addEventListener('click', function () {
+                            var reason = note.value.trim();
+                            if (!reason) {
+                                hub.notify('Vui lÃ²ng nháº­p lÃ½ do tá»« chá»‘i vÃ o Ã´ ghi chÃº.', 'warn');
+                                note.focus();
+                                return;
+                            }
+                            reject.disabled = true;
+                            hub.api('/concession/refunds/' + request.id + '/reject', {
+                                method: 'POST',
+                                body: { managerNote: reason }
+                            }).then(load).catch(function (error) {
+                                reject.disabled = false;
+                                notifyError(error);
+                            });
+                        });
+                        actions.appendChild(hub.el('div', { style: 'display:flex;gap:6px;align-items:flex-start' }, [
+                            note,
+                            hub.el('div', { style: 'display:flex;flex-direction:column;gap:4px' }, [approve, reject])
+                        ]));
+                        tbody.appendChild(hub.el('tr', {}, [
+                            hub.el('td', {}, [
+                                hub.el('strong', {}, [request.orderCode || ('#' + request.orderId)]),
+                                hub.el('div', { class: 'ws-muted', style: 'font-size:.78rem' }, [
+                                    request.branchName || ('Chi nhÃ¡nh #' + request.branchId)
+                                ])
+                            ]),
+                            hub.el('td', {}, [bank]),
+                            hub.el('td', {}, [request.reason || 'â€”']),
+                            hub.el('td', {}, [hub.el('strong', {}, [amount])]),
+                            hub.el('td', {}, [request.createdAt ? hub.fmtNotificationDateTime(request.createdAt) : 'â€”']),
+                            actions
+                        ]));
+                    });
+                    table.appendChild(tbody);
+                    tableWrap.replaceChildren(table);
+                }).catch(function (error) {
+                    tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                        hub.el('h3', {}, ['KhÃ´ng táº£i Ä‘Æ°á»£c yÃªu cáº§u']),
+                        hub.el('p', {}, [error.message || 'Vui lÃ²ng thá»­ láº¡i sau.'])
+                    ]));
+                });
+            }
+            load();
+        }
+    });
+
+    // ================================================================
+    //  CONCESSION-ORDERS
+    // ================================================================
+    router.register('concession-orders', {
+        list: function () {
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
+            var branchesRequest = roleMeta === 'ADMIN'
+                ? hub.api('/branch/my-location')
+                : Promise.resolve([]);
+            branchesRequest.then(function (branches) {
+                var filters = [{
+                    name: 'status', label: 'Tráº¡ng thÃ¡i', options: [
+                        { value: 'PENDING', label: 'Chá» thanh toÃ¡n' },
+                        { value: 'READY_FOR_PICKUP', label: 'Sáºµn sÃ ng nháº­n' },
+                        { value: 'FULFILLED', label: 'ÄÃ£ giao' },
+                        { value: 'CANCELLED', label: 'ÄÃ£ há»§y' },
+                        { value: 'EXPIRED_NO_SHOW', label: 'QuÃ¡ háº¡n' }
+                    ]
+                }];
+                if (roleMeta === 'ADMIN') {
+                    filters.unshift({
+                        name: 'branchId', label: 'Chi nhÃ¡nh',
+                        options: (branches || []).map(function (b) {
+                            return { value: String(b.id), label: b.name };
+                        })
+                    });
+                }
+                list.render({
+                    title: 'ÄÆ¡n hÃ ng Báº¯p & NÆ°á»›c',
+                    subtitle: 'Danh sÃ¡ch Ä‘Æ¡n F&B táº¡i chi nhÃ¡nh.',
+                    searchPlaceholder: 'TÃ¬m mÃ£ Ä‘Æ¡n / tÃªn / SÄTâ€¦',
+                    pageSize: 20,
+                    filters: filters,
+                    toolbarRight: [hub.el('a', {
+                        href: ctx + '/console?module=concession-pickup',
+                        class: 'ws-btn secondary'
+                    }, ['ðŸ“· QuÃ©t mÃ£ nháº­n'])],
+                    fetcher: function (qs) { return hub.api('/concession/orders?' + qs.toString()); },
+                    emptyTitle: 'ChÆ°a cÃ³ Ä‘Æ¡n hÃ ng',
+                    emptyMessage: 'Chi nhÃ¡nh chÆ°a cÃ³ Ä‘Æ¡n F&B nÃ o.',
+                    columns: [
+                        { label: 'MÃ£ Ä‘Æ¡n', key: 'orderCode' },
+                        { label: 'Chi nhÃ¡nh', key: 'branchName' },
+                        { label: 'KhÃ¡ch hÃ ng', key: 'customerName' },
+                        { label: 'Tá»•ng tiá»n', render: function (o) { return hub.fmtMoney(o.totalAmount); } },
+                        { label: 'MÃ£ nháº­n', key: 'pickupCode' },
+                        { label: 'Tráº¡ng thÃ¡i', render: function (o) { return statusBadge(o.status); } },
+                        { label: 'NgÃ y táº¡o', render: function (o) {
+                            return o.createdAt ? hub.fmtNotificationDateTime(o.createdAt) : 'â€”';
+                        } }
+                    ],
+                    actions: function (row) {
+                        return [{ label: 'Chi tiáº¿t', class: 'secondary', href: ctx + '/console?module=concession-orders&action=view&id=' + row.id }];
+                    }
+                });
+            }).catch(notifyError);
+        },
+        view: function (id) {
+            var viewRoot = document.getElementById('viewRoot');
+            hub.setWorkspaceHeader('Chi tiáº¿t Ä‘Æ¡n F&B');
+            var page = hub.el('div', { class: 'ws-page' });
+            var card = hub.el('section', { class: 'ws-card' }, [
+                hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })])
+            ]);
+            page.appendChild(card);
+            viewRoot.replaceChildren(page);
+
+            if (!id) {
+                card.replaceChildren(hub.el('p', { class: 'ws-muted' }, ['KhÃ´ng xÃ¡c Ä‘á»‹nh Ä‘Æ°á»£c Ä‘Æ¡n hÃ ng.']));
+                return;
+            }
+
+            hub.api('/concession/orders/' + encodeURIComponent(id)).then(function (order) {
+                card.replaceChildren();
+                card.appendChild(hub.el('div', { class: 'ws-card-header' }, [
+                    hub.el('div', {}, [
+                        hub.el('h2', {}, ['ÄÆ¡n ' + (order.orderCode || ('#' + order.id))]),
+                        hub.el('p', { class: 'ws-muted' }, [
+                            (order.branchName || (order.branchId ? 'Chi nhÃ¡nh #' + order.branchId : 'Chi nhÃ¡nh chÆ°a xÃ¡c Ä‘á»‹nh')) + ' Â· ' +
+                            (order.createdAt ? hub.fmtNotificationDateTime(order.createdAt) : 'â€”')
+                        ])
+                    ]),
+                    statusBadge(order.status)
+                ]));
+
+                var lines = Array.isArray(order.lines) ? order.lines : [];
+                var table = hub.el('table', { class: 'ws-table' }, [
+                    hub.el('thead', {}, [hub.el('tr', {}, [
+                        hub.el('th', {}, ['Sáº£n pháº©m']),
+                        hub.el('th', {}, ['SL']),
+                        hub.el('th', {}, ['ÄÆ¡n giÃ¡']),
+                        hub.el('th', {}, ['ThÃ nh tiá»n'])
+                    ])])
+                ]);
+                var body = hub.el('tbody');
+                lines.forEach(function (line) {
+                    body.appendChild(hub.el('tr', {}, [
+                        hub.el('td', {}, [line.productName || ('#' + line.productId)]),
+                        hub.el('td', {}, [String(line.qty || 0)]),
+                        hub.el('td', {}, [hub.fmtMoney(line.unitPrice || 0)]),
+                        hub.el('td', {}, [hub.fmtMoney(line.subtotal || 0)])
+                    ]));
+                });
+                table.appendChild(body);
+                card.appendChild(table);
+                card.appendChild(hub.el('div', { class: 'ws-form-actions' }, [
+                    hub.el('strong', {}, ['Tá»•ng cá»™ng: ' + hub.fmtMoney(order.totalAmount || 0)])
+                ]));
+
+                if (order.pickupCode) {
+                    card.appendChild(hub.el('p', {}, [
+                        hub.el('strong', {}, ['MÃ£ nháº­n hÃ ng: ']),
+                        order.pickupCode
+                    ]));
+                }
+                var back = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Vá» danh sÃ¡ch Ä‘Æ¡n']);
+                back.addEventListener('click', function () { router.go('concession-orders'); });
+                card.appendChild(back);
+            }).catch(function (error) {
+                card.replaceChildren(
+                    hub.el('p', { class: 'ws-flash err' }, [error.message || 'KhÃ´ng táº£i Ä‘Æ°á»£c chi tiáº¿t Ä‘Æ¡n hÃ ng.']),
+                    hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Vá» danh sÃ¡ch Ä‘Æ¡n'])
+                );
+                card.querySelector('button').addEventListener('click', function () {
+                    router.go('concession-orders');
+                });
+            });
+        }
+    });
+
+    // ================================================================
+    //  CONCESSION-PICKUP (QR scan)
+    // ================================================================
+    router.register('concession-pickup', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            var page = hub.el('div', { class: 'ws-page' });
+            page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
+                hub.el('h1', { class: 'ws-page-title' }, ['QuÃ©t mÃ£ F&B']),
+                hub.el('p', { class: 'ws-page-subtitle' }, ['Nháº­p mÃ£ nháº­n hÃ ng Ä‘á»ƒ tra cá»©u; kiá»ƒm tra Ä‘Æ¡n rá»“i xÃ¡c nháº­n Ä‘Ã£ giao cho khÃ¡ch.'])
+            ]));
+            var card = hub.el('div', { class: 'ws-card', style: 'padding:24px;max-width:540px' });
+            card.appendChild(hub.el('label', { style: 'display:block;margin-bottom:6px;font-weight:600' }, ['MÃ£ nháº­n hÃ ng']));
+            var codeInput = hub.el('input', {
+                type: 'text', placeholder: 'PCK-XXXXX',
+                style: 'width:100%;padding:12px;border:1px solid var(--ws-line);border-radius:8px;font-size:1rem;font-family:monospace;text-transform:uppercase'
+            });
+            card.appendChild(codeInput);
+            var scanBtn = hub.el('button', { class: 'ws-btn primary', type: 'button', style: 'margin-top:12px;width:100%' }, ['Tra cá»©u']);
+            card.appendChild(scanBtn);
+            var result = hub.el('div', { style: 'margin-top:20px' });
+            card.appendChild(result);
+            page.appendChild(card);
+            viewRoot.replaceChildren(page);
+
+            var lookupFn = function () {
+                var code = codeInput.value.trim();
+                if (!code) {
+                    hub.notify('Vui lÃ²ng nháº­p mÃ£ nháº­n hÃ ng hoáº·c mÃ£ Ä‘Æ¡n!', 'warn');
+                    codeInput.focus();
+                    return;
+                }
+                result.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
+                hub.api('/concession/scan', { method: 'POST', body: { code: code.toUpperCase() } }).then(function (data) {
+                    if (!data.canRedeem) {
+                        result.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                            hub.el('h3', {}, ['KhÃ´ng thá»ƒ giao Ä‘Æ¡n nÃ y']),
+                            hub.el('p', {}, [data.message || 'ÄÆ¡n khÃ´ng á»Ÿ tráº¡ng thÃ¡i sáºµn sÃ ng nháº­n.'])
+                        ]));
+                        return;
+                    }
+                    var box = hub.el('div', { class: 'ws-card', style: 'padding:20px' });
+                    box.appendChild(hub.el('h3', {}, ['âœ“ Sáºµn sÃ ng giao hÃ ng']));
+                    var grid = hub.el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px' });
+                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['MÃ£ Ä‘Æ¡n:']), ' ', data.orderCode || 'â€”']));
+                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['KhÃ¡ch:']), ' ', data.customerName || 'â€”']));
+                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['Tá»•ng tiá»n:']), ' ', hub.fmtMoney(data.totalAmount)]));
+                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['Chi nhÃ¡nh:']), ' ', data.branchId || 'â€”']));
+                    box.appendChild(grid);
+                    var lines = (data.lines || []).map(function (l) {
+                        return hub.el('div', { style: 'padding:6px 0;border-bottom:1px solid var(--ws-line)' },
+                            [l.productName + ' Ã—' + l.qty + '  ', hub.el('strong', {}, [hub.fmtMoney(l.subtotal)])]);
+                    });
+                    if (lines.length) {
+                        box.appendChild(hub.el('h4', { style: 'margin-top:16px' }, ['Sáº£n pháº©m']));
+                        lines.forEach(function (l) { box.appendChild(l); });
+                    }
+                    var confirmBtn = hub.el('button', { class: 'ws-btn primary', type: 'button', style: 'margin-top:16px;width:100%' }, ['âœ“ XÃ¡c nháº­n Ä‘Ã£ giao cho khÃ¡ch']);
+                    confirmBtn.addEventListener('click', function () {
+                        confirmBtn.disabled = true;
+                        confirmBtn.textContent = 'Äang xá»­ lÃ½ giao hÃ ng...';
+                        hub.api('/concession/redeem', { method: 'POST', body: { orderId: data.orderId } })
+                            .then(function () {
+                                hub.notify('Giao Ä‘Æ¡n hÃ ng thÃ nh cÃ´ng!', 'ok');
+                                result.replaceChildren();
+                                codeInput.value = '';
+                                codeInput.focus();
+                            })
+                            .catch(function (err) {
+                                confirmBtn.disabled = false;
+                                confirmBtn.textContent = 'âœ“ XÃ¡c nháº­n Ä‘Ã£ giao cho khÃ¡ch';
+                                notifyError(err);
+                            });
+                    });
+                    box.appendChild(confirmBtn);
+                    result.replaceChildren(box);
+                }).catch(function (err) {
+                    result.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                        hub.el('h3', {}, ['KhÃ´ng tÃ¬m tháº¥y']),
+                        hub.el('p', {}, [err.message || 'MÃ£ nháº­n hÃ ng khÃ´ng tá»“n táº¡i.'])
+                    ]));
+                });
+            };
+
+            scanBtn.addEventListener('click', lookupFn);
+            codeInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    lookupFn();
+                }
+            });
+            codeInput.focus();
+        }
+    });
+
 })();
