@@ -1,5 +1,5 @@
 /* ============================================================================
- * rsc.css — Stylesheet riêng cho module Reviews
+ * rsc.css — Stylesheet riêng cho các module RSC (Reviews / Support / Complaints)
  * được nhúng trong customer area (header.jsp với cờ loadRscCss=true).
  *
  * Tách ra khỏi workspace.css để tránh kéo theo:
@@ -403,7 +403,7 @@
 }
 
 /* ---------- Badges (cart, status) ---------- */
-.ws-badge {
+.ws-badge-count {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -417,4 +417,3 @@
     font-weight: 700;
     margin-left: 6px;
 }
-.ws-badge.ws-badge-red { background: var(--ws-danger); }

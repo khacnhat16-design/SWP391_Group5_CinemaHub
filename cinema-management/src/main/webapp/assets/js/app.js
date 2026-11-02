@@ -178,6 +178,35 @@
         }
     }
 
+    function repairMojibakeText(value) {
+        const text = String(value || '');
+        if (!/(?:Ã.|Â.|Ä.|á»|áº|â€)/.test(text)
+                || typeof TextDecoder !== 'function' || typeof TextEncoder !== 'function') {
+            return text;
+        }
+        const cp1252 = '\u20AC\u0081\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030'
+            + '\u0160\u2039\u0152\u008D\u017D\u008F\u0090\u2018\u2019\u201C\u201D'
+            + '\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u009D\u017E\u0178';
+        const bytes = [];
+        const encoder = new TextEncoder();
+        for (const character of text) {
+            const code = character.charCodeAt(0);
+            if (code <= 0x7F || (code >= 0xA0 && code <= 0xFF)) {
+                bytes.push(code);
+            } else {
+                const index = cp1252.indexOf(character);
+                if (index >= 0) bytes.push(index + 0x80);
+                else bytes.push(...encoder.encode(character));
+            }
+        }
+        try {
+            const repaired = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes));
+            return repaired;
+        } catch (e) {
+            return text;
+        }
+    }
+
     function fmtNotificationDateTime(value) {
         if (!value) return '';
         try {
@@ -247,20 +276,60 @@
         try {
             if (window.JsBarcode) {
                 window.JsBarcode(canvas, value, { format: 'CODE128', displayValue: false, height: 60 });
-            } else {
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return;
-                canvas.width = canvas.width || 200;
-                canvas.height = canvas.height || 60;
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = '#000';
-                ctx.font = '16px monospace';
-                ctx.fillText(String(value), 10, 30);
+                return;
             }
-        } catch (e) {
-            // ignore
+        } catch (_) { }
+
+        // Codes issued by CinemaHub use the Code 39 character set, so keep them
+        // scannable even when the optional CODE128 renderer is not available.
+        const code39 = {
+            '0': '000110100', '1': '100100001', '2': '001100001', '3': '101100000',
+            '4': '000110001', '5': '100110000', '6': '001110000', '7': '000100101',
+            '8': '100100100', '9': '001100100', 'A': '100001001', 'B': '001001001',
+            'C': '101001000', 'D': '000011001', 'E': '100011000', 'F': '001011000',
+            'G': '000001101', 'H': '100001100', 'I': '001001100', 'J': '000011100',
+            'K': '100000011', 'L': '001000011', 'M': '101000010', 'N': '000010011',
+            'O': '100010010', 'P': '001010010', 'Q': '000000111', 'R': '100000110',
+            'S': '001000110', 'T': '000010110', 'U': '110000001', 'V': '011000001',
+            'W': '111000000', 'X': '010010001', 'Y': '110010000', 'Z': '011010000',
+            '-': '010000101', '.': '110000100', ' ': '011000100', '$': '010101000',
+            '/': '010100010', '+': '010001010', '%': '000101010', '*': '010010100'
+        };
+        const encoded = '*' + String(value).toUpperCase() + '*';
+        if ([...encoded].some(function (character) { return !code39[character]; })) {
+            canvas.hidden = true;
+            return;
         }
+        const narrow = 2;
+        const wide = narrow * 3;
+        const quiet = narrow * 10;
+        let units = quiet * 2 / narrow + (encoded.length - 1);
+        [...encoded].forEach(function (character) {
+            [...code39[character]].forEach(function (width) {
+                units += width === '1' ? 3 : 1;
+            });
+        });
+        canvas.width = units * narrow;
+        canvas.height = 64;
+        canvas.hidden = false;
+        canvas.setAttribute('aria-label', 'Mã vạch ' + value);
+        const context = canvas.getContext('2d');
+        if (!context) {
+            canvas.hidden = true;
+            return;
+        }
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = '#111';
+        let x = quiet;
+        [...encoded].forEach(function (character, characterIndex) {
+            [...code39[character]].forEach(function (width, index) {
+                const barWidth = width === '1' ? wide : narrow;
+                if (index % 2 === 0) context.fillRect(x, 2, barWidth, canvas.height - 4);
+                x += barWidth;
+            });
+            if (characterIndex < encoded.length - 1) x += narrow;
+        });
     }
 
     // ---------- Notification badge ----------
@@ -284,6 +353,62 @@
                 badge.hidden = true;
             }
         });
+    }
+
+    function showtimeScheduleReminderAction(item) {
+        const reminderType = item && item.type;
+        if (reminderType !== 'SHOWTIME_SCHEDULE_REMINDER'
+                && reminderType !== 'SHOWTIME_SCHEDULE_URGENT') return null;
+        const body = String(item.body || '');
+        const actionPattern =
+            /\s*·\s*\/console\?module=showtime-allocation&movieId=(\d+)&branchId=(\d+)\s*$/;
+        const match = actionPattern.exec(body);
+        if (!match) return null;
+        const query = new URLSearchParams({
+            module: 'showtime-allocation',
+            movieId: match[1],
+            branchId: match[2]
+        });
+        return {
+            href: ctx + '/console?' + query.toString(),
+            body: body.slice(0, match.index).trim(),
+            urgent: reminderType === 'SHOWTIME_SCHEDULE_URGENT'
+        };
+    }
+
+    function refundRequestAction(item) {
+        if (!item || item.type !== 'REFUND_REQUEST') return null;
+        return {
+            href: ctx + '/console?module=refunds&status=PENDING',
+            label: 'Xem yêu cầu hoàn tiền',
+            body: String(item.body || '')
+        };
+    }
+
+    function inventoryAlertAction(item) {
+        if (!item) return null;
+        if (item.type === 'INVENTORY_LOW_STOCK' || item.type === 'INVENTORY_EXPIRY_WARNING') {
+            const titleLower = (item.title || '').toLowerCase();
+            const bodyLower = (item.body || '').toLowerCase();
+            const isMaterial = titleLower.indexOf('nguyên liệu') !== -1 || bodyLower.indexOf('nguyên liệu') !== -1;
+            const isOutOfStock = titleLower.indexOf('hết hàng') !== -1 || bodyLower.indexOf('hết hàng') !== -1;
+            const isExpired = titleLower.indexOf('hết hạn') !== -1 || bodyLower.indexOf('hết hạn') !== -1;
+            const isExpiringSoon = titleLower.indexOf('cận hạn') !== -1 || bodyLower.indexOf('cận hạn') !== -1;
+
+            let severityLabel = 'Sắp hết';
+            if (isOutOfStock) severityLabel = 'Hết hàng';
+            else if (isExpired) severityLabel = 'Hết hạn';
+            else if (isExpiringSoon) severityLabel = 'Cận hạn';
+
+            return {
+                href: ctx + '/console?module=inventory&tab=' + (isMaterial ? 'material' : 'product'),
+                label: 'Xem kho hàng',
+                body: String(item.body || ''),
+                urgent: isOutOfStock || isExpired,
+                severityLabel: severityLabel
+            };
+        }
+        return null;
     }
 
     function uploadFile(file, fieldName) {
@@ -318,8 +443,10 @@
     function setWorkspaceHeader(title) {
         const h1 = document.querySelector('.ws-header h1');
         const eyebrow = document.querySelector('.ws-header .eyebrow');
-        if (h1 && title) {
-            h1.textContent = title;
+        if (h1) {
+            // Nếu title rỗng/null thì giữ nguyên giá trị từ JSP (mặc định 'Bảng điều khiển')
+            // — chỉ cập nhật khi có title cụ thể (vd. 'Thêm phim mới', 'Danh mục phim').
+            if (title) h1.textContent = title;
         }
         if (eyebrow) {
             eyebrow.textContent = 'KHU VỰC QUẢN LÝ CINEMAHUB';
@@ -336,6 +463,9 @@
         fmtMoney: fmtMoney,
         fmtDateTime: fmtDateTime,
         fmtNotificationDateTime: fmtNotificationDateTime,
+        repairMojibakeText: repairMojibakeText,
+        showtimeScheduleReminderAction: showtimeScheduleReminderAction,
+        refundRequestAction: refundRequestAction,
         notify: notify,
         statusBadge: statusBadge,
         table: table,
@@ -360,6 +490,11 @@
         refreshNotificationBadge().catch(function (error) {
             console.error('Không thể tải số lượng thông báo chưa đọc.', error);
         });
+
+        // Tự động kiểm tra thông báo định kỳ mỗi 15 giây
+        setInterval(function () {
+            refreshNotificationBadge().catch(function () {});
+        }, 15000);
 
         const bell = document.getElementById('notificationBell');
         const popover = document.getElementById('notificationPopover');
@@ -398,14 +533,20 @@
                     return;
                 }
                 list.slice(0, 6).forEach(function (item) {
+                    const action = showtimeScheduleReminderAction(item) || refundRequestAction(item) || inventoryAlertAction(item);
+                    const body = repairMojibakeText(action ? action.body : item.body);
                     const row = el('button', {
                         class: 'notification-item ' + (item.read ? '' : 'unread'),
                         type: 'button'
                     }, [
-                        el('strong', {}, [item.title || 'Thông báo']),
-                        item.body ? el('span', {}, [item.body]) : null,
+                        el('strong', {}, [repairMojibakeText(item.title || 'Thông báo')]),
+                        action && action.urgent !== undefined ? el('small', {
+                            class: 'notification-severity '
+                                + (action.urgent ? 'urgent' : 'normal')
+                        }, [action.severityLabel || (action.urgent ? 'Khẩn cấp' : 'Cần xử lý')]) : null,
+                        body ? el('span', {}, [body]) : null,
                         el('small', {}, [fmtNotificationDateTime(item.createdAt)])
-                    ]);
+                    ].filter(Boolean));
                     row.addEventListener('click', function () {
                         const chain = (!item.read
                             ? api('/notification/' + item.id + '/read', { method: 'POST' })
@@ -415,7 +556,28 @@
                             row.classList.remove('unread');
                         }).catch(function (e) { notify(e.message || 'Không thể cập nhật thông báo.', 'err'); });
                     });
-                    popover.appendChild(el('div', { class: 'notification-entry' }, [row]));
+                    const entry = el('div', { class: 'notification-entry' }, [row]);
+                    if (action) {
+                        const link = el('a', {
+                            class: 'notification-action',
+                            href: action.href
+                        }, [action.label || 'Xem chi tiết']);
+                        link.addEventListener('click', function (event) {
+                            event.preventDefault();
+                            const markRead = !item.read
+                                ? api('/notification/' + item.id + '/read', { method: 'POST' })
+                                : Promise.resolve();
+                            markRead.then(function () {
+                                return refreshNotificationBadge();
+                            }).then(function () {
+                                window.location.assign(action.href);
+                            }).catch(function (e) {
+                                notify(e.message || 'Không thể mở phân bổ suất chiếu.', 'err');
+                            });
+                        });
+                        entry.appendChild(link);
+                    }
+                    popover.appendChild(entry);
                 });
             }).catch(function (error) {
                 popover.replaceChildren(el('div', { class: 'notification-error' },
@@ -424,9 +586,28 @@
         });
     }
 
+    function initCustomerHeader() {
+        if (currentRole !== 'CUSTOMER' || !document.getElementById('customerPoints')) return;
+        api('/api/profile').then(function (data) {
+            const points = document.getElementById('customerPoints');
+            if (!data || !data.profile || !points) {
+                throw new Error('Dữ liệu điểm tài khoản không hợp lệ.');
+            }
+            points.textContent = Number(data.profile.points || 0).toLocaleString('vi-VN');
+        }).catch(function (error) {
+            console.error('Không thể tải điểm trên header khách hàng.', error);
+            const points = document.getElementById('customerPoints');
+            if (points) points.textContent = '—';
+        });
+    }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initNotifications);
+        document.addEventListener('DOMContentLoaded', function () {
+            initNotifications();
+            initCustomerHeader();
+        });
     } else {
         initNotifications();
+        initCustomerHeader();
     }
 })();

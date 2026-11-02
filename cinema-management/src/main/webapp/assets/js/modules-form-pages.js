@@ -103,6 +103,251 @@
         cancel.focus();
     }
 
+    // Dùng chung modal xác nhận cho các module riêng (modules-voucher.js…).
+    window.CinemaHubConfirm = confirmAction;
+
+    function openShowtimeBookings(showtime) {
+        var previousFocus = document.activeElement;
+        var pageSize = 30;
+        var offset = 0;
+        var overlay = hub.el('div', { class: 'ws-modal-overlay', role: 'presentation' });
+        var backdrop = hub.el('div', { class: 'ws-modal-backdrop' });
+        var panel = hub.el('div', {
+            class: 'ws-modal-panel ws-showtime-bookings-modal',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-labelledby': 'showtime-bookings-title'
+        });
+        var title = [showtime.movieTitle || 'Suất chiếu', 'Ghế đã đặt'].join(' · ');
+        var closeButton = hub.el('button', {
+            class: 'ws-modal-x',
+            type: 'button',
+            'aria-label': 'Đóng danh sách ghế đã đặt'
+        }, ['×']);
+        var heading = hub.el('div', { class: 'ws-modal-head' }, [
+            hub.el('h2', { id: 'showtime-bookings-title' }, [title]),
+            closeButton
+        ]);
+        var body = hub.el('div', { class: 'ws-modal-body' });
+        var details = [
+            showtime.branchName,
+            showtime.screenName,
+            showtime.startTime ? hub.fmtDateTime(showtime.startTime) : null,
+            showtime.endTime ? 'Kết thúc ' + hub.fmtDateTime(showtime.endTime) : null
+        ].filter(Boolean).join(' · ');
+        body.appendChild(hub.el('p', { class: 'ws-showtime-bookings-meta' }, [
+            details || 'Danh sách vé và ghế của suất chiếu này.'
+        ]));
+        body.appendChild(hub.el('h3', { class: 'ws-showtime-seat-map-title' }, [
+            'Sơ đồ ghế phòng chiếu'
+        ]));
+        var seatMapStatus = hub.el('p', {
+            class: 'ws-showtime-bookings-status',
+            role: 'status'
+        }, ['Đang tải sơ đồ ghế…']);
+        body.appendChild(seatMapStatus);
+        var seatMap = hub.el('div', { class: 'ws-showtime-seat-map' });
+        body.appendChild(seatMap);
+        var status = hub.el('p', { class: 'ws-showtime-bookings-status', role: 'status' }, ['Đang tải danh sách ghế…']);
+        body.appendChild(status);
+        var tableWrap = hub.el('div', { class: 'ws-table-wrap ws-showtime-bookings-table-wrap' });
+        body.appendChild(tableWrap);
+        var pagination = hub.el('div', { class: 'ws-showtime-bookings-pagination' });
+        var pageLabel = hub.el('span', { class: 'ws-muted' });
+        var previousButton = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Trước']);
+        var nextButton = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Tiếp']);
+        pagination.appendChild(pageLabel);
+        pagination.appendChild(previousButton);
+        pagination.appendChild(nextButton);
+        body.appendChild(pagination);
+
+        var closed = false;
+        function close() {
+            if (closed) return;
+            closed = true;
+            document.removeEventListener('keydown', onKeyDown);
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
+        }
+        function onKeyDown(event) {
+            if (event.key === 'Escape') close();
+        }
+        closeButton.addEventListener('click', close);
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay || event.target === backdrop) close();
+        });
+        previousButton.addEventListener('click', function () {
+            if (offset >= pageSize) {
+                offset -= pageSize;
+                loadBookings();
+            }
+        });
+        nextButton.addEventListener('click', function () {
+            offset += pageSize;
+            loadBookings();
+        });
+        pagination.hidden = true;
+
+        function loadShowtimeSeatMap() {
+            hub.api('/showtime/' + encodeURIComponent(String(showtime.id))).then(function (data) {
+                var seats = Array.isArray(data.seats) ? data.seats : [];
+                var rows = new Map();
+                var counts = { SOLD: 0, HOLD: 0, AVAILABLE: 0, MAINTENANCE: 0 };
+                var capacity = 0;
+                seats.forEach(function (seat) {
+                    var rowLabel = String(seat.rowLabel || '?');
+                    if (!rows.has(rowLabel)) rows.set(rowLabel, []);
+                    rows.get(rowLabel).push(seat);
+                    var seatCapacity = String(seat.seatType || '').toUpperCase() === 'COUPLE' ? 2 : 1;
+                    capacity += seatCapacity;
+                    if (Object.prototype.hasOwnProperty.call(counts, seat.status)) {
+                        counts[seat.status] += seatCapacity;
+                    }
+                });
+                seatMap.replaceChildren();
+                if (!seats.length) {
+                    seatMapStatus.textContent = 'Phòng chiếu chưa có sơ đồ ghế.';
+                    return;
+                }
+
+                seatMapStatus.textContent = 'Tổng ' + capacity + ' chỗ · '
+                    + counts.SOLD + ' đã đặt · ' + counts.HOLD + ' đang giữ · '
+                    + counts.AVAILABLE + ' còn trống'
+                    + (counts.MAINTENANCE ? ' · ' + counts.MAINTENANCE + ' bảo trì' : '') + '.';
+                seatMap.appendChild(hub.el('div', {
+                    class: 'ws-showtime-seat-map-screen',
+                    'aria-hidden': 'true'
+                }, ['MÀN HÌNH']));
+
+                var grid = hub.el('div', { class: 'ws-showtime-seat-map-grid' });
+                Array.from(rows.keys()).sort().forEach(function (rowLabel) {
+                    var row = hub.el('div', { class: 'ws-showtime-seat-map-row' });
+                    row.appendChild(hub.el('span', {
+                        class: 'ws-showtime-seat-map-row-label'
+                    }, [rowLabel]));
+                    var cells = hub.el('div', { class: 'ws-showtime-seat-map-cells' });
+                    var occupiedThrough = 0;
+                    rows.get(rowLabel).sort(function (a, b) {
+                        return Number(a.colNo) - Number(b.colNo);
+                    }).forEach(function (seat) {
+                        var seatCol = Number(seat.colNo) || 0;
+                        if (seatCol <= occupiedThrough) return;
+                        var seatStatus = String(seat.status || 'MAINTENANCE').toUpperCase();
+                        var className = seatStatus === 'SOLD' ? 'sold'
+                            : seatStatus === 'HOLD' ? 'hold'
+                            : seatStatus === 'AVAILABLE' ? 'available' : 'maintenance';
+                        var seatCode = rowLabel + String(seat.colNo || '');
+                        var seatDisplayCode = seat.seatType === 'COUPLE'
+                            ? seatCode + '-' + (seatCol + 1) : seatCode;
+                        var statusLabel = seatStatus === 'SOLD' ? 'đã đặt'
+                            : seatStatus === 'HOLD' ? 'đang được giữ'
+                            : seatStatus === 'AVAILABLE' ? 'còn trống' : 'bảo trì';
+                        var seatNode = hub.el('span', {
+                            class: 'ws-showtime-seat-map-seat ' + className
+                                + (seat.seatType === 'COUPLE' ? ' couple' : ''),
+                            title: seatDisplayCode + ' · ' + (seat.seatType || 'STANDARD') + ' · ' + statusLabel,
+                            'aria-label': 'Ghế ' + seatDisplayCode + ', ' + statusLabel
+                        }, [seat.seatType === 'COUPLE'
+                            ? String(seat.colNo) + '-' + (seatCol + 1) : String(seat.colNo || '')]);
+                        cells.appendChild(seatNode);
+                        if (seat.seatType === 'COUPLE') occupiedThrough = seatCol + 1;
+                    });
+                    row.appendChild(cells);
+                    grid.appendChild(row);
+                });
+                seatMap.appendChild(grid);
+                seatMap.appendChild(hub.el('div', { class: 'ws-showtime-seat-map-legend' }, [
+                    ['available', 'Còn trống'],
+                    ['hold', 'Đang giữ'],
+                    ['sold', 'Đã đặt'],
+                    ['maintenance', 'Bảo trì']
+                ].map(function (item) {
+                    return hub.el('span', { class: 'ws-showtime-seat-map-legend-item' }, [
+                        hub.el('span', {
+                            class: 'ws-showtime-seat-map-dot ' + item[0],
+                            'aria-hidden': 'true'
+                        }),
+                        item[1]
+                    ]);
+                })));
+            }).catch(function (err) {
+                seatMapStatus.className = 'ws-showtime-bookings-status error';
+                seatMapStatus.textContent = err.message || 'Không tải được sơ đồ ghế phòng chiếu.';
+            });
+        }
+
+        function loadBookings() {
+            status.className = 'ws-showtime-bookings-status';
+            status.textContent = 'Đang tải danh sách ghế…';
+            tableWrap.replaceChildren();
+            previousButton.disabled = true;
+            nextButton.disabled = true;
+            var query = new URLSearchParams({
+                showtimeId: String(showtime.id),
+                limit: String(pageSize),
+                offset: String(offset)
+            });
+            hub.api('/booking/list?' + query.toString()).then(function (data) {
+                var items = Array.isArray(data.items) ? data.items : [];
+                var total = Number(data.total) || 0;
+                status.textContent = total
+                    ? 'Có ' + total.toLocaleString('vi-VN') + ' vé đang giữ, đã đặt hoặc đã sử dụng.'
+                    : 'Chưa có khách đặt ghế cho suất chiếu này.';
+                if (items.length) {
+                    var table = hub.el('table', { class: 'ws-table' });
+                    var headRow = hub.el('tr');
+                    ['Mã vé', 'Khách hàng', 'Ghế', 'Trạng thái'].forEach(function (label) {
+                        headRow.appendChild(hub.el('th', {}, [label]));
+                    });
+                    table.appendChild(hub.el('thead', {}, [headRow]));
+                    var tbody = hub.el('tbody');
+                    items.forEach(function (ticket) {
+                        var row = hub.el('tr');
+                        row.appendChild(hub.el('td', {}, [ticket.ticketCode || '—']));
+                        row.appendChild(hub.el('td', {}, [ticket.customerName || 'Khách lẻ']));
+                        var seatsCell = hub.el('td', { class: 'ws-showtime-bookings-seats' });
+                        var seats = Array.isArray(ticket.seats) ? ticket.seats : [];
+                        if (!seats.length) {
+                            seatsCell.textContent = '—';
+                        } else {
+                            seats.forEach(function (seat) {
+                                seatsCell.appendChild(hub.el('span', { class: 'ws-showtime-seat-chip' }, [
+                                    seat.seatCode || ((seat.rowLabel || '') + (seat.colNo || ''))
+                                ]));
+                            });
+                        }
+                        row.appendChild(seatsCell);
+                        row.appendChild(hub.el('td', {}, [statusBadge(ticket.status)]));
+                        tbody.appendChild(row);
+                    });
+                    table.appendChild(tbody);
+                    tableWrap.appendChild(table);
+                }
+                pageLabel.textContent = total
+                    ? 'Hiển thị ' + (offset + 1) + '–' + (offset + items.length) + ' / ' + total
+                    : '';
+                previousButton.disabled = offset === 0;
+                nextButton.disabled = offset + items.length >= total;
+                pagination.hidden = total <= pageSize;
+            }).catch(function (err) {
+                status.className = 'ws-showtime-bookings-status error';
+                status.textContent = err.message || 'Không tải được danh sách ghế đã đặt.';
+                pagination.hidden = true;
+                notifyError(err);
+            });
+        }
+
+        panel.appendChild(heading);
+        panel.appendChild(body);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        document.addEventListener('keydown', onKeyDown);
+        closeButton.focus();
+        loadShowtimeSeatMap();
+        loadBookings();
+    }
+
     function notifyError(err) {
         hub.notify(err.message || 'Đã xảy ra lỗi.', 'err');
     }
@@ -371,8 +616,8 @@
             staffHead.appendChild(hub.el('h3', {}, ['Nhân viên']));
             staffHead.appendChild(hub.el('p', { class: 'ws-bsap-block-desc' }, [
                 allowManagerEdit
-                    ? 'Chọn nhân viên chi nhánh (có thể chọn nhiều).'
-                    : 'Thêm nhân viên chi nhánh của bạn.'
+                    ? 'Chọn các nhân viên được phân công cho chi nhánh (có thể chọn nhiều).'
+                    : 'Thêm nhân viên vào chi nhánh của bạn.'
             ]));
             staffBlock.appendChild(staffHead);
             var staffList = hub.el('div', { class: 'ws-bsap-list' });
@@ -1225,11 +1470,7 @@
     //  BRANCH (Admin only)
     // ================================================================
     function branchListApiPath(roleMeta) {
-        if (!roleMeta) {
-            var meta = document.querySelector('meta[name="user-role"]');
-            roleMeta = meta ? meta.content : '';
-        }
-        return (roleMeta === 'ADMIN') ? '/branch' : '/branch/my-location';
+        return roleMeta === 'BRANCH_MANAGER' ? '/branch/my-location' : '/branch';
     }
 
     router.register('branch', {
@@ -1657,116 +1898,221 @@
         }
     });
 
+
+    // ================================================================
+    //  MOVIE (Admin only)
+    // ================================================================
+    // (Hàm renderMoviePriceRules đã được lược bỏ cùng module "Bảng giá vé".)
+
     function renderMovieForm(movie, genres, branches) {
         var isEdit = !!movie;
         branches = branches || [];
-        var posterState = { currentUrl: (movie && movie.posterUrl) || '' };
-        var selectedTemplateId = new URLSearchParams(window.location.search).get('templateId');
-        var pricePicker = null;
-        var priceRetryButton = null;
-        var pendingMoviePricingId = null;
+        var movieTemplatePicker = null;
+        var roleMeta = document.querySelector('meta[name="user-role"]');
+
+        function openMovieEdit(movieId, selections) {
+            var query = new URLSearchParams({
+                module: 'movie',
+                action: 'edit',
+                id: String(movieId)
+            });
+            if (selections && selections.length) {
+                query.set('templateAssignments', selections.map(function (selection) {
+                    return selection.branchIds[0] + ':' + selection.templateId;
+                }).join(','));
+            }
+            window.location.href = ctx + '/console?' + query.toString();
+        }
+
+        function finishTemplateApply(movieId, selections) {
+            if (!selections || !selections.length) {
+                router.go('movie');
+                return Promise.resolve();
+            }
+            function keepEditing(message, failedSelections) {
+                hub.notify('Phim đã được lưu nhưng giá mẫu chưa hoàn tất. ' + message
+                    + ' Có thể thử lại trong màn hình chỉnh sửa phim.', 'err');
+                openMovieEdit(movieId, failedSelections || selections);
+            }
+            return Promise.all(selections.map(function (selection) {
+                return hub.api('/pricing-templates/' + encodeURIComponent(selection.templateId)
+                    + '/preview', {
+                        method: 'POST',
+                        body: JSON.stringify({ movieId: movieId, branchIds: selection.branchIds }),
+                        contentType: 'application/json;charset=UTF-8'
+                    }).then(function (preview) {
+                        return { selection: selection, preview: preview };
+                    });
+            })).then(function (prepared) {
+                var conflicts = [];
+                prepared.forEach(function (item) {
+                    (item.preview.branches || []).filter(function (branch) {
+                        return branch.conflict;
+                    }).forEach(function (branch) {
+                        conflicts.push({ selection: item.selection, branch: branch });
+                    });
+                });
+                if (conflicts.length) {
+                    var detail = conflicts.map(function (item) {
+                        var branch = item.selection.branches[0];
+                        return branch.name + ' · ' + item.selection.templateName
+                            + ': ' + item.branch.existingRuleCount + ' khung giá hiện có';
+                    }).join('\n');
+                    if (!window.confirm('Các chi nhánh sau đã có giá cho phim:\n' + detail
+                            + '\n\nThay thế toàn bộ giá tại các chi nhánh bị ảnh hưởng?')) {
+                        keepEditing('Bạn đã hủy thao tác áp dụng.', selections);
+                        return null;
+                    }
+                }
+                return prepared.reduce(function (chain, item) {
+                    return chain.then(function (results) {
+                        var expectedState = {};
+                        (item.preview.branches || []).forEach(function (branch) {
+                            expectedState[String(branch.branchId)] = branch.stateToken;
+                        });
+                        var hasConflict = (item.preview.branches || []).some(function (branch) {
+                            return branch.conflict;
+                        });
+                        return hub.api('/pricing-templates/'
+                            + encodeURIComponent(item.selection.templateId) + '/apply', {
+                                method: 'POST',
+                                body: JSON.stringify({
+                                    movieId: movieId,
+                                    branchIds: item.selection.branchIds,
+                                    expectedState: expectedState,
+                                    replaceExisting: hasConflict
+                                }),
+                                contentType: 'application/json;charset=UTF-8'
+                            }).then(function (result) {
+                                return results.concat(result.branches || []);
+                            }).catch(function (error) {
+                                if (error.status === 409 && error.payload
+                                        && Array.isArray(error.payload.results)) {
+                                    return results.concat(error.payload.results);
+                                }
+                                return results.concat(item.selection.branches.map(function (branch) {
+                                    return {
+                                        branchId: branch.id,
+                                        status: 'FAILED',
+                                        message: error.message || 'Không thể áp dụng mẫu giá.'
+                                    };
+                                }));
+                            });
+                    });
+                }, Promise.resolve([]));
+            }).then(function (results) {
+                    if (results === null) return;
+                    var applied = results.filter(function (branch) {
+                        return branch.status === 'APPLIED';
+                    });
+                    var failed = results.filter(function (branch) {
+                        return branch.status !== 'APPLIED';
+                    });
+                    if (!failed.length) {
+                        hub.notify('Đã áp dụng mẫu giá cho ' + applied.length + ' chi nhánh.', 'ok');
+                        router.go('movie');
+                        return;
+                    }
+                    var failedSelections = selections.filter(function (selection) {
+                        return failed.some(function (branch) {
+                            return selection.branchIds.some(function (branchId) {
+                                return String(branchId) === String(branch.branchId);
+                            });
+                        });
+                    });
+                    var details = failed.map(function (branch) {
+                        var target = selections.reduce(function (found, selection) {
+                            return found || selection.branches.find(function (item) {
+                                return String(item.id) === String(branch.branchId);
+                            });
+                        }, null);
+                        return (target ? target.name : ('Chi nhánh #' + branch.branchId))
+                            + ': ' + (branch.message || branch.status);
+                    }).join(' · ');
+                    keepEditing(details, failedSelections);
+                }).catch(function (error) {
+                keepEditing(error.message || 'Không thể áp dụng mẫu giá.', selections);
+            });
+        }
+
+        // Trạng thái poster: lưu URL hiện tại; nếu upload mới thì thay đổi URL này.
+        // Khi không upload ảnh mới, URL cũ được giữ nguyên → không làm mất ảnh cũ.
+        var posterState = {
+            currentUrl: (movie && movie.posterUrl) || '',
+            pendingFile: null
+        };
+
         var sections = [{
             title: 'Thông tin cơ bản',
             description: 'Mô tả và chi tiết phim.',
             fields: [
                 { name: 'title', label: 'Tên phim', required: true, value: movie && movie.title, fullWidth: true },
-                { name: 'author', label: 'Tác giả / Đạo diễn', value: movie && movie.author,
-                    placeholder: 'VD: Christopher Nolan, Trần Anh Hùng…' },
-                { name: 'durationMin', label: 'Thời lượng (phút)', type: 'number',
-                    required: true, min: 1, max: 600, value: movie && movie.durationMin },
+                { name: 'author', label: 'Tác giả / Đạo diễn', required: false,
+                  value: movie && movie.author, placeholder: 'VD: Christopher Nolan, Trần Anh Hùng…',
+                  maxLength: 200,
+                  },
+                { name: 'durationMin', label: 'Thời lượng (phút)', type: 'number', required: true, min: 1, max: 600, value: movie && movie.durationMin },
                 { name: 'genre', label: 'Thể loại phim', type: 'checkbox-group',
-                    className: 'ws-genre-field', required: true,
-                    value: movie && movie.genre ? movie.genre.split(/\s*[,/;]\s*/).filter(Boolean) : [],
-                    options: (genres || []).map(function (genre) {
-                        return { value: genre.name, label: genre.name };
-                    }),
-                    hint: 'Chọn một hoặc nhiều thể loại.' },
+                  className: 'ws-genre-field', required: true,
+                  value: movie && movie.genre ? movie.genre.split(/\s*[,/;]\s*/).filter(Boolean) : [],
+                  options: genres.map(function (genre) { return { value: genre.name, label: genre.name }; }),
+                  hint: 'Chọn một hoặc nhiều thể loại.' },
                 { name: 'rating', label: 'Giới hạn tuổi', type: 'select', required: true,
-                    value: (movie && movie.rating) || 'P', options: [
-                        { value: 'P', label: 'P - Mọi lứa tuổi' },
-                        { value: 'C13', label: 'C13 - Trên 13 tuổi' },
-                        { value: 'C16', label: 'C16 - Trên 16 tuổi' },
-                        { value: 'C18', label: 'C18 - Trên 18 tuổi' }
-                    ] },
-                { name: 'releaseDate', label: 'Ngày phát hành', type: 'date', required: true,
-                    value: dateValue(movie && movie.releaseDate) },
-                { name: 'endDate', label: 'Ngày kết thúc', type: 'date', required: true,
-                    value: dateValue(movie && movie.endDate) },
-                { name: 'status', label: 'Trạng thái', type: 'select', required: true,
-                    value: (movie && movie.status) || 'DRAFT', options: [
-                        { value: 'DRAFT', label: 'Bản nháp' },
-                        { value: 'PUBLISHED', label: 'Đang phát hành' },
-                        { value: 'ARCHIVED', label: 'Đã lưu trữ' }
-                    ] },
-                { name: 'description', label: 'Mô tả', type: 'textarea',
-                    value: movie && movie.description, rows: 5, fullWidth: true }
+                  value: (movie && movie.rating) || 'P',
+                  hint: 'Chọn phân loại độ tuổi phù hợp.', options: [
+                    { value: 'P', label: 'P - Mọi lứa tuổi' },
+                    { value: 'C13', label: 'C13 - Trên 13 tuổi' },
+                    { value: 'C16', label: 'C16 - Trên 16 tuổi' },
+                    { value: 'C18', label: 'C18 - Trên 18 tuổi' }
+                ]},
+                { name: 'releaseDate', label: 'Ngày phát hành', type: 'date', required: true, value: dateValue(movie && movie.releaseDate) },
+                { name: 'endDate', label: 'Ngày kết thúc', type: 'date', required: true, value: dateValue(movie && movie.endDate) },
+                { name: 'status', label: 'Trạng thái', type: 'select', required: true, value: (movie && movie.status) || 'DRAFT', options: [
+                    { value: 'DRAFT', label: 'Bản nháp' },
+                    { value: 'PUBLISHED', label: 'Đang phát hành' },
+                    { value: 'ARCHIVED', label: 'Đã lưu trữ' }
+                ]},
+                { name: 'description', label: 'Mô tả', type: 'textarea', required: false, value: movie && movie.description, rows: 5, fullWidth: true,
+                  hint: 'Mô tả ngắn gọn nội dung phim để hiển thị cho khách hàng.' }
             ]
         }];
 
         form.renderFormPage({
-            breadcrumb: ['Quản lý', { label: 'Phim', href: ctx + '/console?module=movie' },
-                isEdit ? 'Chỉnh sửa' : 'Tạo mới'],
+            breadcrumb: ['Quản lý', { label: 'Phim', href: ctx + '/console?module=movie' }, isEdit ? 'Chỉnh sửa' : 'Tạo mới'],
             title: isEdit ? 'Chỉnh sửa phim' : 'Thêm phim mới',
             subtitle: isEdit ? movie.title : 'Tạo bản ghi phim mới trong hệ thống.',
             submitLabel: isEdit ? 'Lưu thay đổi' : 'Tạo phim',
             sections: sections,
+            // renderFooter: chèn khối poster upload + hidden posterUrl sau form (sau sections)
             renderFooter: function (formEl) {
-                var pricing = hub.el('section', { class: 'ws-form-section ws-movie-pricing-section' });
-                pricing.appendChild(hub.el('h2', { class: 'ws-form-section-title' }, ['Giá vé']));
-                var pricingTemplates = window.CinemaHubPricingTemplates;
-                if (!pricingTemplates || typeof pricingTemplates.createBranchApplyPicker !== 'function') {
-                    throw new Error('Không tải được công cụ cấu hình mẫu giá vé.');
-                }
-                pricePicker = pricingTemplates.createBranchApplyPicker({
-                    movieId: movie && movie.id,
-                    branches: branches,
-                    preselectedTemplateId: selectedTemplateId
-                });
-                pricing.appendChild(pricePicker.element);
-                priceRetryButton = hub.el('button', {
-                    type: 'button',
-                    class: 'ws-btn ws-btn-secondary',
-                    hidden: true
-                }, ['Thử lại áp dụng giá']);
-                priceRetryButton.addEventListener('click', function () {
-                    if (priceRetryButton.disabled || pendingMoviePricingId == null) return;
-                    priceRetryButton.disabled = true;
-                    pricePicker.prepareSelection().then(function (assignments) {
-                        if (!assignments.length) {
-                            throw new Error('Chọn ít nhất một mẫu giá cho chi nhánh.');
-                        }
-                        return applyMoviePriceTemplates(pendingMoviePricingId, assignments);
-                    }).then(function (result) {
-                        if (result.cancelled) {
-                            hub.notify('Đã hủy thay thế giá. Chưa có thay đổi nào được áp dụng.', 'warn');
-                            return;
-                        }
-                        pendingMoviePricingId = null;
-                        hub.notify('Đã áp dụng mẫu giá vé: '
-                            + result.branchMessages.join(' '), 'ok');
-                        router.go('movie');
-                    }).catch(function (error) {
-                        hub.notify(error.message || 'Không thể áp dụng mẫu giá.', 'err');
-                    }).then(function () {
-                        priceRetryButton.disabled = false;
+                if (window.CinemaHubPricingTemplates && roleMeta
+                        && (roleMeta.content === 'ADMIN' || roleMeta.content === 'BRANCH_MANAGER')) {
+                    var queryParams = new URLSearchParams(window.location.search);
+                    var requestedBranches = (queryParams.get('branchIds') || '')
+                        .split(',').filter(Boolean);
+                    movieTemplatePicker = window.CinemaHubPricingTemplates.createBranchApplyPicker({
+                        branches: branches,
+                        preselectedTemplateId: queryParams.get('templateId'),
+                        preselectedBranchIds: requestedBranches,
+                        preselectedAssignments: queryParams.get('templateAssignments')
                     });
-                });
-                pricing.appendChild(priceRetryButton);
-                formEl.appendChild(pricing);
+                    formEl.appendChild(movieTemplatePicker.element);
+                }
 
-                var poster = hub.el('section', { class: 'ws-form-section ws-form-poster-section' });
-                poster.appendChild(hub.el('h2', { class: 'ws-form-section-title' }, ['Poster phim']));
-                poster.appendChild(hub.el('p', { class: 'ws-form-section-desc' }, [
-                    'Chọn ảnh poster để tải lên. Nếu không chọn ảnh mới, poster hiện tại sẽ được giữ nguyên.'
-                ]));
+                var wrap = hub.el('section', { class: 'ws-form-section ws-form-poster-section' });
+                wrap.appendChild(hub.el('h2', { class: 'ws-form-section-title' }, ['Poster phim']));
+                wrap.appendChild(hub.el('p', { class: 'ws-form-section-desc' },
+                    ['Chọn ảnh poster để upload qua Cloudinary. Nếu không chọn ảnh mới, hệ thống sẽ giữ nguyên poster hiện tại.']));
+
                 var grid = hub.el('div', { class: 'ws-poster-uploader' });
-                var preview = hub.el('div', { class: 'ws-poster-preview' });
+
+                // Preview box
+                var preview = hub.el('div', { class: 'ws-poster-preview', id: 'moviePosterPreview' });
                 function renderPreview() {
                     preview.replaceChildren();
                     if (posterState.currentUrl) {
-                        preview.appendChild(hub.el('img', {
-                            src: posterState.currentUrl, alt: 'Poster phim'
-                        }));
+                        var img = hub.el('img', { src: posterState.currentUrl, alt: 'Poster' });
+                        preview.appendChild(img);
                     } else {
                         preview.appendChild(hub.el('div', { class: 'ws-poster-empty' }, ['Chưa có poster']));
                     }
@@ -1774,310 +2120,94 @@
                 renderPreview();
                 grid.appendChild(preview);
 
+                // Controls
                 var controls = hub.el('div', { class: 'ws-poster-controls' });
                 var fileInput = hub.el('input', {
-                    type: 'file',
-                    accept: 'image/jpeg,image/jpg,image/png,image/webp',
-                    id: 'moviePosterFile'
+                    type: 'file', accept: 'image/jpeg,image/jpg,image/png,image/webp',
+                    id: 'moviePosterFile', name: 'moviePosterFile'
                 });
-                controls.appendChild(hub.el('label', {
-                    for: 'moviePosterFile', class: 'ws-btn secondary'
-                }, ['Chọn ảnh mới']));
+                controls.appendChild(hub.el('label', { for: 'moviePosterFile', class: 'ws-btn secondary' }, ['Chọn ảnh mới']));
                 controls.appendChild(fileInput);
-                controls.appendChild(hub.el('p', { class: 'ws-field-hint' }, [
-                    'Hỗ trợ JPEG/PNG/WEBP, tối đa 5MB.'
-                ]));
-                var status = hub.el('div', { class: 'ws-poster-status' });
+
+                var hint = hub.el('p', { class: 'ws-field-hint' },
+                    ['Hỗ trợ JPEG/PNG/WEBP, tối đa 5MB. Ảnh sẽ được upload lên Cloudinary.']);
+                controls.appendChild(hint);
+
+                // Status line
+                var status = hub.el('div', { class: 'ws-poster-status', id: 'moviePosterStatus' });
                 controls.appendChild(status);
+
                 var hidden = hub.el('input', {
-                    type: 'hidden', name: 'posterUrl', value: posterState.currentUrl
+                    type: 'hidden', id: 'fld-posterUrl', name: 'posterUrl',
+                    value: posterState.currentUrl || ''
                 });
                 controls.appendChild(hidden);
+
+                // Upload-on-change handler: tải file lên Cloudinary, cập nhật hidden posterUrl.
                 fileInput.addEventListener('change', function () {
-                    var file = fileInput.files && fileInput.files[0];
-                    if (!file) return;
-                    if (file.size > 5 * 1024 * 1024) {
+                    var f = fileInput.files && fileInput.files[0];
+                    if (!f) return;
+
+                    if (f.size > 5 * 1024 * 1024) {
                         status.textContent = 'File vượt quá 5MB.';
                         status.className = 'ws-poster-status error';
                         fileInput.value = '';
                         return;
                     }
-                    status.textContent = 'Đang tải poster lên…';
+
+                    status.textContent = 'Đang upload lên Cloudinary...';
                     status.className = 'ws-poster-status uploading';
-                    var previousUrl = posterState.currentUrl;
-                    hub.uploadFile(file, 'file').then(function (result) {
-                        posterState.currentUrl = result.url || '';
+                    var oldUrl = posterState.currentUrl;
+                    hub.uploadFile(f, 'file').then(function (data) {
+                        posterState.currentUrl = data.url || '';
                         hidden.value = posterState.currentUrl;
+                        posterState.pendingFile = f.name;
                         renderPreview();
-                        status.textContent = 'Đã tải poster lên.';
+                        status.textContent = 'Đã upload: ' + (data.filename || f.name);
                         status.className = 'ws-poster-status success';
-                    }).catch(function (error) {
-                        posterState.currentUrl = previousUrl;
-                        hidden.value = previousUrl;
+                    }).catch(function (err) {
+                        status.textContent = 'Upload thất bại: ' + (err.message || 'lỗi không xác định') + '. Giữ nguyên ảnh cũ.';
+                        status.className = 'ws-poster-status error';
+                        posterState.currentUrl = oldUrl;
+                        hidden.value = oldUrl;
                         fileInput.value = '';
                         renderPreview();
-                        status.textContent = 'Tải poster thất bại: ' + (error.message || 'Lỗi không xác định.');
-                        status.className = 'ws-poster-status error';
                     });
                 });
+
                 grid.appendChild(controls);
-                poster.appendChild(grid);
-                formEl.appendChild(poster);
+                wrap.appendChild(grid);
+
+                // Reference hidden input in formData so onSubmit can pick it up.
+                // (Already name="posterUrl" so collectData() will include it.)
+
+                formEl.appendChild(wrap);
             },
             onSubmit: function (data) {
-                if (!isEdit && pendingMoviePricingId != null) {
-                    throw new Error('Phim đã được lưu. Dùng nút "Thử lại áp dụng giá" để hoàn tất cấu hình.');
-                }
-                var assignmentsPromise = pricePicker
-                    ? pricePicker.prepareSelection()
-                    : Promise.resolve([]);
-                return assignmentsPromise.then(function (assignments) {
-                    if (selectedTemplateId && !assignments.length) {
-                        throw new Error('Chọn ít nhất một chi nhánh để áp dụng mẫu giá.');
+                // posterUrl đã được đồng bộ với hidden input ở trên.
+                // Nếu user không upload ảnh mới, posterUrl giữ nguyên giá trị ban đầu (movie.posterUrl cũ).
+                var pickerReady = movieTemplatePicker
+                    ? movieTemplatePicker.prepareSelection() : Promise.resolve([]);
+                return pickerReady.then(function (templateSelections) {
+                    if (typeof data.author === 'string') data.author = data.author.trim();
+                    templateSelections = templateSelections || [];
+                    if (isEdit) {
+                        return hub.api('/movie/' + movie.id, { method: 'PUT', body: data })
+                            .then(function () {
+                                if (templateSelections.length) {
+                                    return finishTemplateApply(movie.id, templateSelections);
+                                }
+                                router.go('movie');
+                            });
                     }
-                    return hub.api(isEdit ? '/movie/' + movie.id : '/movie', {
-                        method: isEdit ? 'PUT' : 'POST',
-                        body: data
-                    }).then(function (savedMovie) {
-                        if (!assignments.length) {
-                            router.go('movie');
-                            return;
-                        }
-                        pendingMoviePricingId = savedMovie.id;
-                        return applyMoviePriceTemplates(savedMovie.id, assignments).then(function (result) {
-                            if (result.cancelled) {
-                                pendingMoviePricingId = null;
-                                hub.notify('Đã lưu phim; giá vé chưa được thay đổi.', 'warn');
-                            } else {
-                                pendingMoviePricingId = null;
-                                hub.notify('Đã lưu phim và áp dụng mẫu giá: '
-                                    + result.branchMessages.join(' '), 'ok');
+                    return hub.api('/movie', { method: 'POST', body: data })
+                        .then(function (createdMovie) {
+                            if (templateSelections.length) {
+                                return finishTemplateApply(createdMovie.id, templateSelections);
                             }
+                            hub.notify('Tạo phim thành công.', 'ok');
                             router.go('movie');
-                        }, function (error) {
-                            if (priceRetryButton) priceRetryButton.hidden = false;
-                            throw new Error('Đã lưu phim nhưng không áp dụng được mẫu giá. '
-                                + 'Dùng nút "Thử lại áp dụng giá" để tiếp tục. '
-                                + (error.message || 'Lỗi không xác định.'));
                         });
-                    });
-                });
-            },
-            onCancel: function () { router.go('movie'); }
-        });
-    }
-
-    function pricingTemplateRequest(path, payload) {
-        return hub.api(path, {
-            method: 'POST',
-            body: JSON.stringify(payload),
-            contentType: 'application/json;charset=UTF-8'
-        });
-    }
-
-    function applyMoviePriceTemplates(movieId, assignments) {
-        // Phân tách: assignment có templateId → qua apply-template,
-        // assignment có rules (nhập thủ công) → qua apply-rules.
-        var templateAssignments = [];
-        var manualAssignments = [];
-        assignments.forEach(function (a) {
-            if (a.rules && a.rules.length) {
-                manualAssignments.push(a);
-            } else {
-                templateAssignments.push(a);
-            }
-        });
-
-        // Gộp kết quả từ cả hai nhóm.
-        function processOutcomes(outcomes, branchMessages) {
-            var hasFailures = false;
-            outcomes.forEach(function (outcome) {
-                var assignment = outcome.assignment;
-                if (outcome.error) {
-                    hasFailures = true;
-                    (assignment.branchIds || []).forEach(function (branchId) {
-                        var target = (assignment.branches || []).find(function (b) {
-                            return String(b.id) === String(branchId);
-                        });
-                        var branchName = target && target.name
-                            ? target.name : ('#' + branchId);
-                        branchMessages.push('Chi nhánh ' + branchName + ': '
-                            + (outcome.error.message || 'Không áp dụng được giá.'));
-                    });
-                    return;
-                }
-                var reported = {};
-                (outcome.branches || []).forEach(function (branch) {
-                    reported[String(branch.branchId)] = true;
-                    var target = (assignment.branches || []).find(function (b) {
-                        return String(b.id) === String(branch.branchId);
-                    });
-                    var branchName = target && target.name ? target.name : ('#' + branch.branchId);
-                    if (branch.status !== 'APPLIED') {
-                        hasFailures = true;
-                        branchMessages.push('Chi nhánh ' + branchName + ': '
-                            + (branch.message || 'Không áp dụng được giá.'));
-                    } else {
-                        branchMessages.push('Chi nhánh ' + branchName + ': đã áp dụng '
-                            + Number(branch.appliedRuleCount || 0) + ' khung giá.');
-                    }
-                });
-                (assignment.branchIds || []).forEach(function (branchId) {
-                    if (reported[String(branchId)]) return;
-                    hasFailures = true;
-                    var target = (assignment.branches || []).find(function (b) {
-                        return String(b.id) === String(branchId);
-                    });
-                    var branchName = target && target.name ? target.name : ('#' + branchId);
-                    branchMessages.push('Chi nhánh ' + branchName + ': không nhận được kết quả.');
-                });
-            });
-            return hasFailures;
-        }
-
-        // 1. Xử lý mẫu giá (có preview trước).
-        var templateOutcomes = [];
-        var step1 = templateAssignments.length
-            ? Promise.all(templateAssignments.map(function (assignment) {
-                return pricingTemplateRequest('/pricing-templates/'
-                    + encodeURIComponent(assignment.templateId) + '/preview', {
-                        movieId: movieId,
-                        branchIds: assignment.branchIds
-                    }).then(function (preview) {
-                        if (!preview || !Array.isArray(preview.branches) || !preview.branches.length) {
-                            throw new Error('Không tạo được bản xem trước giá cho chi nhánh.');
-                        }
-                        return { assignment: assignment, preview: preview };
-                    });
-            })).then(function (previews) {
-                var existingRuleCount = previews.reduce(function (count, item) {
-                    return count + item.preview.branches.reduce(function (bc, branch) {
-                        return bc + Number(branch.existingRuleCount || 0);
-                    }, 0);
-                }, 0);
-                var replaceExisting = existingRuleCount > 0;
-                if (replaceExisting && !window.confirm(
-                    'Phim đã có ' + existingRuleCount + ' khung giá tại các chi nhánh đã chọn. Thay thế các khung giá này?'
-                )) {
-                    throw { cancelled: true };
-                }
-                return Promise.all(previews.map(function (item) {
-                    var expectedState = {};
-                    item.preview.branches.forEach(function (branch) {
-                        expectedState[String(branch.branchId)] = branch.stateToken;
-                    });
-                    return pricingTemplateRequest('/pricing-templates/'
-                        + encodeURIComponent(item.assignment.templateId) + '/apply', {
-                            movieId: movieId,
-                            branchIds: item.assignment.branchIds,
-                            expectedState: expectedState,
-                            replaceExisting: replaceExisting
-                        }).then(function (result) {
-                            return { assignment: item.assignment, branches: result && result.branches };
-                        }, function (error) {
-                            return { assignment: item.assignment, error: error };
-                        });
-                }));
-            })
-            : Promise.resolve([]);
-
-        // 2. Xử lý nhập thủ công (không preview, apply trực tiếp).
-        var step2 = manualAssignments.length
-            ? Promise.resolve().then(function () {
-                if (manualAssignments.length > 1
-                        && !window.confirm('Sẽ áp dụng giá thủ công cho ' + manualAssignments.length
-                        + ' nhóm chi nhánh. Tiếp tục?')) {
-                    throw { cancelled: true };
-                }
-                // Mỗi assignment = một branch cùng rules (vì picker nhập chung 1 bộ rules).
-                // Nhưng cấu trúc assignment hỗ trợ nhiều branch cùng template nên
-                // ta gom chung rules cho mọi branch trong manualAssignments.
-                return Promise.all(manualAssignments.map(function (assignment) {
-                    var rules = assignment.rules;
-                    var expectedState = {}; // manual không có token → luôn thay thế
-                    var replaceExisting = true;
-                    if (!window.confirm(
-                        'Áp dụng ' + rules.length + ' khung giá thủ công cho '
-                        + assignment.branchIds.length + ' chi nhánh? Giá hiện có sẽ bị thay thế.'
-                    )) {
-                        throw { cancelled: true };
-                    }
-                    return hub.api('/pricing-templates/apply-rules', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            movieId: movieId,
-                            branchIds: assignment.branchIds,
-                            rules: rules,
-                            expectedState: expectedState,
-                            replaceExisting: replaceExisting
-                        }),
-                        contentType: 'application/json;charset=UTF-8'
-                    }).then(function (result) {
-                        return { assignment: assignment, branches: result && result.branches };
-                    }, function (error) {
-                        return { assignment: assignment, error: error };
-                    });
-                }));
-            })
-            : Promise.resolve([]);
-
-        return Promise.all([step1, step2]).then(function (results) {
-            var outcomes = results[0].concat(results[1]);
-            var branchMessages = [];
-            var hasFailures = processOutcomes(outcomes, branchMessages);
-            if (hasFailures) {
-                throw new Error('Kết quả áp dụng giá theo chi nhánh: ' + branchMessages.join(' '));
-            }
-            return { cancelled: false, branchMessages: branchMessages };
-        });
-    }
-
-    function renderManagerMoviePricingForm(movie) {
-        var picker;
-        var selectedTemplateId = new URLSearchParams(window.location.search).get('templateId');
-        form.renderFormPage({
-            breadcrumb: ['Quản lý', { label: 'Phim', href: ctx + '/console?module=movie' }, 'Giá vé'],
-            title: 'Cấu hình giá vé phim',
-            subtitle: movie.title || '',
-            submitLabel: 'Áp dụng giá',
-            sections: [{
-                title: 'Giá theo chi nhánh',
-                description: 'Chọn mẫu giá cho chi nhánh được phân công. Giá hiện có sẽ chỉ bị thay khi xác nhận.',
-                // fields rỗng — giao diện chọn mẫu nằm trong renderFooter
-                // để form-page không gọi section.fields.forEach trên undefined.
-                fields: []
-            }],
-            renderFooter: function (formEl) {
-                var templates = window.CinemaHubPricingTemplates;
-                if (!templates || typeof templates.createBranchApplyPicker !== 'function') {
-                    throw new Error('Không tải được công cụ cấu hình mẫu giá vé.');
-                }
-                picker = templates.createBranchApplyPicker({
-                    movieId: movie.id,
-                    preselectedTemplateId: selectedTemplateId || ''
-                });
-                formEl.appendChild(picker.element);
-            },
-            onSubmit: function () {
-                if (!picker) throw new Error('Chưa tải được cấu hình giá vé.');
-                return picker.prepareSelection().then(function (assignments) {
-                    if (!assignments.length) {
-                        if (!picker.hasUnselectedBranches()) {
-                            hub.notify('Giá hiện tại được giữ nguyên, không có thay đổi nào.', 'ok');
-                            router.go('movie');
-                            return null;
-                        }
-                        throw new Error('Chọn ít nhất một mẫu giá cho chi nhánh.');
-                    }
-                    return applyMoviePriceTemplates(movie.id, assignments);
-                }).then(function (result) {
-                    if (!result) return;
-                    if (result.cancelled) {
-                        throw new Error('Đã hủy thay thế giá. Chưa có thay đổi nào được áp dụng.');
-                    }
-                    hub.notify('Đã cập nhật giá vé: '
-                        + result.branchMessages.join(' '), 'ok');
-                    router.go('movie');
                 });
             },
             onCancel: function () { router.go('movie'); }
@@ -2088,8 +2218,6 @@
         list: function () {
             var roleMeta = document.querySelector('meta[name="user-role"]');
             var isAdmin = !!roleMeta && roleMeta.content === 'ADMIN';
-            var isManager = !!roleMeta && roleMeta.content === 'BRANCH_MANAGER';
-            var selectedTemplateId = new URLSearchParams(window.location.search).get('templateId');
             list.render({
                 title: 'Phim',
                 subtitle: 'Danh mục phim trong hệ thống và trạng thái phát hành.',
@@ -2181,10 +2309,14 @@
                     { label: 'Trạng thái', render: function (m) { return statusBadge(m.status); } }
                 ],
                 actions: function (row) {
-                    if (!isAdmin && !isManager) return [];
-                    if (isManager && row.status !== 'PUBLISHED') return [];
+                    if (!isAdmin && row.status !== 'PUBLISHED') return [];
                     if (isAdmin) {
-                    var arr = [{ label: 'Sửa', class: 'secondary', href: ctx + '/console?module=movie&action=edit&id=' + row.id }];
+                    var arr = [
+                        { label: 'Sửa', class: 'secondary', href: ctx + '/console?module=movie&action=edit&id=' + row.id },
+                        // BR-PR-01 — Admin cũng có thể vào trang sửa giá của từng phim,
+                        // danh sách chi nhánh sẽ hiện ra sau khi chọn phim.
+                        { label: 'Sửa giá vé', class: 'secondary', href: ctx + '/console?module=movie-price&action=list&movieId=' + encodeURIComponent(row.id) }
+                    ];
                     if (row.status === 'DRAFT') {
                         arr.push({ label: 'Phát hành', class: 'primary', onClick: function () {
                             confirmAction('Phát hành phim này?', function () {
@@ -2221,49 +2353,35 @@
                     }
                     return arr;
                     }
-                    var priceEditUrl = ctx + '/console?module=movie&action=edit&id='
-                        + encodeURIComponent(row.id);
-                    if (selectedTemplateId) {
-                        priceEditUrl += '&templateId=' + encodeURIComponent(selectedTemplateId);
-                    }
-                    return [{
-                        label: 'Sửa giá vé',
-                        class: 'secondary',
-                        href: priceEditUrl
-                    }, {
-                        label: 'Tạo suất chiếu',
-                        class: 'primary',
-                        href: ctx + '/console?module=showtime&action=create&movieId='
-                            + encodeURIComponent(row.id) + '&releaseDate='
-                            + encodeURIComponent(dateValue(row.releaseDate))
-                    }];
+                    // BR-PR-01 — Manager chỉ thấy phim PUBLISHED và có thể tạo suất chiếu.
+                    return [
+                        {
+                            label: 'Tạo suất chiếu',
+                            class: 'primary',
+                            href: ctx + '/console?module=showtime&action=create&movieId='
+                                + encodeURIComponent(row.id) + '&releaseDate='
+                                + encodeURIComponent(dateValue(row.releaseDate))
+                        }
+                    ];
                 }
             });
         },
         create: function () {
             var roleMeta = document.querySelector('meta[name="user-role"]');
-            if (!roleMeta || roleMeta.content !== 'ADMIN') {
-                hub.notify('Chỉ Admin mới có thể tạo phim.', 'err');
-                router.go('movie');
-                return;
-            }
-            Promise.all([hub.api('/movie/genres'), hub.api('/branch/')]).then(function (data) {
+            var isManager = !!roleMeta && roleMeta.content === 'BRANCH_MANAGER';
+            var branchesRequest = isManager ? hub.api('/branch/my-location') : hub.api('/branch/');
+            Promise.all([hub.api('/movie/genres'), branchesRequest]).then(function (data) {
                 renderMovieForm(null, data[0], data[1]);
             }).catch(notifyError);
         },
         edit: function (id) {
             var roleMeta = document.querySelector('meta[name="user-role"]');
             var isManager = !!roleMeta && roleMeta.content === 'BRANCH_MANAGER';
-            if (isManager) {
-                hub.api('/movie/' + id)
-                    .then(renderManagerMoviePricingForm)
-                    .catch(notifyError);
-                return;
-            }
+            var branchesRequest = isManager ? hub.api('/branch/my-location') : hub.api('/branch/');
             Promise.all([
                 hub.api('/movie/' + id),
                 hub.api('/movie/genres'),
-                hub.api('/branch/')
+                branchesRequest
             ])
                 .then(function (data) {
                     renderMovieForm(data[0], data[1], data[2]);
@@ -2610,7 +2728,7 @@
         updateSummary();
     }
 
-    function renderSeatLayoutPicker(container, hiddenLayout, rowCount, colCount, initialSeats) {
+    function renderSeatLayoutPicker(container, hiddenLayout, rowCount, colCount, initialSeats, archivedPositions) {
         var el = (hub && hub.el) || function (tag, attrs, children) {
             var node = document.createElement(tag);
             Object.keys(attrs || {}).forEach(function (key) {
@@ -2624,12 +2742,19 @@
         };
         container.replaceChildren();
         var layout = new Map();
+        archivedPositions = archivedPositions || new Set();
         (initialSeats || []).forEach(function (seat) {
             if ((!seat.status || seat.status === 'ACTIVE')
                     && seat.rowLabel.charCodeAt(0) - 65 < rowCount
                     && Number(seat.colNo) <= colCount) {
                 layout.set(seat.rowLabel + ':' + seat.colNo, seat.seatType);
             }
+        });
+        Array.from(layout.entries()).forEach(function (entry) {
+            if (entry[1] !== 'COUPLE' || layout.get(entry[0]) !== 'COUPLE') return;
+            var parts = entry[0].split(':');
+            var pairedPosition = parts[0] + ':' + (Number(parts[1]) + 1);
+            layout.delete(pairedPosition);
         });
         var selectedTool = 'STANDARD';
         var dragging = false;
@@ -2646,8 +2771,15 @@
             hiddenLayout.dispatchEvent(new Event('change'));
             var counts = { STANDARD: 0, VIP: 0, COUPLE: 0 };
             layout.forEach(function (type) { counts[type] = (counts[type] || 0) + 1; });
-            summary.textContent = 'Tổng ' + layout.size + ' ghế · Thường ' + counts.STANDARD
-                + ' · VIP ' + counts.VIP + ' · Đôi ' + counts.COUPLE;
+            var capacity = counts.STANDARD + counts.VIP + counts.COUPLE * 2;
+            summary.textContent = 'Tổng ' + capacity + ' chỗ · Thường ' + counts.STANDARD
+                + ' · VIP ' + counts.VIP + ' · Đôi ' + counts.COUPLE + ' ghế (2 chỗ/ghế)';
+            layout.forEach(function (type, key) {
+                var parts = key.split(':');
+                if (type === 'COUPLE' && Number(parts[1]) >= colCount) {
+                    summary.textContent += ' · Lỗi: ghế đôi cuối hàng cần thêm một cột.';
+                }
+            });
         }
 
         [
@@ -2668,21 +2800,62 @@
         });
         container.appendChild(tools);
         container.appendChild(el('p', { class: 'seat-picker-hint' },
-            ['Chọn loại ghế hoặc Xóa ghế, rồi bấm/kéo trên ô để thêm hay xóa nhiều ghế. Ô trống sẽ không xuất hiện khi khách đặt vé.']));
+            ['Ghế đôi chiếm 2 cột liền nhau: chọn ô bên trái để tạo một ghế đôi. Ô trống sẽ không xuất hiện khi khách đặt vé.']));
 
         function paint(cell) {
             var key = cell.getAttribute('data-row') + ':' + cell.getAttribute('data-col');
             if (painted.has(key)) return;
             painted.add(key);
-            if (selectedTool === 'REMOVE') layout.delete(key);
-            else layout.set(key, selectedTool);
-            var type = layout.get(key);
-            cell.classList.toggle('is-empty', !type);
-            cell.classList.toggle('is-vip', type === 'VIP');
-            cell.classList.toggle('is-couple', type === 'COUPLE');
-            cell.textContent = type ? cell.getAttribute('data-col') : '';
-            cell.setAttribute('aria-label', cell.getAttribute('data-row') + cell.getAttribute('data-col')
-                + (type ? ' ' + type : ' - không có ghế'));
+            var rowLabel = cell.getAttribute('data-row');
+            var colNo = Number(cell.getAttribute('data-col'));
+            var previousKey = rowLabel + ':' + (colNo - 1);
+            var nextKey = rowLabel + ':' + (colNo + 1);
+            var coupleAnchor = layout.get(key) === 'COUPLE' ? key
+                : layout.get(previousKey) === 'COUPLE' ? previousKey : null;
+
+            if (selectedTool === 'COUPLE') {
+                if (coupleAnchor) return;
+                if (colNo >= colCount) {
+                    summary.textContent = 'Ghế đôi cần 2 cột liền nhau; không thể đặt tại cột cuối.';
+                    return;
+                }
+                if (layout.get(previousKey) === 'COUPLE') layout.delete(previousKey);
+                if (layout.get(nextKey) === 'COUPLE') layout.delete(nextKey);
+                layout.set(key, 'COUPLE');
+                layout.delete(nextKey);
+            } else if (coupleAnchor) {
+                layout.delete(coupleAnchor);
+                if (selectedTool !== 'REMOVE') {
+                    var anchorCol = Number(coupleAnchor.split(':')[1]);
+                    layout.set(coupleAnchor, selectedTool);
+                    if (anchorCol < colCount) {
+                        layout.set(rowLabel + ':' + (anchorCol + 1), selectedTool);
+                    }
+                }
+            } else if (selectedTool === 'REMOVE') {
+                layout.delete(key);
+            } else {
+                layout.set(key, selectedTool);
+            }
+
+            grid.querySelectorAll('.seat-layout-cell').forEach(function (seatCell) {
+                var cellRow = seatCell.getAttribute('data-row');
+                var cellCol = Number(seatCell.getAttribute('data-col'));
+                var cellKey = cellRow + ':' + cellCol;
+                var cellType = layout.get(cellKey);
+                var isCouplePartner = layout.get(cellRow + ':' + (cellCol - 1)) === 'COUPLE';
+                var displayedType = isCouplePartner ? 'COUPLE' : cellType;
+                var isMaintenance = !displayedType && archivedPositions.has(cellKey);
+                seatCell.classList.toggle('is-empty', !displayedType && !isMaintenance);
+                seatCell.classList.toggle('is-maintenance', isMaintenance);
+                seatCell.classList.toggle('is-vip', displayedType === 'VIP');
+                seatCell.classList.toggle('is-couple', displayedType === 'COUPLE');
+                seatCell.disabled = isMaintenance;
+                seatCell.textContent = displayedType ? String(cellCol) : isMaintenance ? '×' : '';
+                seatCell.setAttribute('aria-label', cellRow + cellCol
+                    + (isCouplePartner ? ' phần ghế đôi' : cellType ? ' ' + cellType
+                        : isMaintenance ? ' - đang bảo trì' : ' - không có ghế'));
+            });
             syncLayout();
         }
 
@@ -2693,15 +2866,22 @@
             for (var c = 1; c <= colCount; c++) {
                 var key = rowLabel + ':' + c;
                 var type = layout.get(key);
+                var isCouplePartner = layout.get(rowLabel + ':' + (c - 1)) === 'COUPLE';
+                var displayedType = isCouplePartner ? 'COUPLE' : type;
+                var isMaintenance = !displayedType && archivedPositions.has(key);
                 var cell = el('button', {
                     type: 'button',
-                    class: 'seat-cell seat-layout-cell' + (type ? '' : ' is-empty')
-                        + (type === 'VIP' ? ' is-vip' : '')
-                        + (type === 'COUPLE' ? ' is-couple' : ''),
+                    class: 'seat-cell seat-layout-cell' + (displayedType ? '' : ' is-empty')
+                        + (displayedType === 'VIP' ? ' is-vip' : '')
+                        + (displayedType === 'COUPLE' ? ' is-couple' : '')
+                        + (isMaintenance ? ' is-maintenance' : ''),
                     'data-row': rowLabel,
                     'data-col': String(c),
-                    'aria-label': rowLabel + c + (type ? ' ' + type : ' - không có ghế')
-                }, [type ? String(c) : '']);
+                    'aria-label': rowLabel + c + (isCouplePartner ? ' phần ghế đôi'
+                        : type ? ' ' + type : isMaintenance ? ' - đang bảo trì' : ' - không có ghế')
+                }, [displayedType ? String(c) : isMaintenance ? '×' : '']);
+                cell.disabled = isMaintenance;
+                cell.classList.toggle('is-empty', !displayedType && !isMaintenance);
                 cell.addEventListener('pointerdown', function (event) {
                     if (event.button !== undefined && event.button !== 0) return;
                     dragging = true;
@@ -2804,6 +2984,9 @@
                 var archivedPositions = new Set(archivedSeats.map(function (seat) {
                     return seat.rowLabel + ':' + seat.colNo;
                 }));
+                if (archivedSeats.length) {
+                    desc.textContent = 'Ô gạch chéo là ghế bảo trì; chọn đúng ghế trong danh sách bên dưới để mở lại.';
+                }
                 var archivedSeatSection = null;
 
                 function updateArchivedSeatButtons() {
@@ -2824,8 +3007,11 @@
                             && Number(parts[1]) <= currentCols;
                         var restored = desiredPositions.has(position);
                         button.disabled = restored || !inBounds;
-                        button.textContent = restored ? 'Đã chọn mở lại'
-                            : (inBounds ? 'Mở lại ghế' : 'Ngoài kích thước phòng');
+                        var seatCode = position.replace(':', '');
+                        button.textContent = restored ? 'Đã chọn mở lại ' + seatCode
+                            : (inBounds ? 'Mở lại ghế ' + seatCode
+                                : seatCode + ' (ngoài kích thước phòng)');
+                        button.setAttribute('aria-label', button.textContent);
                     });
                 }
 
@@ -2844,13 +3030,19 @@
                         var positions = new Set(initialSeats.map(function (seat) {
                             return seat.rowLabel + ':' + seat.colNo;
                         }));
+                        var coupleAnchors = new Set(initialSeats.filter(function (seat) {
+                            return seat.seatType === 'COUPLE';
+                        }).map(function (seat) {
+                            return seat.rowLabel + ':' + seat.colNo;
+                        }));
                         for (var rowIndex = 0; rowIndex < nextRows; rowIndex++) {
                             var rowLabel = String.fromCharCode(65 + rowIndex);
                             for (var colNo = 1; colNo <= nextCols; colNo++) {
                                 var position = rowLabel + ':' + colNo;
+                                var occupiedByCouple = coupleAnchors.has(rowLabel + ':' + (colNo - 1));
                                 var addedByResize = rowIndex >= currentRows || colNo > currentCols;
                                 if (addedByResize && !positions.has(position)
-                                        && !archivedPositions.has(position)) {
+                                        && !archivedPositions.has(position) && !occupiedByCouple) {
                                     initialSeats.push({
                                         rowLabel: rowLabel,
                                         colNo: colNo,
@@ -2864,7 +3056,8 @@
                     }
                     currentRows = nextRows;
                     currentCols = nextCols;
-                    renderSeatLayoutPicker(seatHost, hidden, currentRows, currentCols, initialSeats);
+                    renderSeatLayoutPicker(seatHost, hidden, currentRows, currentCols,
+                        initialSeats, archivedPositions);
                     updateArchivedSeatButtons();
                 }
 
@@ -2877,6 +3070,8 @@
                     var archivedHint = document.createElement('p');
                     archivedHint.textContent = 'Chọn ghế cần mở lại, sau đó lưu sơ đồ phòng.';
                     archivedSeatSection.appendChild(archivedHint);
+                    var archivedActions = document.createElement('div');
+                    archivedActions.className = 'seat-archived-actions';
                     archivedSeats.forEach(function (seat) {
                         var position = seat.rowLabel + ':' + seat.colNo;
                         var button = document.createElement('button');
@@ -2906,8 +3101,9 @@
                                 redrawSeatPicker();
                             }
                         });
-                        archivedSeatSection.appendChild(button);
+                        archivedActions.appendChild(button);
                     });
+                    archivedSeatSection.appendChild(archivedActions);
                     section.appendChild(archivedSeatSection);
                     hidden.addEventListener('change', updateArchivedSeatButtons);
                 }
@@ -3102,6 +3298,18 @@
                     emptyMessage: 'Hãy tạo suất chiếu đầu tiên cho chi nhánh.',
                     columns: [
                         { label: 'Phim', key: 'movieTitle' },
+                        { label: 'Ghế đã đặt', render: function (showtime) {
+                            var button = hub.el('button', {
+                                class: 'ws-btn ws-btn-sm secondary',
+                                type: 'button',
+                                'aria-label': 'Xem suất chiếu và sơ đồ ghế đã đặt của '
+                                    + (showtime.movieTitle || 'suất chiếu')
+                            }, ['Xem ghế đã đặt']);
+                            button.addEventListener('click', function () {
+                                openShowtimeBookings(showtime);
+                            });
+                            return button;
+                        } },
                         { label: 'Chi nhánh', key: 'branchName' },
                         { label: 'Phòng', key: 'screenName' },
                         { label: 'Bắt đầu', render: function (s) { return s.startTime ? hub.fmtDateTime(s.startTime) : '—'; } },
@@ -3109,8 +3317,9 @@
                         { label: 'Trạng thái', render: function (s) { return statusBadge(s.status); } }
                     ],
                     actions: function (row) {
+                        var actions = [];
                         if (row.status === 'CANCELLED') {
-                            return [{
+                            actions.push({
                                 label: 'Khôi phục', class: 'primary', onClick: function () {
                                     confirmAction('Khôi phục suất chiếu này?', function () {
                                         hub.api('/showtime/' + row.id,
@@ -3122,10 +3331,11 @@
                                             .catch(notifyError);
                                     });
                                 }
-                            }];
+                            });
+                            return actions;
                         }
-                        if (row.status !== 'OPEN') return [];
-                        return [
+                        if (row.status !== 'OPEN') return actions;
+                        actions.push(
                             { label: 'Sửa giờ', class: 'secondary',
                               href: ctx + '/console?module=showtime&action=edit&id=' + row.id },
                             { label: 'Hủy', class: 'danger', onClick: function () {
@@ -3138,7 +3348,8 @@
                                     .catch(notifyError);
                             });
                             }}
-                        ];
+                        );
+                        return actions;
                     }
                 });
             }).catch(notifyError);
@@ -3404,9 +3615,8 @@
                         data.startTime = data.showDate + 'T' + data.startHour;
                         delete data.showDate;
                         delete data.startHour;
-                        hub.api('/showtime', { method: 'POST', body: data })
-                            .then(function () { router.go('showtime'); })
-                            .catch(notifyError);
+                        return hub.api('/showtime', { method: 'POST', body: data })
+                            .then(function () { router.go('showtime'); });
                     },
                     onCancel: function () { router.go('showtime'); }
                 });
@@ -3441,15 +3651,286 @@
     });
 
     // ================================================================
-    //  BOOKING
+    //  INVENTORY (Admin + Manager)
+    // ================================================================
+    router.register('inventory', {
+        list: function () {
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
+            hub.api(branchListApiPath(roleMeta)).then(function (branches) {
+                var params = new URLSearchParams(window.location.search);
+                // Manager chỉ quản lý đúng chi nhánh của mình, controller ép scope
+                // -> dùng branch[0] (hoặc branchId từ URL) và KHÔNG hiển thị filter.
+                var initialBranchId = params.get('branchId') || (branches[0] && branches[0].id);
+                // selectedBranchId thay đổi theo dropdown filter — closure dùng cho
+                // href "Nhập/Điều chỉnh" trong actions (tránh reference toolbar không có scope).
+                var selectedBranchId = initialBranchId;
+                var showBranchFilter = roleMeta === 'ADMIN';
+                var filters = [];
+                if (showBranchFilter) {
+                    filters.push({
+                        name: 'branchId', label: 'Chi nhánh',
+                        initialValue: initialBranchId ? String(initialBranchId) : '',
+                        options: (branches || []).map(function (b) { return { value: String(b.id), label: b.name }; })
+                    });
+                }
+                list.render({
+                    title: 'Kho hàng',
+                    subtitle: 'Theo dõi và điều chỉnh tồn kho tại từng chi nhánh.',
+                    addUrl: function () {
+                        return ctx + '/console?module=inventory&action=create&branchId=' + (selectedBranchId || '');
+                    },
+                    addLabel: 'Nhập kho',
+                    searchPlaceholder: 'Tìm theo tên sản phẩm…',
+                    pageSize: 50,
+                    filters: filters,
+                    // InventoryController chỉ nhận branchId; lọc chi nhánh trên server
+                    // rồi lọc theo tên sản phẩm client-side.
+                    fetcher: function (qs) {
+                        var branchParam = qs.get('branchId');
+                        selectedBranchId = branchParam || initialBranchId;
+                        var url = '/inventory' + (branchParam ? '?branchId=' + encodeURIComponent(branchParam) : '');
+                        return hub.api(url).then(function (list) {
+                            var items = Array.isArray(list) ? list : [];
+                            var q = (qs.get('q') || '').trim().toLowerCase();
+                            if (q) {
+                                items = items.filter(function (s) {
+                                    return (s.name || '').toLowerCase().indexOf(q) !== -1;
+                                });
+                            }
+                            return { items: items, total: items.length };
+                        });
+                    },
+                    emptyTitle: 'Chưa có tồn kho',
+                    emptyMessage: 'Chi nhánh chưa có sản phẩm nào trong kho.',
+                    columns: [
+                        { label: 'Sản phẩm', key: 'name' },
+                        { label: 'Loại', key: 'type' },
+                        { label: 'Số lượng', render: function (s) { return (s.qty || 0) + ' ' + (s.unit || ''); } },
+                        { label: 'Giá bán', render: function (s) { return hub.fmtMoney(s.price); } }
+                    ],
+                    actions: function (row) {
+                        return [
+                            { label: 'Nhập', class: 'secondary', href: ctx + '/console?module=inventory&action=create&branchId=' + (selectedBranchId || '') + '&productId=' + row.productId },
+                            { label: 'Điều chỉnh', class: 'danger', href: ctx + '/console?module=inventory&action=edit&branchId=' + (selectedBranchId || '') + '&productId=' + row.productId }
+                        ];
+                    }
+                });
+            }).catch(notifyError);
+        },
+        create: function () {
+            var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
+            Promise.all([
+                hub.api(branchListApiPath(roleMeta)).catch(function () { return []; }),
+                hub.api('/concession/products').catch(function () { return []; })
+            ]).then(function (results) {
+                var branches = results[0] || [];
+                var products = results[1] || [];
+                var params = new URLSearchParams(window.location.search);
+                var preselectedBranch = params.get('branchId');
+                var preselectedProduct = params.get('productId');
+                form.renderFormPage({
+                    breadcrumb: ['Vận hành', { label: 'Kho hàng', href: ctx + '/console?module=inventory' }, 'Nhập kho'],
+                    title: 'Nhập kho',
+                    subtitle: 'Thêm số lượng tồn cho sản phẩm tại chi nhánh.',
+                    submitLabel: 'Nhập kho',
+                    sections: [{
+                        title: 'Thông tin nhập kho',
+                        fields: [
+                            { name: 'branchId', label: 'Chi nhánh', type: 'select', required: true,
+                              value: preselectedBranch,
+                              options: (branches || []).map(function (b) { return { value: String(b.id), label: b.name }; }) },
+                            { name: 'productId', label: 'Sản phẩm', type: 'select', required: true,
+                              value: preselectedProduct,
+                              options: (products || []).map(function (p) { return { value: String(p.id), label: p.name }; }) },
+                            { name: 'quantity', label: 'Số lượng nhập', type: 'number', required: true, min: 1 },
+                            { name: 'reason', label: 'Lý do / Ghi chú', required: true, value: 'Nhập kho',
+                              hint: 'Bắt buộc để theo dõi lịch sử tồn kho.' }
+                        ]
+                    }],
+                    onSubmit: function (data) {
+                        hub.api('/inventory', { method: 'POST', body: data })
+                            .then(function () { router.go('inventory'); })
+                            .catch(notifyError);
+                    },
+                    onCancel: function () { router.go('inventory'); }
+                });
+            }).catch(notifyError);
+        },
+        edit: function (id) {
+            hub.api('/concession/products').then(function (products) {
+                var params = new URLSearchParams(window.location.search);
+                var branchId = params.get('branchId');
+                var productId = params.get('productId') || id;
+                var product = (products || []).find(function (p) { return String(p.id) === String(productId); });
+                form.renderFormPage({
+                    breadcrumb: ['Vận hành', { label: 'Kho hàng', href: ctx + '/console?module=inventory' }, 'Điều chỉnh'],
+                    title: 'Điều chỉnh tồn kho',
+                    subtitle: product ? product.name : 'Điều chỉnh chênh lệch tồn kho',
+                    submitLabel: 'Lưu điều chỉnh',
+                    sections: [{
+                        title: 'Thông tin điều chỉnh',
+                        description: 'Số dương = thêm, số âm = giảm. Lý do bắt buộc.',
+                        fields: [
+                            { name: 'branchId', label: 'Chi nhánh', type: 'hidden', required: true, value: branchId },
+                            { name: 'productId', label: 'Sản phẩm', type: 'hidden', required: true, value: productId },
+                            { name: 'quantity', label: 'Chênh lệch (+ hoặc -)', type: 'number', required: true, step: 1 },
+                            { name: 'reason', label: 'Lý do', required: true, value: 'Kiểm kê',
+                              hint: 'Tối thiểu 5 ký tự để audit trail.' }
+                        ]
+                    }],
+                    onSubmit: function (data) {
+                        data.action = 'adjust';
+                        hub.api('/inventory', { method: 'POST', body: data })
+                            .then(function () { router.go('inventory'); })
+                            .catch(notifyError);
+                    },
+                    onCancel: function () { router.go('inventory'); }
+                });
+            }).catch(notifyError);
+        }
+    });
+
+    // ================================================================
+    //  SHIFT (Staff + Manager)
+    // ================================================================
+
+    // ================================================================
+    //  PRODUCT (F&B Catalog Admin)
+    // ================================================================
+    function renderProductForm(product) {
+        var isEdit = !!product;
+        form.renderFormPage({
+            breadcrumb: ['Quản lý', { label: 'Sản phẩm F&B', href: ctx + '/console?module=product' }, isEdit ? 'Chỉnh sửa' : 'Tạo mới'],
+            title: isEdit ? 'Chỉnh sửa sản phẩm' : 'Tạo sản phẩm mới',
+            subtitle: isEdit ? product.name : 'Thêm sản phẩm hoặc combo bắp nước.',
+            submitLabel: isEdit ? 'Lưu thay đổi' : 'Tạo sản phẩm',
+            sections: [{
+                title: 'Thông tin sản phẩm',
+                fields: [
+                    { name: 'name', label: 'Tên sản phẩm', required: true, value: product && product.name, fullWidth: true },
+                    { name: 'description', label: 'Mô tả', type: 'textarea', required: false, value: product && product.description, rows: 3, fullWidth: true },
+                    { name: 'price', label: 'Giá bán (VND)', type: 'number', required: true, min: 0, step: 1000, value: product && product.price },
+                    { name: 'unit', label: 'Đơn vị', value: (product && product.unit) || 'phần', placeholder: 'phần, ly, hộp…' },
+                    { name: 'type', label: 'Loại', type: 'select', required: true, value: (product && product.type) || 'POPCORN', options: [
+                        { value: 'POPCORN', label: 'Bắp rang' },
+                        { value: 'DRINK', label: 'Nước uống' },
+                        { value: 'COMBO', label: 'Combo' },
+                        { value: 'OTHER', label: 'Khác' }
+                    ]}
+                ]
+            }],
+            onSubmit: function (data) {
+                var url = isEdit ? '/concession/products/' + product.id : '/concession/products';
+                var method = isEdit ? 'PUT' : 'POST';
+                hub.api(url, { method: method, body: data })
+                    .then(function () { router.go('product'); })
+                    .catch(notifyError);
+            },
+            onCancel: function () { router.go('product'); }
+        });
+    }
+
+    router.register('product', {
+        list: function () {
+            list.render({
+                title: 'Sản phẩm F&B',
+                subtitle: 'Danh mục bắp nước và combo đang được quản lý.',
+                addUrl: ctx + '/console?module=product&action=create',
+                addLabel: 'Tạo sản phẩm',
+                searchPlaceholder: 'Tìm theo tên sản phẩm…',
+                pageSize: 20,
+                filters: [{
+                    name: 'type', label: 'Loại',
+                    options: [
+                        { value: 'POPCORN', label: 'Bắp rang' },
+                        { value: 'DRINK', label: 'Nước uống' },
+                        { value: 'COMBO', label: 'Combo' },
+                        { value: 'OTHER', label: 'Khác' }
+                    ]
+                }],
+                sortable: true,
+                sortOptions: [
+                    { value: 'name', label: 'Tên A→Z' },
+                    { value: 'price', label: 'Giá' }
+                ],
+                // /concession/products trả về toàn bộ; lọc + search client-side.
+                fetcher: function (qs) {
+                    return hub.api('/concession/products').then(function (list) {
+                        var items = Array.isArray(list) ? list : [];
+                        var q = (qs.get('q') || '').trim().toLowerCase();
+                        var type = qs.get('type') || '';
+                        if (type) {
+                            items = items.filter(function (p) { return p.type === type; });
+                        }
+                        if (q) {
+                            items = items.filter(function (p) {
+                                return (p.name || '').toLowerCase().indexOf(q) !== -1;
+                            });
+                        }
+                        return { items: items, total: items.length };
+                    });
+                },
+                emptyTitle: 'Chưa có sản phẩm',
+                emptyMessage: 'Danh mục bắp nước đang trống.',
+                columns: [
+                    { label: 'Tên sản phẩm', key: 'name' },
+                    { label: 'Loại', key: 'type' },
+                    { label: 'Đơn vị', key: 'unit' },
+                    { label: 'Giá bán', render: function (r) { return hub.fmtMoney(r.price); } },
+                    { label: 'Trạng thái', render: function (r) { return statusBadge(r.status); } }
+                ],
+                actions: function (row) {
+                    var arr = [{ label: 'Sửa', class: 'secondary', href: ctx + '/console?module=product&action=edit&id=' + row.id }];
+                    if (row.status === 'ACTIVE') {
+                        arr.push({ label: 'Ngưng', class: 'danger', onClick: function () {
+                            confirmAction('Ngưng kinh doanh sản phẩm này?', function () {
+                                hub.api('/concession/products/' + row.id, { method: 'PUT', body: { action: 'deactivate' } })
+                                    .then(function () {
+                                        hub.notify('Đã ngưng sản phẩm.', 'ok');
+                                        router.go('product');
+                                    })
+                                    .catch(notifyError);
+                            });
+                        }});
+                    } else {
+                        // INACTIVE hoac trang thai khac -> cho phep mo lai.
+                        arr.push({ label: 'Mở lại', class: 'primary', onClick: function () {
+                            confirmAction('Mở lại kinh doanh sản phẩm này?', function () {
+                                hub.api('/concession/products/' + row.id, { method: 'PUT', body: { action: 'activate' } })
+                                    .then(function () {
+                                        hub.notify('Đã mở lại sản phẩm.', 'ok');
+                                        router.go('product');
+                                    })
+                                    .catch(notifyError);
+                            });
+                        }});
+                    }
+                    return arr;
+                }
+            });
+        },
+        create: function () { renderProductForm(null); },
+        edit: function (id) {
+            hub.api('/concession/products').then(function (list) {
+                var product = (list || []).find(function (p) { return String(p.id) === String(id); });
+                if (!product) throw new Error('Không tìm thấy sản phẩm');
+                renderProductForm(product);
+            }).catch(notifyError);
+        }
+    });
+
+    // ================================================================
+    //  BOOKING / TICKET (Customer history + Admin/Manager overview)
     // ================================================================
     router.register('booking', {
         list: function () {
             var roleMeta = (document.querySelector('meta[name="user-role"]') || {}).content;
-            if (roleMeta === 'ADMIN' || roleMeta === 'BRANCH_MANAGER') {
+            if (roleMeta === 'ADMIN' || roleMeta === 'BRANCH_MANAGER' || roleMeta === 'BRANCH_STAFF') {
                 list.render({
-                    title: 'Đặt vé & vé bán',
-                    subtitle: 'Danh sách vé đã bán trong hệ thống (Admin/Manager).',
+                    title: roleMeta === 'BRANCH_STAFF' ? 'Lịch sử vé tại chi nhánh' : 'Đặt vé & vé bán',
+                    subtitle: roleMeta === 'ADMIN'
+                        ? 'Danh sách vé và ghế đã đặt trong hệ thống.'
+                        : 'Danh sách vé và ghế đã đặt tại chi nhánh được phân công.',
                     pageSize: 20,
                     searchPlaceholder: 'Tìm theo mã vé hoặc tên khách…',
                     filters: [{
@@ -3473,6 +3954,11 @@
                         { label: 'Mã vé', key: 'ticketCode' },
                         { label: 'Khách hàng', key: 'customerName' },
                         { label: 'Phim', key: 'movie' },
+                        { label: 'Ghế đã đặt', render: function (t) {
+                            return Array.isArray(t.seats) && t.seats.length
+                                ? t.seats.map(function (seat) { return seat.seatCode; }).join(', ')
+                                : '—';
+                        } },
                         { label: 'Giờ chiếu', render: function (t) { return t.showtimeStart ? hub.fmtDateTime(t.showtimeStart) : '—'; } },
                         { label: 'Tổng tiền', render: function (t) { return hub.fmtMoney(t.totalAmount); } },
                         { label: 'Trạng thái', render: function (t) { return statusBadge(t.status); } }
@@ -3510,6 +3996,39 @@
                         pendingRefunds[String(refund.ticketId)] = refund;
                     }
                 });
+                // Tổng giao dịch = tổng tiền các vé đã thanh toán (CONFIRMED/USED);
+                // tổng hoàn = tổng refund_amount của vé CANCELLED. Hiển thị phía trên
+                // bảng để user nắm nhanh chi tiêu và tiền được hoàn.
+                var txTotal = list.reduce(function (sum, t) {
+                    if (t.status === 'CONFIRMED' || t.status === 'USED') {
+                        return sum + (Number(t.totalAmount) || 0);
+                    }
+                    return sum;
+                }, 0);
+                var refundTotal = list.reduce(function (sum, t) {
+                    if (t.status === 'CANCELLED') {
+                        return sum + (Number(t.refundAmount) || 0);
+                    }
+                    return sum;
+                }, 0);
+                var paidCount = list.filter(function (t) {
+                    return t.status === 'CONFIRMED' || t.status === 'USED';
+                }).length;
+                var summaryBar = hub.el('div', { class: 'ws-card my-tickets-summary' }, [
+                    hub.el('div', { class: 'my-tickets-summary-item' }, [
+                        hub.el('small', { class: 'muted' }, ['Tổng tiền giao dịch']),
+                        hub.el('strong', {}, [hub.fmtMoney(txTotal)])
+                    ]),
+                    hub.el('div', { class: 'my-tickets-summary-item' }, [
+                        hub.el('small', { class: 'muted' }, ['Tổng tiền đã hoàn']),
+                        hub.el('strong', { class: 'text-ok' }, [hub.fmtMoney(refundTotal)])
+                    ]),
+                    hub.el('div', { class: 'my-tickets-summary-item' }, [
+                        hub.el('small', { class: 'muted' }, ['Số vé đã thanh toán']),
+                        hub.el('strong', {}, [String(paidCount)])
+                    ])
+                ]);
+                viewRoot.querySelector('.ws-page').appendChild(summaryBar);
                 if (!list || !list.length) {
                     viewRoot.querySelector('.ws-page').appendChild(hub.el('div', { class: 'ws-empty' }, [
                         hub.el('h3', {}, ['Chưa có vé']),
@@ -3989,534 +4508,17 @@
     }
 
     // ================================================================
-    //  NOTIFICATION
-    // ================================================================
-    router.register('notification', {
-        list: function () {
-            var viewRoot = document.getElementById('viewRoot');
-            var page = hub.el('div', { class: 'ws-page' });
-            page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
-                hub.el('h1', { class: 'ws-page-title' }, ['Thông báo']),
-                hub.el('p', { class: 'ws-page-subtitle' }, ['Thông báo in-app của bạn.'])
-            ]));
-            var toolbar = hub.el('div', { class: 'ws-list-toolbar' });
-            var left = hub.el('div', { class: 'ws-list-toolbar-left' });
-            var filterSel = hub.el('select', { class: 'ws-select', 'aria-label': 'Lọc' }, [
-                hub.el('option', { value: '' }, ['Tất cả']),
-                hub.el('option', { value: 'unread' }, ['Chưa đọc'])
-            ]);
-            left.appendChild(filterSel);
-            toolbar.appendChild(left);
-            var right = hub.el('div', { class: 'ws-list-toolbar-right' });
-            var markAllBtn = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Đánh dấu tất cả đã đọc']);
-            right.appendChild(markAllBtn);
-            toolbar.appendChild(right);
-            page.appendChild(toolbar);
-
-            var tableWrap = hub.el('div', { class: 'ws-card', style: 'padding:0;overflow:hidden' });
-            page.appendChild(tableWrap);
-            viewRoot.replaceChildren(page);
-
-            function load() {
-                tableWrap.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
-                var qs = filterSel.value === 'unread' ? '?unreadOnly=true' : '';
-                hub.api('/notification' + qs).then(function (data) {
-                    var list = (data && data.notifications) || [];
-                    if (!list.length) {
-                        tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
-                            hub.el('h3', {}, ['Không có thông báo']),
-                            hub.el('p', {}, ['Bạn sẽ nhận thông báo khi có hoạt động mới.'])
-                        ]));
-                        return;
-                    }
-                    var table = hub.el('table', { class: 'ws-table' });
-                    table.innerHTML = '<thead><tr><th>Nội dung</th><th>Thời điểm</th><th>Trạng thái</th><th></th></tr></thead>';
-                    var tbody = hub.el('tbody');
-                    list.forEach(function (n) {
-                        var tr = hub.el('tr');
-                            var action = hub.refundRequestAction(n);
-                            var body = action ? action.body : (n.body || n.title || '—');
-                            body = body.replace(/\s*·\s*\/console\?[^\s]*\s*$/, '');
-                            var contentCell = hub.el('td');
-                            contentCell.appendChild(document.createTextNode(body));
-                            tr.appendChild(contentCell);
-                            tr.appendChild(hub.el('td', {}, [
-                                n.createdAt ? hub.fmtNotificationDateTime(n.createdAt) : '—'
-                            ]));
-                        tr.appendChild(hub.el('td', {}, [statusBadge(n.read ? 'USED' : 'PENDING')]));
-                        var actions = hub.el('td', { class: 'row-actions' });
-                            if (action) {
-                                actions.appendChild(hub.el('a', {
-                                    class: 'ws-btn ws-btn-sm primary',
-                                    href: action.href
-                                }, [action.label]));
-                            }
-                        if (!n.read) {
-                            var btn = hub.el('button', { class: 'ws-btn ws-btn-sm secondary', type: 'button' }, ['Đã đọc']);
-                            btn.addEventListener('click', function () {
-                                hub.api('/notification/' + n.id + '/read', { method: 'POST' })
-                                    .then(load)
-                                    .catch(notifyError);
-                            });
-                            actions.appendChild(btn);
-                        }
-                        tr.appendChild(actions);
-                        tbody.appendChild(tr);
-                    });
-                    table.appendChild(tbody);
-                    tableWrap.replaceChildren(table);
-                }).catch(notifyError);
-            }
-            markAllBtn.addEventListener('click', function () {
-                hub.api('/notification/read-all', { method: 'POST' })
-                    .then(function () {
-                        hub.notify('Đã đánh dấu tất cả là đã đọc.', 'ok');
-                        load();
-                    })
-                    .catch(notifyError);
-            });
-            filterSel.addEventListener('change', load);
-            load();
-        }
-    });
-
-    router.register('review-branch', {
-        list: function () {
-            var viewRoot = document.getElementById('viewRoot');
-            var page = hub.el('div', { class: 'ws-page' });
-
-            // Page header
-            page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
-                hub.el('span', { class: 'ws-eyebrow' }, ['ĐÁNH GIÁ PHIM CỦA KHÁCH']),
-                hub.el('h1', { class: 'ws-page-title' }, ['Đánh giá phim theo rạp']),
-                hub.el('p', { class: 'ws-page-subtitle' }, [
-                    'Xem nhận xét và số sao khách hàng đã gửi về phim tại chi nhánh.'
-                ])
-            ]));
-
-            var branchSelect = hub.el('select', {
-                class: 'ws-input',
-                'aria-label': 'Chọn chi nhánh',
-            });
-            branchSelect.appendChild(hub.el('option', { value: '' }, ['— Chọn chi nhánh —']));
-            page.appendChild(hub.el('label', { class: 'ws-label' }, ['Chi nhánh được phân công', branchSelect]));
-            var listWrap = hub.el('div', { class: 'ws-review-movie-grid' });
-            page.appendChild(listWrap);
-            viewRoot.replaceChildren(page);
-
-            function loadBranches() {
-                return hub.api('/api/reviews?branches=true').then(function (branches) {
-                    if (!Array.isArray(branches)) throw new Error('Danh sách chi nhánh không hợp lệ.');
-                    branchSelect.replaceChildren(hub.el('option', { value: '' }, ['— Chọn chi nhánh —']));
-                    branches.forEach(function (b) {
-                        branchSelect.appendChild(hub.el('option', { value: String(b.id) }, [b.name || ('Chi nhánh #' + b.id)]));
-                    });
-                    if (branches.length === 0) {
-                        listWrap.replaceChildren(hub.el('p', { class: 'ws-empty' }, [
-                            'Tài khoản chưa được phân công chi nhánh đang hoạt động.'
-                        ]));
-                    } else if (branches.length === 1) {
-                        branchSelect.value = String(branches[0].id);
-                        loadMovies();
-                    }
-                }).catch(function (error) {
-                    listWrap.replaceChildren(hub.el('p', { class: 'ws-flash err' }, [
-                        error.message || 'Không tải được chi nhánh được phân công.'
-                    ]));
-                });
-            }
-
-            function renderMovies(items) {
-                listWrap.replaceChildren();
-                if (!items.length) {
-                    listWrap.appendChild(hub.el('div', { class: 'ws-empty' }, [
-                        hub.el('h3', {}, ['Chưa có phim đang chiếu tại chi nhánh này']),
-                        hub.el('p', { class: 'ws-muted' }, ['Danh sách chỉ gồm phim có suất chiếu không bị hủy.'])
-                    ]));
-                    return;
-                }
-                items.forEach(function (movie) {
-                    var average = Number(movie.average) || 0;
-                    var count = Number(movie.total) || 0;
-                    var card = hub.el('button', {
-                        class: 'ws-review-movie-card',
-                        type: 'button',
-                        'aria-label': 'Xem đánh giá phim ' + movie.movieTitle
-                    }, [
-                        hub.el('strong', { class: 'ws-review-movie-title' }, [movie.movieTitle || ('Phim #' + movie.movieId)]),
-                        hub.el('span', { class: 'ws-review-movie-average' }, [
-                            hub.el('span', { class: 'ws-stars' }, [starString(average)]),
-                            hub.el('strong', {}, [average.toFixed(1) + '/5'])
-                        ]),
-                        hub.el('span', { class: 'ws-muted' }, [count + ' đánh giá · Xem chi tiết'])
-                    ]);
-                    card.addEventListener('click', function () {
-                        loadMovieReviews(movie.movieId, movie.movieTitle || ('Phim #' + movie.movieId), 0);
-                    });
-                    listWrap.appendChild(card);
-                });
-            }
-
-            function loadMovies() {
-                var branchId = branchSelect.value;
-                if (!branchId) {
-                    listWrap.replaceChildren(hub.el('p', { class: 'ws-muted' }, ['Chọn chi nhánh được phân công.']));
-                    return;
-                }
-                listWrap.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
-                hub.api('/api/reviews?branchId=' + encodeURIComponent(branchId)).then(function (data) {
-                    renderMovies(data.items || []);
-                }).catch(function (err) {
-                    listWrap.replaceChildren(hub.el('p', { class: 'ws-flash err' }, [
-                        err && err.message ? err.message : 'Không tải được danh sách phim.'
-                    ]));
-                });
-            }
-
-            function loadMovieReviews(movieId, movieTitle, offset) {
-                var branchId = branchSelect.value;
-                var pageSize = 50;
-                listWrap.replaceChildren();
-                var backButton = hub.el('button', { class: 'ws-btn ghost', type: 'button' }, ['← Quay lại danh sách phim']);
-                backButton.addEventListener('click', loadMovies);
-                var detail = hub.el('section', { class: 'ws-card ws-review-details' }, [
-                    backButton,
-                    hub.el('h2', {}, [movieTitle]),
-                    hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })])
-                ]);
-                listWrap.appendChild(detail);
-                hub.api('/api/reviews?branchId=' + encodeURIComponent(branchId)
-                    + '&movieId=' + encodeURIComponent(movieId)
-                    + '&offset=' + offset + '&limit=' + pageSize).then(function (data) {
-                    var reviews = data.items || [];
-                    detail.replaceChildren(
-                        backButton,
-                        hub.el('h2', {}, [movieTitle]),
-                        hub.el('p', { class: 'ws-review-movie-average' }, [
-                            hub.el('span', { class: 'ws-stars' }, [starString(Number(data.average) || 0)]),
-                            hub.el('strong', {}, [(Number(data.average) || 0).toFixed(1) + '/5']),
-                            hub.el('span', { class: 'ws-muted' }, [' · ' + (data.total || 0) + ' đánh giá'])
-                        ])
-                    );
-                    if (!reviews.length) {
-                        detail.appendChild(hub.el('p', { class: 'ws-muted' }, ['Phim này chưa có đánh giá.']));
-                        return;
-                    }
-                    var reviewList = hub.el('div', { class: 'ws-review-list' });
-                    reviews.forEach(function (review) {
-                        reviewList.appendChild(hub.el('article', { class: 'ws-review-item' }, [
-                            hub.el('div', { class: 'ws-review-item-header' }, [
-                                hub.el('strong', {}, [review.userFullName || ('Khách #' + review.userId)]),
-                                hub.el('span', { class: 'ws-star-display' }, [starString(review.rating)])
-                            ]),
-                            hub.el('p', { class: 'ws-review-comment' }, [
-                                review.comment || 'Khách chỉ chấm sao, không để lại bình luận.'
-                            ]),
-                            hub.el('small', { class: 'ws-muted' }, [
-                                review.createdAt ? hub.fmtDateTime(review.createdAt) : '—'
-                            ])
-                        ]));
-                    });
-                    detail.appendChild(reviewList);
-                    if (data.total > pageSize) {
-                        var pagination = hub.el('div', { class: 'ws-actions' });
-                        var previous = hub.el('button', { class: 'ws-btn ghost', type: 'button' }, ['Trang trước']);
-                        var next = hub.el('button', { class: 'ws-btn ghost', type: 'button' }, ['Trang tiếp']);
-                        previous.disabled = offset === 0;
-                        next.disabled = offset + pageSize >= data.total;
-                        previous.addEventListener('click', function () {
-                            loadMovieReviews(movieId, movieTitle, Math.max(0, offset - pageSize));
-                        });
-                        next.addEventListener('click', function () {
-                            loadMovieReviews(movieId, movieTitle, offset + pageSize);
-                        });
-                        pagination.append(previous, next);
-                        detail.appendChild(pagination);
-                    }
-                }).catch(function (error) {
-                    detail.replaceChildren(backButton, hub.el('p', { class: 'ws-flash err' }, [
-                        error.message || 'Không tải được danh sách đánh giá.'
-                    ]));
-                });
-            }
-
-            branchSelect.addEventListener('change', loadMovies);
-            loadBranches();
-        }
-    });
-
-    // ================================================================
-    //  CUSTOMER PROFILE
-    // ================================================================
-    router.register('profile', {
-        list: function () {
-            var viewRoot = document.getElementById('viewRoot');
-            var page = hub.el('div', { class: 'ws-page' });
-            var header = hub.el('div', { class: 'ws-page-header' }, [
-                hub.el('h1', { class: 'ws-page-title' }, ['Hồ sơ cá nhân']),
-                hub.el('p', { class: 'ws-page-subtitle' }, ['Quản lý thông tin tài khoản và yêu cầu hoàn tiền.'])
-            ]);
-            var content = hub.el('div', { class: 'ws-card' });
-            content.appendChild(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
-            page.appendChild(header);
-            page.appendChild(content);
-            viewRoot.replaceChildren(page);
-
-            hub.api('/api/profile').then(function (data) {
-                if (!data || !data.user) {
-                    throw new Error('Dữ liệu hồ sơ không hợp lệ.');
-                }
-                var user = data.user;
-                var form = hub.el('form', { class: 'ws-form' });
-                var fields = hub.el('div', { class: 'ws-form-grid' });
-                var fullName = hub.el('input', {
-                    type: 'text', name: 'fullName', required: 'required',
-                    value: user.fullName || '', maxlength: '120'
-                });
-                var phone = hub.el('input', {
-                    type: 'tel', name: 'phone', value: user.phone || '', maxlength: '30'
-                });
-                fields.appendChild(hub.el('label', {}, ['Họ và tên', fullName]));
-                fields.appendChild(hub.el('label', {}, ['Số điện thoại', phone]));
-                fields.appendChild(hub.el('label', {}, ['Email', hub.el('input', {
-                    type: 'email', value: user.email || '', disabled: 'disabled'
-                })]));
-                fields.appendChild(hub.el('label', {}, ['Vai trò', hub.el('input', {
-                    type: 'text', value: user.role || 'CUSTOMER', disabled: 'disabled'
-                })]));
-                form.appendChild(fields);
-                form.appendChild(hub.el('div', { class: 'ws-form-actions' }, [
-                    hub.el('button', { class: 'ws-btn primary', type: 'submit' }, ['Lưu thay đổi'])
-                ]));
-
-                var summary = hub.el('div', { class: 'kpi-grid', style: 'margin-top:20px' }, [
-                    hub.el('div', { class: 'kpi' }, [
-                        hub.el('span', {}, ['Yêu cầu hoàn tiền']),
-                        hub.el('strong', {}, [hub.el('a', {
-                            href: ctx + '/console?module=my-tickets',
-                            class: 'ws-link'
-                        }, ['Vào vé của tôi →'])])
-                    ])
-                ]);
-
-                form.addEventListener('submit', function (event) {
-                    event.preventDefault();
-                    var submit = form.querySelector('button[type="submit"]');
-                    submit.disabled = true;
-                    hub.api('/api/profile', {
-                        method: 'POST',
-                        body: { fullName: fullName.value.trim(), phone: phone.value.trim() }
-                    }).then(function (updated) {
-                        var updatedUser = updated && updated.user ? updated.user : {};
-                        fullName.value = updatedUser.fullName || fullName.value;
-                        phone.value = updatedUser.phone || '';
-                        hub.notify('Đã cập nhật hồ sơ.', 'ok');
-                    }).catch(notifyError).then(function () {
-                        submit.disabled = false;
-                    });
-                });
-
-                var savedBankAccount = data.bankAccount || {};
-                var bankForm = hub.el('form', { class: 'ws-form profile-bank-form' });
-                var bankFields = hub.el('div', { class: 'ws-form-grid' });
-                var bankName = hub.el('input', {
-                    type: 'text', name: 'bankName', maxlength: '120',
-                    value: savedBankAccount.bankName || ''
-                });
-                var bankAccountName = hub.el('input', {
-                    type: 'text', name: 'bankAccountName', maxlength: '120',
-                    value: savedBankAccount.bankAccountName || ''
-                });
-                var bankAccountNumber = hub.el('input', {
-                    type: 'text', name: 'bankAccountNumber', maxlength: '40',
-                    inputmode: 'numeric', pattern: '[0-9]{6,40}',
-                    value: savedBankAccount.bankAccountNumber || ''
-                });
-                bankFields.appendChild(hub.el('label', {}, ['Tên ngân hàng', bankName]));
-                bankFields.appendChild(hub.el('label', {}, ['Chủ tài khoản', bankAccountName]));
-                bankFields.appendChild(hub.el('label', {}, ['Số tài khoản', bankAccountNumber]));
-                bankForm.appendChild(bankFields);
-                bankForm.appendChild(hub.el('p', { class: 'ws-help' }, [
-                    'Lưu một tài khoản nhận hoàn tiền. Để xoá, hãy xoá cả ba trường rồi lưu.'
-                ]));
-                bankForm.appendChild(hub.el('div', { class: 'ws-form-actions' }, [
-                    hub.el('button', { class: 'ws-btn primary', type: 'submit' },
-                        ['Lưu tài khoản nhận hoàn'])
-                ]));
-                bankForm.addEventListener('submit', function (event) {
-                    event.preventDefault();
-                    var submit = bankForm.querySelector('button[type="submit"]');
-                    submit.disabled = true;
-                    hub.api('/api/profile', {
-                        method: 'POST',
-                        body: {
-                            bankName: bankName.value.trim(),
-                            bankAccountName: bankAccountName.value.trim(),
-                            bankAccountNumber: bankAccountNumber.value.trim()
-                        }
-                    }).then(function (updated) {
-                        var saved = updated && updated.bankAccount ? updated.bankAccount : {};
-                        bankName.value = saved.bankName || '';
-                        bankAccountName.value = saved.bankAccountName || '';
-                        bankAccountNumber.value = saved.bankAccountNumber || '';
-                        hub.notify('Đã lưu tài khoản nhận hoàn.', 'ok');
-                    }).catch(notifyError).then(function () {
-                        submit.disabled = false;
-                    });
-                });
-                var bankSection = hub.el('section', { class: 'profile-bank-section' }, [
-                    hub.el('h2', {}, ['Tài khoản ngân hàng nhận hoàn']),
-                    hub.el('p', { class: 'muted' }, [
-                        'Bạn có thể chọn tài khoản này hoặc nhập tài khoản khác khi gửi yêu cầu hoàn tiền.'
-                    ]),
-                    bankForm
-                ]);
-                content.replaceChildren(form, bankSection, summary);
-            }).catch(function (error) {
-                content.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
-                    hub.el('h3', {}, ['Không tải được hồ sơ']),
-                    hub.el('p', {}, [error.message || 'Vui lòng thử lại.'])
-                ]));
-            });
-        }
-    });
-
-
-    // ================================================================
-    //  PRODUCT (F&B Catalog Admin)
-    // ================================================================
-    function renderProductForm(product) {
-        var isEdit = !!product;
-        form.renderFormPage({
-            breadcrumb: ['Quáº£n lÃ½', { label: 'Sáº£n pháº©m F&B', href: ctx + '/console?module=product' }, isEdit ? 'Chá»‰nh sá»­a' : 'Táº¡o má»›i'],
-            title: isEdit ? 'Chá»‰nh sá»­a sáº£n pháº©m' : 'Táº¡o sáº£n pháº©m má»›i',
-            subtitle: isEdit ? product.name : 'ThÃªm sáº£n pháº©m hoáº·c combo báº¯p nÆ°á»›c.',
-            submitLabel: isEdit ? 'LÆ°u thay Ä‘á»•i' : 'Táº¡o sáº£n pháº©m',
-            sections: [{
-                title: 'ThÃ´ng tin sáº£n pháº©m',
-                fields: [
-                    { name: 'name', label: 'TÃªn sáº£n pháº©m', required: true, value: product && product.name, fullWidth: true },
-                    { name: 'description', label: 'MÃ´ táº£', type: 'textarea', required: false, value: product && product.description, rows: 3, fullWidth: true },
-                    { name: 'price', label: 'GiÃ¡ bÃ¡n (VND)', type: 'number', required: true, min: 0, step: 1000, value: product && product.price },
-                    { name: 'unit', label: 'ÄÆ¡n vá»‹', value: (product && product.unit) || 'pháº§n', placeholder: 'pháº§n, ly, há»™pâ€¦' },
-                    { name: 'type', label: 'Loáº¡i', type: 'select', required: true, value: (product && product.type) || 'POPCORN', options: [
-                        { value: 'POPCORN', label: 'Báº¯p rang' },
-                        { value: 'DRINK', label: 'NÆ°á»›c uá»‘ng' },
-                        { value: 'COMBO', label: 'Combo' },
-                        { value: 'OTHER', label: 'KhÃ¡c' }
-                    ]}
-                ]
-            }],
-            onSubmit: function (data) {
-                var url = isEdit ? '/concession/products/' + product.id : '/concession/products';
-                var method = isEdit ? 'PUT' : 'POST';
-                hub.api(url, { method: method, body: data })
-                    .then(function () { router.go('product'); })
-                    .catch(notifyError);
-            },
-            onCancel: function () { router.go('product'); }
-        });
-    }
-
-    router.register('product', {
-        list: function () {
-            list.render({
-                title: 'Sáº£n pháº©m F&B',
-                subtitle: 'Danh má»¥c báº¯p nÆ°á»›c vÃ  combo Ä‘ang Ä‘Æ°á»£c quáº£n lÃ½.',
-                addUrl: ctx + '/console?module=product&action=create',
-                addLabel: 'Táº¡o sáº£n pháº©m',
-                searchPlaceholder: 'TÃ¬m theo tÃªn sáº£n pháº©mâ€¦',
-                pageSize: 20,
-                filters: [{
-                    name: 'type', label: 'Loáº¡i',
-                    options: [
-                        { value: 'POPCORN', label: 'Báº¯p rang' },
-                        { value: 'DRINK', label: 'NÆ°á»›c uá»‘ng' },
-                        { value: 'COMBO', label: 'Combo' },
-                        { value: 'OTHER', label: 'KhÃ¡c' }
-                    ]
-                }],
-                sortable: true,
-                sortOptions: [
-                    { value: 'name', label: 'TÃªn Aâ†’Z' },
-                    { value: 'price', label: 'GiÃ¡' }
-                ],
-                fetcher: function (qs) {
-                    return hub.api('/concession/products').then(function (list) {
-                        var items = Array.isArray(list) ? list : [];
-                        var q = (qs.get('q') || '').trim().toLowerCase();
-                        var type = qs.get('type') || '';
-                        if (type) {
-                            items = items.filter(function (p) { return p.type === type; });
-                        }
-                        if (q) {
-                            items = items.filter(function (p) {
-                                return (p.name || '').toLowerCase().indexOf(q) !== -1;
-                            });
-                        }
-                        return { items: items, total: items.length };
-                    });
-                },
-                emptyTitle: 'ChÆ°a cÃ³ sáº£n pháº©m',
-                emptyMessage: 'Danh má»¥c báº¯p nÆ°á»›c Ä‘ang trá»‘ng.',
-                columns: [
-                    { label: 'TÃªn sáº£n pháº©m', key: 'name' },
-                    { label: 'Loáº¡i', key: 'type' },
-                    { label: 'ÄÆ¡n vá»‹', key: 'unit' },
-                    { label: 'GiÃ¡ bÃ¡n', render: function (r) { return hub.fmtMoney(r.price); } },
-                    { label: 'Tráº¡ng thÃ¡i', render: function (r) { return statusBadge(r.status); } }
-                ],
-                actions: function (row) {
-                    var arr = [{ label: 'Sá»­a', class: 'secondary', href: ctx + '/console?module=product&action=edit&id=' + row.id }];
-                    if (row.status === 'ACTIVE') {
-                        arr.push({ label: 'NgÆ°ng', class: 'danger', onClick: function () {
-                            confirmAction('NgÆ°ng kinh doanh sáº£n pháº©m nÃ y?', function () {
-                                hub.api('/concession/products/' + row.id, { method: 'PUT', body: { action: 'deactivate' } })
-                                    .then(function () {
-                                        hub.notify('ÄÃ£ ngÆ°ng sáº£n pháº©m.', 'ok');
-                                        router.go('product');
-                                    })
-                                    .catch(notifyError);
-                            });
-                        }});
-                    } else {
-                        arr.push({ label: 'Má»Ÿ láº¡i', class: 'primary', onClick: function () {
-                            confirmAction('Má»Ÿ láº¡i kinh doanh sáº£n pháº©m nÃ y?', function () {
-                                hub.api('/concession/products/' + row.id, { method: 'PUT', body: { action: 'activate' } })
-                                    .then(function () {
-                                        hub.notify('ÄÃ£ má»Ÿ láº¡i sáº£n pháº©m.', 'ok');
-                                        router.go('product');
-                                    })
-                                    .catch(notifyError);
-                            });
-                        }});
-                    }
-                    return arr;
-                }
-            });
-        },
-        create: function () { renderProductForm(null); },
-        edit: function (id) {
-            hub.api('/concession/products').then(function (list) {
-                var product = (list || []).find(function (p) { return String(p.id) === String(id); });
-                if (!product) throw new Error('KhÃ´ng tÃ¬m tháº¥y sáº£n pháº©m');
-                renderProductForm(product);
-            }).catch(notifyError);
-        }
-    });
-
-    // ================================================================
     //  CONCESSION-REFUNDS (F&B refund approval)
     // ================================================================
     router.register('concession-refunds', {
         list: function () {
             var viewRoot = document.getElementById('viewRoot');
-            hub.setWorkspaceHeader('YÃªu cáº§u hoÃ n tiá»n F&B');
+            hub.setWorkspaceHeader('Yêu cầu hoàn tiền F&B');
             var page = hub.el('div', { class: 'ws-page' });
             page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
-                hub.el('h1', { class: 'ws-page-title' }, ['YÃªu cáº§u hoÃ n tiá»n F&B']),
+                hub.el('h1', { class: 'ws-page-title' }, ['Yêu cầu hoàn tiền F&B']),
                 hub.el('p', { class: 'ws-page-subtitle' }, [
-                    'HoÃ n 100% sá»‘ tiá»n Ä‘Ã£ thanh toÃ¡n vÃ  Ä‘iá»ƒm Ä‘Ã£ sá»­ dá»¥ng; khÃ´ng giá»›i háº¡n thá»i gian yÃªu cáº§u.'
+                    'Hoàn 100% số tiền đã thanh toán và điểm đã sử dụng; không giới hạn thời gian yêu cầu.'
                 ])
             ]));
             var tableWrap = hub.el('div', { class: 'ws-card', style: 'padding:0;overflow:auto' });
@@ -4531,81 +4533,71 @@
                     var requests = (data && data.items) || [];
                     if (!requests.length) {
                         tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
-                            hub.el('h3', {}, ['KhÃ´ng cÃ³ yÃªu cáº§u Ä‘ang chá»']),
-                            hub.el('p', {}, ['YÃªu cáº§u hoÃ n tiá»n F&B má»›i sáº½ xuáº¥t hiá»‡n táº¡i Ä‘Ã¢y.'])
+                            hub.el('h3', {}, ['Không có yêu cầu đang chờ']),
+                            hub.el('p', {}, ['Yêu cầu hoàn tiền F&B mới sẽ xuất hiện tại đây.'])
                         ]));
                         return;
                     }
                     var table = hub.el('table', { class: 'ws-table' });
-                    table.innerHTML = '<thead><tr><th>ÄÆ¡n</th><th>NgÃ¢n hÃ ng nháº­n tiá»n</th>'
-                        + '<th>LÃ½ do</th><th>HoÃ n tiá»n</th><th>YÃªu cáº§u lÃºc</th><th></th></tr></thead>';
+                    table.innerHTML = '<thead><tr><th>Đơn</th><th>Ngân hàng nhận tiền</th>'
+                        + '<th>Lý do</th><th>Hoàn tiền</th><th>Yêu cầu lúc</th><th></th></tr></thead>';
                     var tbody = hub.el('tbody');
                     requests.forEach(function (request) {
-                        var bank = request.bankName + ' Â· ' + request.bankAccountName
-                            + ' Â· ' + request.bankAccountNumber;
+                        var bank = request.bankName + ' · ' + request.bankAccountName
+                            + ' · ' + request.bankAccountNumber;
                         var amount = hub.fmtMoney(request.refundAmount || 0)
-                            + (request.refundPoints > 0 ? ' + ' + request.refundPoints + ' Ä‘iá»ƒm' : '');
+                            + (request.refundPoints > 0 ? ' + ' + request.refundPoints + ' điểm' : '');
                         var actions = hub.el('td');
                         var note = hub.el('textarea', {
                             class: 'ws-input',
                             rows: '2',
                             maxlength: '500',
-                            placeholder: 'Ghi chÃº xá»­ lÃ½ / lÃ½ do tá»« chá»‘i'
+                            placeholder: 'Ghi chú xử lý / lý do từ chối'
                         });
-                        var approve = hub.el('button', { class: 'ws-btn primary', type: 'button' }, ['Duyá»‡t hoÃ n']);
-                        var reject = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Tá»« chá»‘i']);
+                        var approve = hub.el('button', { class: 'ws-btn primary', type: 'button' }, ['Duyệt hoàn']);
+                        var reject = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Từ chối']);
                         approve.addEventListener('click', function () {
-                            if (!window.confirm('XÃ¡c nháº­n chuyá»ƒn ' + hub.fmtMoney(request.refundAmount)
-                                    + ' vá» tÃ i khoáº£n ' + request.bankAccountNumber + '?')) return;
+                            if (!window.confirm('Xác nhận chuyển ' + hub.fmtMoney(request.refundAmount)
+                                    + ' về tài khoản ' + request.bankAccountNumber
+                                    + ' và hoàn ' + (request.refundPoints || 0) + ' điểm?')) return;
                             approve.disabled = true;
                             hub.api('/concession/refunds/' + request.id + '/approve', {
                                 method: 'POST',
-                                body: { managerNote: note.value.trim() || 'ÄÃ£ xá»­ lÃ½ hoÃ n tiá»n 100% qua ngÃ¢n hÃ ng.' }
+                                body: { managerNote: note.value.trim() || 'Đã xử lý hoàn tiền 100% qua ngân hàng.' }
                             }).then(load).catch(function (error) {
                                 approve.disabled = false;
                                 notifyError(error);
                             });
                         });
                         reject.addEventListener('click', function () {
-                            var reason = note.value.trim();
-                            if (!reason) {
-                                hub.notify('Vui lÃ²ng nháº­p lÃ½ do tá»« chá»‘i vÃ o Ã´ ghi chÃº.', 'warn');
-                                note.focus();
+                            if (!note.value.trim()) {
+                                hub.notify('Vui lòng nhập lý do từ chối.', 'err');
                                 return;
                             }
                             reject.disabled = true;
                             hub.api('/concession/refunds/' + request.id + '/reject', {
                                 method: 'POST',
-                                body: { managerNote: reason }
+                                body: { managerNote: note.value.trim() }
                             }).then(load).catch(function (error) {
                                 reject.disabled = false;
                                 notifyError(error);
                             });
                         });
-                        actions.appendChild(hub.el('div', { style: 'display:flex;gap:6px;align-items:flex-start' }, [
-                            note,
-                            hub.el('div', { style: 'display:flex;flex-direction:column;gap:4px' }, [approve, reject])
-                        ]));
+                        actions.append(note, approve, reject);
                         tbody.appendChild(hub.el('tr', {}, [
-                            hub.el('td', {}, [
-                                hub.el('strong', {}, [request.orderCode || ('#' + request.orderId)]),
-                                hub.el('div', { class: 'ws-muted', style: 'font-size:.78rem' }, [
-                                    request.branchName || ('Chi nhÃ¡nh #' + request.branchId)
-                                ])
-                            ]),
+                            hub.el('td', {}, [request.orderCode || ('#' + request.orderId)]),
                             hub.el('td', {}, [bank]),
-                            hub.el('td', {}, [request.reason || 'â€”']),
-                            hub.el('td', {}, [hub.el('strong', {}, [amount])]),
-                            hub.el('td', {}, [request.createdAt ? hub.fmtNotificationDateTime(request.createdAt) : 'â€”']),
+                            hub.el('td', {}, [request.reason || '—']),
+                            hub.el('td', {}, [amount]),
+                            hub.el('td', {}, [request.createdAt ? hub.fmtDateTime(request.createdAt) : '—']),
                             actions
                         ]));
                     });
                     table.appendChild(tbody);
                     tableWrap.replaceChildren(table);
                 }).catch(function (error) {
-                    tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
-                        hub.el('h3', {}, ['KhÃ´ng táº£i Ä‘Æ°á»£c yÃªu cáº§u']),
-                        hub.el('p', {}, [error.message || 'Vui lÃ²ng thá»­ láº¡i sau.'])
+                    tableWrap.replaceChildren(hub.el('div', { class: 'ws-flash err' }, [
+                        error.message || 'Không thể tải yêu cầu hoàn tiền.'
                     ]));
                 });
             }
@@ -4614,7 +4606,7 @@
     });
 
     // ================================================================
-    //  CONCESSION-ORDERS
+    //  CONCESSION-ORDERS (F&B Staff orders)
     // ================================================================
     router.register('concession-orders', {
         list: function () {
@@ -4624,55 +4616,55 @@
                 : Promise.resolve([]);
             branchesRequest.then(function (branches) {
                 var filters = [{
-                    name: 'status', label: 'Tráº¡ng thÃ¡i', options: [
-                        { value: 'PENDING', label: 'Chá» thanh toÃ¡n' },
-                        { value: 'READY_FOR_PICKUP', label: 'Sáºµn sÃ ng nháº­n' },
-                        { value: 'FULFILLED', label: 'ÄÃ£ giao' },
-                        { value: 'CANCELLED', label: 'ÄÃ£ há»§y' },
-                        { value: 'EXPIRED_NO_SHOW', label: 'QuÃ¡ háº¡n' }
+                    name: 'status', label: 'Trạng thái', options: [
+                        { value: 'PENDING', label: 'Chờ thanh toán' },
+                        { value: 'READY_FOR_PICKUP', label: 'Sẵn sàng nhận' },
+                        { value: 'FULFILLED', label: 'Đã giao' },
+                        { value: 'CANCELLED', label: 'Đã hủy' },
+                        { value: 'EXPIRED_NO_SHOW', label: 'Quá hạn' }
                     ]
                 }];
                 if (roleMeta === 'ADMIN') {
                     filters.unshift({
-                        name: 'branchId', label: 'Chi nhÃ¡nh',
+                        name: 'branchId', label: 'Chi nhánh',
                         options: (branches || []).map(function (b) {
                             return { value: String(b.id), label: b.name };
                         })
                     });
                 }
                 list.render({
-                    title: 'ÄÆ¡n hÃ ng Báº¯p & NÆ°á»›c',
-                    subtitle: 'Danh sÃ¡ch Ä‘Æ¡n F&B táº¡i chi nhÃ¡nh.',
-                    searchPlaceholder: 'TÃ¬m mÃ£ Ä‘Æ¡n / tÃªn / SÄTâ€¦',
+                    title: 'Đơn hàng Bắp & Nước',
+                    subtitle: 'Danh sách đơn F&B tại chi nhánh.',
+                    searchPlaceholder: 'Tìm mã đơn / tên / SĐT…',
                     pageSize: 20,
                     filters: filters,
                     toolbarRight: [hub.el('a', {
                         href: ctx + '/console?module=concession-pickup',
                         class: 'ws-btn secondary'
-                    }, ['ðŸ“· QuÃ©t mÃ£ nháº­n'])],
+                    }, ['📷 Quét mã nhận'])],
                     fetcher: function (qs) { return hub.api('/concession/orders?' + qs.toString()); },
-                    emptyTitle: 'ChÆ°a cÃ³ Ä‘Æ¡n hÃ ng',
-                    emptyMessage: 'Chi nhÃ¡nh chÆ°a cÃ³ Ä‘Æ¡n F&B nÃ o.',
+                    emptyTitle: 'Chưa có đơn hàng',
+                    emptyMessage: 'Chi nhánh chưa có đơn F&B nào.',
                     columns: [
-                        { label: 'MÃ£ Ä‘Æ¡n', key: 'orderCode' },
-                        { label: 'Chi nhÃ¡nh', key: 'branchName' },
-                        { label: 'KhÃ¡ch hÃ ng', key: 'customerName' },
-                        { label: 'Tá»•ng tiá»n', render: function (o) { return hub.fmtMoney(o.totalAmount); } },
-                        { label: 'MÃ£ nháº­n', key: 'pickupCode' },
-                        { label: 'Tráº¡ng thÃ¡i', render: function (o) { return statusBadge(o.status); } },
-                        { label: 'NgÃ y táº¡o', render: function (o) {
-                            return o.createdAt ? hub.fmtNotificationDateTime(o.createdAt) : 'â€”';
+                        { label: 'Mã đơn', key: 'orderCode' },
+                        { label: 'Chi nhánh', key: 'branchName' },
+                        { label: 'Khách hàng', key: 'customerName' },
+                        { label: 'Tổng tiền', render: function (o) { return hub.fmtMoney(o.totalAmount); } },
+                        { label: 'Mã nhận', key: 'pickupCode' },
+                        { label: 'Trạng thái', render: function (o) { return statusBadge(o.status); } },
+                        { label: 'Ngày tạo', render: function (o) {
+                            return o.createdAt ? hub.fmtNotificationDateTime(o.createdAt) : '—';
                         } }
                     ],
                     actions: function (row) {
-                        return [{ label: 'Chi tiáº¿t', class: 'secondary', href: ctx + '/console?module=concession-orders&action=view&id=' + row.id }];
+                        return [{ label: 'Chi tiết', class: 'secondary', href: ctx + '/console?module=concession-orders&action=view&id=' + row.id }];
                     }
                 });
             }).catch(notifyError);
         },
         view: function (id) {
             var viewRoot = document.getElementById('viewRoot');
-            hub.setWorkspaceHeader('Chi tiáº¿t Ä‘Æ¡n F&B');
+            hub.setWorkspaceHeader('Chi tiết đơn F&B');
             var page = hub.el('div', { class: 'ws-page' });
             var card = hub.el('section', { class: 'ws-card' }, [
                 hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })])
@@ -4681,7 +4673,7 @@
             viewRoot.replaceChildren(page);
 
             if (!id) {
-                card.replaceChildren(hub.el('p', { class: 'ws-muted' }, ['KhÃ´ng xÃ¡c Ä‘á»‹nh Ä‘Æ°á»£c Ä‘Æ¡n hÃ ng.']));
+                card.replaceChildren(hub.el('p', { class: 'ws-muted' }, ['Không xác định được đơn hàng.']));
                 return;
             }
 
@@ -4689,10 +4681,10 @@
                 card.replaceChildren();
                 card.appendChild(hub.el('div', { class: 'ws-card-header' }, [
                     hub.el('div', {}, [
-                        hub.el('h2', {}, ['ÄÆ¡n ' + (order.orderCode || ('#' + order.id))]),
+                        hub.el('h2', {}, ['Đơn ' + (order.orderCode || ('#' + order.id))]),
                         hub.el('p', { class: 'ws-muted' }, [
-                            (order.branchName || (order.branchId ? 'Chi nhÃ¡nh #' + order.branchId : 'Chi nhÃ¡nh chÆ°a xÃ¡c Ä‘á»‹nh')) + ' Â· ' +
-                            (order.createdAt ? hub.fmtNotificationDateTime(order.createdAt) : 'â€”')
+                            (order.branchName || (order.branchId ? 'Chi nhánh #' + order.branchId : 'Chi nhánh chưa xác định')) + ' · ' +
+                            (order.createdAt ? hub.fmtNotificationDateTime(order.createdAt) : '—')
                         ])
                     ]),
                     statusBadge(order.status)
@@ -4701,10 +4693,10 @@
                 var lines = Array.isArray(order.lines) ? order.lines : [];
                 var table = hub.el('table', { class: 'ws-table' }, [
                     hub.el('thead', {}, [hub.el('tr', {}, [
-                        hub.el('th', {}, ['Sáº£n pháº©m']),
+                        hub.el('th', {}, ['Sản phẩm']),
                         hub.el('th', {}, ['SL']),
-                        hub.el('th', {}, ['ÄÆ¡n giÃ¡']),
-                        hub.el('th', {}, ['ThÃ nh tiá»n'])
+                        hub.el('th', {}, ['Đơn giá']),
+                        hub.el('th', {}, ['Thành tiền'])
                     ])])
                 ]);
                 var body = hub.el('tbody');
@@ -4719,22 +4711,22 @@
                 table.appendChild(body);
                 card.appendChild(table);
                 card.appendChild(hub.el('div', { class: 'ws-form-actions' }, [
-                    hub.el('strong', {}, ['Tá»•ng cá»™ng: ' + hub.fmtMoney(order.totalAmount || 0)])
+                    hub.el('strong', {}, ['Tổng cộng: ' + hub.fmtMoney(order.totalAmount || 0)])
                 ]));
 
                 if (order.pickupCode) {
                     card.appendChild(hub.el('p', {}, [
-                        hub.el('strong', {}, ['MÃ£ nháº­n hÃ ng: ']),
+                        hub.el('strong', {}, ['Mã nhận hàng: ']),
                         order.pickupCode
                     ]));
                 }
-                var back = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Vá» danh sÃ¡ch Ä‘Æ¡n']);
+                var back = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Về danh sách đơn']);
                 back.addEventListener('click', function () { router.go('concession-orders'); });
                 card.appendChild(back);
             }).catch(function (error) {
                 card.replaceChildren(
-                    hub.el('p', { class: 'ws-flash err' }, [error.message || 'KhÃ´ng táº£i Ä‘Æ°á»£c chi tiáº¿t Ä‘Æ¡n hÃ ng.']),
-                    hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Vá» danh sÃ¡ch Ä‘Æ¡n'])
+                    hub.el('p', { class: 'ws-flash err' }, [error.message || 'Không tải được chi tiết đơn hàng.']),
+                    hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Về danh sách đơn'])
                 );
                 card.querySelector('button').addEventListener('click', function () {
                     router.go('concession-orders');
@@ -4744,103 +4736,7 @@
     });
 
     // ================================================================
-    //  CONCESSION-PICKUP (QR scan)
-    // ================================================================
-    router.register('concession-pickup', {
-        list: function () {
-            var viewRoot = document.getElementById('viewRoot');
-            var page = hub.el('div', { class: 'ws-page' });
-            page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
-                hub.el('h1', { class: 'ws-page-title' }, ['QuÃ©t mÃ£ F&B']),
-                hub.el('p', { class: 'ws-page-subtitle' }, ['Nháº­p mÃ£ nháº­n hÃ ng Ä‘á»ƒ tra cá»©u; kiá»ƒm tra Ä‘Æ¡n rá»“i xÃ¡c nháº­n Ä‘Ã£ giao cho khÃ¡ch.'])
-            ]));
-            var card = hub.el('div', { class: 'ws-card', style: 'padding:24px;max-width:540px' });
-            card.appendChild(hub.el('label', { style: 'display:block;margin-bottom:6px;font-weight:600' }, ['MÃ£ nháº­n hÃ ng']));
-            var codeInput = hub.el('input', {
-                type: 'text', placeholder: 'PCK-XXXXX',
-                style: 'width:100%;padding:12px;border:1px solid var(--ws-line);border-radius:8px;font-size:1rem;font-family:monospace;text-transform:uppercase'
-            });
-            card.appendChild(codeInput);
-            var scanBtn = hub.el('button', { class: 'ws-btn primary', type: 'button', style: 'margin-top:12px;width:100%' }, ['Tra cá»©u']);
-            card.appendChild(scanBtn);
-            var result = hub.el('div', { style: 'margin-top:20px' });
-            card.appendChild(result);
-            page.appendChild(card);
-            viewRoot.replaceChildren(page);
-
-            var lookupFn = function () {
-                var code = codeInput.value.trim();
-                if (!code) {
-                    hub.notify('Vui lÃ²ng nháº­p mÃ£ nháº­n hÃ ng hoáº·c mÃ£ Ä‘Æ¡n!', 'warn');
-                    codeInput.focus();
-                    return;
-                }
-                result.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
-                hub.api('/concession/scan', { method: 'POST', body: { code: code.toUpperCase() } }).then(function (data) {
-                    if (!data.canRedeem) {
-                        result.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
-                            hub.el('h3', {}, ['KhÃ´ng thá»ƒ giao Ä‘Æ¡n nÃ y']),
-                            hub.el('p', {}, [data.message || 'ÄÆ¡n khÃ´ng á»Ÿ tráº¡ng thÃ¡i sáºµn sÃ ng nháº­n.'])
-                        ]));
-                        return;
-                    }
-                    var box = hub.el('div', { class: 'ws-card', style: 'padding:20px' });
-                    box.appendChild(hub.el('h3', {}, ['âœ“ Sáºµn sÃ ng giao hÃ ng']));
-                    var grid = hub.el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px' });
-                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['MÃ£ Ä‘Æ¡n:']), ' ', data.orderCode || 'â€”']));
-                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['KhÃ¡ch:']), ' ', data.customerName || 'â€”']));
-                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['Tá»•ng tiá»n:']), ' ', hub.fmtMoney(data.totalAmount)]));
-                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['Chi nhÃ¡nh:']), ' ', data.branchId || 'â€”']));
-                    box.appendChild(grid);
-                    var lines = (data.lines || []).map(function (l) {
-                        return hub.el('div', { style: 'padding:6px 0;border-bottom:1px solid var(--ws-line)' },
-                            [l.productName + ' Ã—' + l.qty + '  ', hub.el('strong', {}, [hub.fmtMoney(l.subtotal)])]);
-                    });
-                    if (lines.length) {
-                        box.appendChild(hub.el('h4', { style: 'margin-top:16px' }, ['Sáº£n pháº©m']));
-                        lines.forEach(function (l) { box.appendChild(l); });
-                    }
-                    var confirmBtn = hub.el('button', { class: 'ws-btn primary', type: 'button', style: 'margin-top:16px;width:100%' }, ['âœ“ XÃ¡c nháº­n Ä‘Ã£ giao cho khÃ¡ch']);
-                    confirmBtn.addEventListener('click', function () {
-                        confirmBtn.disabled = true;
-                        confirmBtn.textContent = 'Äang xá»­ lÃ½ giao hÃ ng...';
-                        hub.api('/concession/redeem', { method: 'POST', body: { orderId: data.orderId } })
-                            .then(function () {
-                                hub.notify('Giao Ä‘Æ¡n hÃ ng thÃ nh cÃ´ng!', 'ok');
-                                result.replaceChildren();
-                                codeInput.value = '';
-                                codeInput.focus();
-                            })
-                            .catch(function (err) {
-                                confirmBtn.disabled = false;
-                                confirmBtn.textContent = 'âœ“ XÃ¡c nháº­n Ä‘Ã£ giao cho khÃ¡ch';
-                                notifyError(err);
-                            });
-                    });
-                    box.appendChild(confirmBtn);
-                    result.replaceChildren(box);
-                }).catch(function (err) {
-                    result.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
-                        hub.el('h3', {}, ['KhÃ´ng tÃ¬m tháº¥y']),
-                        hub.el('p', {}, [err.message || 'MÃ£ nháº­n hÃ ng khÃ´ng tá»“n táº¡i.'])
-                    ]));
-                });
-            };
-
-            scanBtn.addEventListener('click', lookupFn);
-            codeInput.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    lookupFn();
-                }
-            });
-            codeInput.focus();
-        }
-    });
-
-
-    // ================================================================
-    //  REPORT (Admin + Manager) - Feature 11 Row 55
+    //  REPORT (Admin + Manager)
     // ================================================================
     router.register('report', {
         list: function () {
@@ -5406,6 +5302,1087 @@
 
             runBtn.addEventListener('click', load);
             load();
+        }
+    });
+
+    // ================================================================
+    //  NOTIFICATION
+    // ================================================================
+    router.register('notification', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            var page = hub.el('div', { class: 'ws-page' });
+            page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
+                hub.el('h1', { class: 'ws-page-title' }, ['Thông báo']),
+                hub.el('p', { class: 'ws-page-subtitle' }, ['Thông báo in-app của bạn.'])
+            ]));
+            var toolbar = hub.el('div', { class: 'ws-list-toolbar' });
+            var left = hub.el('div', { class: 'ws-list-toolbar-left' });
+            var filterSel = hub.el('select', { class: 'ws-select', 'aria-label': 'Lọc' }, [
+                hub.el('option', { value: '' }, ['Tất cả']),
+                hub.el('option', { value: 'unread' }, ['Chưa đọc'])
+            ]);
+            left.appendChild(filterSel);
+            toolbar.appendChild(left);
+            var right = hub.el('div', { class: 'ws-list-toolbar-right' });
+            var markAllBtn = hub.el('button', { class: 'ws-btn secondary', type: 'button' }, ['Đánh dấu tất cả đã đọc']);
+            right.appendChild(markAllBtn);
+            toolbar.appendChild(right);
+            page.appendChild(toolbar);
+
+            var tableWrap = hub.el('div', { class: 'ws-card', style: 'padding:0;overflow:hidden' });
+            page.appendChild(tableWrap);
+            viewRoot.replaceChildren(page);
+
+            function load() {
+                tableWrap.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
+                var qs = filterSel.value === 'unread' ? '?unreadOnly=true' : '';
+                hub.api('/notification' + qs).then(function (data) {
+                    var list = (data && data.notifications) || [];
+                    if (!list.length) {
+                        tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                            hub.el('h3', {}, ['Không có thông báo']),
+                            hub.el('p', {}, ['Bạn sẽ nhận thông báo khi có hoạt động mới.'])
+                        ]));
+                        return;
+                    }
+                    var hasLegacyAllocationText = list.some(function (n) {
+                        return /^SHOWTIME_ALLOCATION_/.test(n.type || '')
+                            && /(?:movie|chi nhánh)\s+#\d+/i.test(n.body || '');
+                    });
+                    var references = hasLegacyAllocationText
+                        ? Promise.all([hub.api('/movie'), hub.api('/branch')]).then(function (results) {
+                            var movies = {};
+                            var branches = {};
+                            (results[0] || []).forEach(function (movie) {
+                                movies[String(movie.id)] = movie.title;
+                            });
+                            (results[1] || []).forEach(function (branch) {
+                                branches[String(branch.id)] = branch.name;
+                            });
+                            return { movies: movies, branches: branches };
+                        })
+                        : Promise.resolve({ movies: {}, branches: {} });
+                    return references.then(function (names) {
+                    var table = hub.el('table', { class: 'ws-table' });
+                    table.innerHTML = '<thead><tr><th>Nội dung</th><th>Thời điểm</th><th>Trạng thái</th><th></th></tr></thead>';
+                    var tbody = hub.el('tbody');
+                    list.forEach(function (n) {
+                        var tr = hub.el('tr');
+                            var action = hub.showtimeScheduleReminderAction(n)
+                                || hub.refundRequestAction(n);
+                            var body = hub.repairMojibakeText(
+                                action ? action.body : (n.body || n.title || '—'));
+                            body = body.replace(/\s*·\s*\/console\?[^\s]*\s*$/, '');
+                            if (/^SHOWTIME_ALLOCATION_/.test(n.type || '')) {
+                                body = body.replace(/movie\s+#(\d+)/gi, function (match, id) {
+                                    return names.movies[id] ? 'phim ' + names.movies[id] : match;
+                                });
+                                body = body.replace(/chi nhánh\s+#(\d+)/gi, function (match, id) {
+                                    if (!names.branches[id]) return match;
+                                    var label = 'chi nhánh ' + names.branches[id];
+                                    return match.charAt(0) === match.charAt(0).toUpperCase()
+                                        ? 'Chi nhánh ' + names.branches[id] : label;
+                                });
+                                body = body.replace(
+                                    'Vui lòng tạo Time Sheet và Room Seat tương ứng.',
+                                    'Vui lòng tạo lịch chiếu và phòng chiếu tương ứng.');
+                            }
+                            var contentCell = hub.el('td');
+                            if (action && action.urgent !== undefined) {
+                                contentCell.appendChild(hub.el('span', {
+                                    class: 'notification-severity '
+                                        + (action.urgent ? 'urgent' : 'normal')
+                                }, [action.urgent ? 'Khẩn cấp' : 'Cần xếp lịch']));
+                            }
+                            contentCell.appendChild(document.createTextNode(body));
+                            tr.appendChild(contentCell);
+                            tr.appendChild(hub.el('td', {}, [
+                                n.createdAt ? hub.fmtNotificationDateTime(n.createdAt) : '—'
+                            ]));
+                        tr.appendChild(hub.el('td', {}, [statusBadge(n.read ? 'USED' : 'PENDING')]));
+                        var actions = hub.el('td', { class: 'row-actions' });
+                            if (action) {
+                                actions.appendChild(hub.el('a', {
+                                    class: 'ws-btn ws-btn-sm primary',
+                                    href: action.href
+                                }, [action.label || 'Xếp lịch ngay']));
+                            }
+                        if (!n.read) {
+                            var btn = hub.el('button', { class: 'ws-btn ws-btn-sm secondary', type: 'button' }, ['Đã đọc']);
+                            btn.addEventListener('click', function () {
+                                hub.api('/notification/' + n.id + '/read', { method: 'POST' })
+                                    .then(load)
+                                    .catch(notifyError);
+                            });
+                            actions.appendChild(btn);
+                        }
+                        tr.appendChild(actions);
+                        tbody.appendChild(tr);
+                    });
+                    table.appendChild(tbody);
+                    tableWrap.replaceChildren(table);
+                    });
+                }).catch(notifyError);
+            }
+            markAllBtn.addEventListener('click', function () {
+                hub.api('/notification/read-all', { method: 'POST' })
+                    .then(function () {
+                        hub.notify('Đã đánh dấu tất cả là đã đọc.', 'ok');
+                        load();
+                    })
+                    .catch(notifyError);
+            });
+            filterSel.addEventListener('change', load);
+            load();
+        }
+    });
+
+    // ================================================================
+    //  CUSTOMER-POINTS (Staff adjust loyalty)
+    //  - Vào trang: load tất cả CUSTOMER (mới nhất trước)
+    //  - Search box: lọc theo email / SĐT / tên (q=…)
+    //  - Click 1 khách → load ledger bên phải
+    // ================================================================
+    router.register('customer-points', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            var page = hub.el('div', { class: 'ws-page' });
+            page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
+                hub.el('h1', { class: 'ws-page-title' }, ['Điều chỉnh điểm khách hàng']),
+                hub.el('p', { class: 'ws-page-subtitle' }, [
+                    'Tra cứu nhanh bằng email hoặc SĐT — hoặc tìm trong danh sách bên dưới.'
+                ])
+            ]));
+
+            // ================================================================
+            // QUICK LOOKUP — tra cứu nhanh bằng email/phone → hiện điểm ngay
+            // ================================================================
+            var quickCard = hub.el('div', { class: 'ws-card', style: 'margin-bottom:16px' });
+            var quickRow = hub.el('div', { style: 'display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap' });
+            var quickEmailWrap = hub.el('div', { style: 'flex:1;min-width:200px' });
+            quickEmailWrap.appendChild(hub.el('label', { class: 'ws-label', style: 'margin-bottom:4px;display:block' }, ['Email khách hàng']));
+            var quickEmail = hub.el('input', {
+                type: 'email', id: 'ql-email',
+                placeholder: 'example@email.com',
+                style: 'width:100%;padding:9px 12px;border:1px solid var(--ws-line);border-radius:8px;box-sizing:border-box'
+            });
+            quickEmailWrap.appendChild(quickEmail);
+
+            var quickPhoneWrap = hub.el('div', { style: 'flex:1;min-width:150px' });
+            quickPhoneWrap.appendChild(hub.el('label', { class: 'ws-label', style: 'margin-bottom:4px;display:block' }, ['Số điện thoại']));
+            var quickPhone = hub.el('input', {
+                type: 'tel', id: 'ql-phone',
+                placeholder: '0901234567',
+                style: 'width:100%;padding:9px 12px;border:1px solid var(--ws-line);border-radius:8px;box-sizing:border-box'
+            });
+            quickPhoneWrap.appendChild(quickPhone);
+
+            var quickBtn = hub.el('button', { type: 'button', class: 'ws-btn primary' }, ['Tra cứu']);
+            quickBtn.style.height = '38px';
+            quickRow.appendChild(quickEmailWrap);
+            quickRow.appendChild(quickPhoneWrap);
+            quickRow.appendChild(quickBtn);
+            quickCard.appendChild(quickRow);
+
+            // Kết quả tra cứu
+            var quickResult = hub.el('div', { id: 'ql-result', style: 'margin-top:12px;display:none' });
+            quickCard.appendChild(quickResult);
+            page.appendChild(quickCard);
+
+            // Layout 2 cột: list customers (trái) + ledger (phải)
+            var layout = hub.el('div', { class: 'ws-loyalty-layout', style: 'display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start' });
+
+            // --- Cột trái: search + danh sách khách ---
+            var leftCol = hub.el('div', { class: 'ws-card', style: 'padding:0;overflow:hidden' });
+            var searchWrap = hub.el('div', { style: 'padding:12px;border-bottom:1px solid var(--ws-line);display:flex;gap:8px' });
+            var searchInput = hub.el('input', {
+                type: 'text',
+                placeholder: 'Tìm theo email, SĐT hoặc tên…',
+                'aria-label': 'Tìm khách hàng',
+                style: 'flex:1;padding:8px 12px;border:1px solid var(--ws-line);border-radius:8px;background:#fff'
+            });
+            searchWrap.appendChild(searchInput);
+            leftCol.appendChild(searchWrap);
+
+            var customersList = hub.el('div', { class: 'ws-customer-list', style: 'max-height:calc(100vh - 280px);overflow:auto' });
+            leftCol.appendChild(customersList);
+
+            // --- Cột phải: ledger ---
+            var rightCol = hub.el('div', { class: 'ws-loyalty-right' });
+            var toolbar = hub.el('div', { class: 'ws-list-toolbar' });
+            var left = hub.el('div', { class: 'ws-list-toolbar-left' });
+            var customerInput = hub.el('input', {
+                type: 'hidden',
+                id: 'cp-selected-customer-id'
+            });
+            var customerBadge = hub.el('span', { class: 'ws-badge muted', style: 'padding:6px 10px;background:#f4f5f7;border-radius:6px;color:#5b5b66' }, ['Chưa chọn khách']);
+            left.appendChild(customerBadge);
+            toolbar.appendChild(left);
+            var right = hub.el('div', { class: 'ws-list-toolbar-right' });
+            var adjustBtn = hub.el('button', { class: 'ws-btn primary', type: 'button' }, ['+ Điều chỉnh điểm']);
+            adjustBtn.disabled = true;
+            right.appendChild(adjustBtn);
+            toolbar.appendChild(right);
+            rightCol.appendChild(toolbar);
+            var tableWrap = hub.el('div', { class: 'ws-card', style: 'padding:0;overflow:hidden' });
+            rightCol.appendChild(tableWrap);
+
+            layout.appendChild(leftCol);
+            layout.appendChild(rightCol);
+            page.appendChild(layout);
+            viewRoot.replaceChildren(page);
+
+            // ================================================================
+            // QUICK LOOKUP logic
+            // ================================================================
+            function doQuickLookup() {
+                var emailVal = quickEmail.value.trim();
+                var phoneVal = quickPhone.value.trim();
+                if (!emailVal && !phoneVal) {
+                    hub.notify('Nhập email hoặc số điện thoại để tra cứu.', 'warn');
+                    return;
+                }
+                var qs = emailVal ? '?email=' + encodeURIComponent(emailVal) : '?phone=' + encodeURIComponent(phoneVal);
+                quickBtn.disabled = true;
+                quickBtn.textContent = 'Đang tra cứu…';
+                quickResult.style.display = 'none';
+                hub.api('/loyalty/customer-points' + qs).then(function (data) {
+                    quickBtn.disabled = false;
+                    quickBtn.textContent = 'Tra cứu';
+                    quickResult.style.display = 'block';
+                    quickResult.innerHTML = '<div style="display:flex;gap:16px;align-items:center;padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">' +
+                        '<div style="flex:1">' +
+                        '<div style="font-weight:700;font-size:1rem;color:#1c1c24">' + (data.fullName || ('Khách #' + data.id)) + '</div>' +
+                        '<div style="font-size:.82rem;color:#5b5b66;margin-top:2px">' + (data.email || '—') + ' · ' + (data.phone || '—') + '</div>' +
+                        '</div>' +
+                        '<div style="text-align:center;padding:8px 16px;background:#fff;border-radius:8px;border:1px solid #e5e7eb">' +
+                        '<div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#8b8b96">Điểm hiện tại</div>' +
+                        '<div style="font-size:1.5rem;font-weight:800;color:#d92121;line-height:1.2;margin-top:2px">' + Number(data.points || 0).toLocaleString('vi') + '</div>' +
+                        '</div>' +
+                        '<div style="text-align:center;padding:8px 16px;background:#fff;border-radius:8px;border:1px solid #e5e7eb">' +
+                        '<div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#8b8b96">Hạng</div>' +
+                        '<div style="font-size:1rem;font-weight:700;color:#1c1c24;line-height:1.2;margin-top:2px">' + (data.tier || '—') + '</div>' +
+                        '</div>' +
+                        '</div>';
+                    // Highlight ledger row if this customer is in list
+                    var rows = customersList.querySelectorAll('.ws-customer-row');
+                    rows.forEach(function (r) {
+                        if (String(r.getAttribute('data-customer-id')) === String(data.id)) {
+                            selectCustomer(data, r);
+                        }
+                    });
+                }).catch(function (err) {
+                    quickBtn.disabled = false;
+                    quickBtn.textContent = 'Tra cứu';
+                    quickResult.style.display = 'block';
+                    quickResult.innerHTML = '<div style="padding:12px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;color:#dc2626;font-size:.9rem">' +
+                        'Không tìm thấy khách hàng với thông tin này.' +
+                        '</div>';
+                });
+            }
+
+            quickBtn.addEventListener('click', doQuickLookup);
+            quickEmail.addEventListener('keydown', function (e) { if (e.key === 'Enter') doQuickLookup(); });
+            quickPhone.addEventListener('keydown', function (e) { if (e.key === 'Enter') doQuickLookup(); });
+
+            // ---------- Render list khách hàng ----------
+            function renderCustomers(items) {
+                customersList.replaceChildren();
+                if (!items.length) {
+                    customersList.appendChild(hub.el('div', { class: 'ws-empty', style: 'padding:24px;text-align:center' }, [
+                        hub.el('p', {}, ['Không có khách hàng nào.'])
+                    ]));
+                    return;
+                }
+                items.forEach(function (c) {
+                    var points = Number(c.points || 0);
+                    var row = hub.el('button', {
+                        type: 'button',
+                        class: 'ws-customer-row',
+                        'data-customer-id': c.id,
+                        style: 'display:block;width:100%;text-align:left;padding:12px 14px;border:0;border-bottom:1px solid var(--ws-line);background:#fff;cursor:pointer'
+                    }, [
+                        hub.el('div', { style: 'display:flex;align-items:center;gap:8px;justify-content:space-between' }, [
+                            hub.el('div', { style: 'font-weight:600;color:#1c1c24' }, [c.fullName || ('Khách #' + c.id)]),
+                            hub.el('span', {
+                                style: 'flex-shrink:0;padding:2px 8px;border-radius:999px;background:#fef2f2;color:#d92121;font-size:.78rem;font-weight:700'
+                            }, [points.toLocaleString('vi') + ' điểm'])
+                        ]),
+                        hub.el('div', { style: 'font-size:.82rem;color:#5b5b66;margin-top:2px' }, [
+                            c.email || '—'
+                        ]),
+                        hub.el('div', { style: 'font-size:.82rem;color:#8b8b96;margin-top:2px' }, [
+                            (c.phone || '—') + ' · #' + c.id + (c.tier ? ' · ' + c.tier : '')
+                        ])
+                    ]);
+                    row.addEventListener('mouseenter', function () { row.style.background = '#f7f8fb'; });
+                    row.addEventListener('mouseleave', function () { row.style.background = '#fff'; });
+                    row.addEventListener('click', function () { selectCustomer(c, row); });
+                    customersList.appendChild(row);
+                });
+            }
+
+            function setActiveRow(activeRow) {
+                var rows = customersList.querySelectorAll('.ws-customer-row');
+                rows.forEach(function (r) { r.style.background = '#fff'; r.style.boxShadow = 'none'; });
+                if (activeRow) {
+                    activeRow.style.background = '#eef2ff';
+                    activeRow.style.boxShadow = 'inset 3px 0 0 var(--ws-primary, #d92121)';
+                }
+            }
+
+            function loadCustomers(term) {
+                customersList.replaceChildren(hub.el('div', { class: 'ws-list-loading', style: 'padding:24px;text-align:center' }, [
+                    hub.el('div', { class: 'ws-spinner' })
+                ]));
+                var qs = term && term.trim() ? '?q=' + encodeURIComponent(term.trim()) : '';
+                hub.api('/loyalty/customers' + qs).then(function (data) {
+                    renderCustomers((data && data.items) || []);
+                }).catch(function (err) {
+                    customersList.replaceChildren(hub.el('div', { class: 'ws-flash err', style: 'padding:16px' }, [
+                        (err && err.message) || 'Không tải được danh sách khách hàng.'
+                    ]));
+                });
+            }
+
+            function selectCustomer(c, rowEl) {
+                customerInput.value = c.id;
+                customerBadge.textContent = (c.fullName || ('Khách #' + c.id)) + ' · ' + (c.email || c.phone || '#' + c.id);
+                customerBadge.style.background = '#eef2ff';
+                customerBadge.style.color = '#1c1c24';
+                setActiveRow(rowEl);
+                loadLedger(c.id);
+            }
+
+            function loadLedger(customerId) {
+                if (!customerId) {
+                    tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty', style: 'padding:32px;text-align:center' }, [
+                        hub.el('h3', {}, ['Chọn khách hàng để xem lịch sử']),
+                        hub.el('p', {}, ['Chọn 1 khách từ danh sách bên trái, hoặc tìm bằng email/SĐT.'])
+                    ]));
+                    adjustBtn.disabled = true;
+                    return;
+                }
+                tableWrap.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
+                hub.api('/loyalty/ledger?customerId=' + customerId).then(function (data) {
+                    var items = (data && data.items) || [];
+                    if (!items.length) {
+                        tableWrap.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                            hub.el('h3', {}, ['Chưa có giao dịch điểm']),
+                            hub.el('p', {}, ['Khách hàng chưa phát sinh điểm thưởng.'])
+                        ]));
+                        adjustBtn.disabled = false;
+                        return;
+                    }
+                    var table = hub.el('table', { class: 'ws-table' });
+                    table.innerHTML = '<thead><tr><th>Ngày</th><th>Loại</th><th>Điểm</th><th>Số dư sau</th><th>Lý do</th><th>Nhân viên</th></tr></thead>';
+                    var tbody = hub.el('tbody');
+                    items.forEach(function (e) {
+                        tbody.appendChild(hub.el('tr', {}, [
+                            hub.el('td', {}, [e.createdAt ? hub.fmtDateTime(e.createdAt) : '—']),
+                            hub.el('td', {}, [e.refType || '—']),
+                            hub.el('td', {}, [(e.delta > 0 ? '+' : '') + e.delta]),
+                            hub.el('td', {}, [String(e.balanceAfter || 0)]),
+                            hub.el('td', {}, [e.reason || '—']),
+                            hub.el('td', {}, [e.staffId ? '#' + e.staffId : '—'])
+                        ]));
+                    });
+                    table.appendChild(tbody);
+                    tableWrap.replaceChildren(table);
+                    adjustBtn.disabled = false;
+                }).catch(notifyError);
+            }
+
+            // Debounce search để đỡ spam request khi gõ
+            var debouncedSearch = (function () {
+                var t;
+                return function (val) {
+                    clearTimeout(t);
+                    t = setTimeout(function () { loadCustomers(val); }, 250);
+                };
+            })();
+            searchInput.addEventListener('input', function () { debouncedSearch(searchInput.value); });
+            searchInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); loadCustomers(searchInput.value); }
+            });
+
+            adjustBtn.addEventListener('click', function () {
+                var customerId = customerInput.value;
+                if (!customerId) {
+                    hub.notify('Vui lòng chọn khách hàng trước.', 'warn');
+                    return;
+                }
+                form.renderFormPage({
+                    breadcrumb: ['Vận hành', { label: 'Điểm khách hàng', href: ctx + '/console?module=customer-points' }, 'Điều chỉnh'],
+                    title: 'Điều chỉnh điểm khách hàng',
+                    subtitle: 'Số điểm dương để cộng, số âm để trừ. Mọi điều chỉnh sẽ được ghi log audit.',
+                    submitLabel: 'Điều chỉnh',
+                    sections: [{
+                        title: 'Thông tin điều chỉnh',
+                        fields: [
+                            { name: 'customerId', label: 'ID khách hàng', type: 'number', required: true, value: customerId, min: 1, readonly: true },
+                            { name: 'delta', label: 'Điểm (+ hoặc -)', type: 'number', required: true, step: 1, min: -10000, max: 10000,
+                              customValidate: function (value) {
+                                  return Number.isInteger(Number(value)) ? '' : 'Điểm điều chỉnh phải là số nguyên';
+                              } },
+                            { name: 'reason', label: 'Lý do', type: 'textarea', required: true, rows: 3, minLength: 5, fullWidth: true,
+                              hint: 'Tối thiểu 5 ký tự. Sẽ hiển thị trong lịch sử điểm của khách.' }
+                        ]
+                    }],
+                    onSubmit: function (data) {
+                        hub.api('/loyalty/adjust', { method: 'POST', body: data })
+                            .then(function () {
+                                hub.notify('Đã điều chỉnh điểm.', 'ok');
+                                router.go('customer-points');
+                            })
+                            .catch(notifyError);
+                    },
+                    onCancel: function () { router.go('customer-points'); }
+                });
+            });
+
+            // Vào trang: hiện tất cả khách + ledger trống
+            loadCustomers('');
+            loadLedger(null);
+        }
+    });
+
+    // ================================================================
+    //  REVIEW-BRANCH (Manager: average theo phim, sau đó xem review)
+    // ================================================================
+    router.register('review-branch', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            var page = hub.el('div', { class: 'ws-page' });
+
+            // Page header
+            page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
+                hub.el('span', { class: 'ws-eyebrow' }, ['ĐÁNH GIÁ PHIM CỦA KHÁCH']),
+                hub.el('h1', { class: 'ws-page-title' }, ['Đánh giá phim theo rạp']),
+                hub.el('p', { class: 'ws-page-subtitle' }, [
+                    'Chỉ xem nhận xét và số sao về phim của khách hàng. Khiếu nại dịch vụ rạp được xử lý riêng trong mục Khiếu nại.'
+                ])
+            ]));
+
+            var branchSelect = hub.el('select', {
+                class: 'ws-input',
+                'aria-label': 'Chọn chi nhánh',
+            });
+            branchSelect.appendChild(hub.el('option', { value: '' }, ['— Chọn chi nhánh —']));
+            page.appendChild(hub.el('label', { class: 'ws-label' }, ['Chi nhánh được phân công', branchSelect]));
+            var listWrap = hub.el('div', { class: 'ws-review-movie-grid' });
+            page.appendChild(listWrap);
+            viewRoot.replaceChildren(page);
+
+            function loadBranches() {
+                return hub.api('/api/reviews?branches=true').then(function (branches) {
+                    if (!Array.isArray(branches)) throw new Error('Danh sách chi nhánh không hợp lệ.');
+                    branchSelect.replaceChildren(hub.el('option', { value: '' }, ['— Chọn chi nhánh —']));
+                    branches.forEach(function (b) {
+                        branchSelect.appendChild(hub.el('option', { value: String(b.id) }, [b.name || ('Chi nhánh #' + b.id)]));
+                    });
+                    if (branches.length === 0) {
+                        listWrap.replaceChildren(hub.el('p', { class: 'ws-empty' }, [
+                            'Tài khoản chưa được phân công chi nhánh đang hoạt động.'
+                        ]));
+                    } else if (branches.length === 1) {
+                        branchSelect.value = String(branches[0].id);
+                        loadMovies();
+                    }
+                }).catch(function (error) {
+                    listWrap.replaceChildren(hub.el('p', { class: 'ws-flash err' }, [
+                        error.message || 'Không tải được chi nhánh được phân công.'
+                    ]));
+                });
+            }
+
+            function renderMovies(items) {
+                listWrap.replaceChildren();
+                if (!items.length) {
+                    listWrap.appendChild(hub.el('div', { class: 'ws-empty' }, [
+                        hub.el('h3', {}, ['Chưa có phim đang chiếu tại chi nhánh này']),
+                        hub.el('p', { class: 'ws-muted' }, ['Danh sách chỉ gồm phim có suất chiếu không bị hủy.'])
+                    ]));
+                    return;
+                }
+                items.forEach(function (movie) {
+                    var average = Number(movie.average) || 0;
+                    var count = Number(movie.total) || 0;
+                    var card = hub.el('button', {
+                        class: 'ws-review-movie-card',
+                        type: 'button',
+                        'aria-label': 'Xem đánh giá phim ' + movie.movieTitle
+                    }, [
+                        hub.el('strong', { class: 'ws-review-movie-title' }, [movie.movieTitle || ('Phim #' + movie.movieId)]),
+                        hub.el('span', { class: 'ws-review-movie-average' }, [
+                            hub.el('span', { class: 'ws-stars' }, [starString(average)]),
+                            hub.el('strong', {}, [average.toFixed(1) + '/5'])
+                        ]),
+                        hub.el('span', { class: 'ws-muted' }, [count + ' đánh giá · Xem chi tiết'])
+                    ]);
+                    card.addEventListener('click', function () {
+                        loadMovieReviews(movie.movieId, movie.movieTitle || ('Phim #' + movie.movieId), 0);
+                    });
+                    listWrap.appendChild(card);
+                });
+            }
+
+            function loadMovies() {
+                var branchId = branchSelect.value;
+                if (!branchId) {
+                    listWrap.replaceChildren(hub.el('p', { class: 'ws-muted' }, ['Chọn chi nhánh được phân công.']));
+                    return;
+                }
+                listWrap.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
+                hub.api('/api/reviews?branchId=' + encodeURIComponent(branchId)).then(function (data) {
+                    renderMovies(data.items || []);
+                }).catch(function (err) {
+                    listWrap.replaceChildren(hub.el('p', { class: 'ws-flash err' }, [
+                        err && err.message ? err.message : 'Không tải được danh sách phim.'
+                    ]));
+                });
+            }
+
+            function loadMovieReviews(movieId, movieTitle, offset) {
+                var branchId = branchSelect.value;
+                var pageSize = 50;
+                listWrap.replaceChildren();
+                var backButton = hub.el('button', { class: 'ws-btn ghost', type: 'button' }, ['← Quay lại danh sách phim']);
+                backButton.addEventListener('click', loadMovies);
+                var detail = hub.el('section', { class: 'ws-card ws-review-details' }, [
+                    backButton,
+                    hub.el('h2', {}, [movieTitle]),
+                    hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })])
+                ]);
+                listWrap.appendChild(detail);
+                hub.api('/api/reviews?branchId=' + encodeURIComponent(branchId)
+                    + '&movieId=' + encodeURIComponent(movieId)
+                    + '&offset=' + offset + '&limit=' + pageSize).then(function (data) {
+                    var reviews = data.items || [];
+                    detail.replaceChildren(
+                        backButton,
+                        hub.el('h2', {}, [movieTitle]),
+                        hub.el('p', { class: 'ws-review-movie-average' }, [
+                            hub.el('span', { class: 'ws-stars' }, [starString(Number(data.average) || 0)]),
+                            hub.el('strong', {}, [(Number(data.average) || 0).toFixed(1) + '/5']),
+                            hub.el('span', { class: 'ws-muted' }, [' · ' + (data.total || 0) + ' đánh giá'])
+                        ])
+                    );
+                    if (!reviews.length) {
+                        detail.appendChild(hub.el('p', { class: 'ws-muted' }, ['Phim này chưa có đánh giá.']));
+                        return;
+                    }
+                    var reviewList = hub.el('div', { class: 'ws-review-list' });
+                    reviews.forEach(function (review) {
+                        reviewList.appendChild(hub.el('article', { class: 'ws-review-item' }, [
+                            hub.el('div', { class: 'ws-review-item-header' }, [
+                                hub.el('strong', {}, [review.userFullName || ('Khách #' + review.userId)]),
+                                hub.el('span', { class: 'ws-star-display' }, [starString(review.rating)])
+                            ]),
+                            hub.el('p', { class: 'ws-review-comment' }, [
+                                review.comment || 'Khách chỉ chấm sao, không để lại bình luận.'
+                            ]),
+                            hub.el('small', { class: 'ws-muted' }, [
+                                review.createdAt ? hub.fmtDateTime(review.createdAt) : '—'
+                            ])
+                        ]));
+                    });
+                    detail.appendChild(reviewList);
+                    if (data.total > pageSize) {
+                        var pagination = hub.el('div', { class: 'ws-actions' });
+                        var previous = hub.el('button', { class: 'ws-btn ghost', type: 'button' }, ['Trang trước']);
+                        var next = hub.el('button', { class: 'ws-btn ghost', type: 'button' }, ['Trang tiếp']);
+                        previous.disabled = offset === 0;
+                        next.disabled = offset + pageSize >= data.total;
+                        previous.addEventListener('click', function () {
+                            loadMovieReviews(movieId, movieTitle, Math.max(0, offset - pageSize));
+                        });
+                        next.addEventListener('click', function () {
+                            loadMovieReviews(movieId, movieTitle, offset + pageSize);
+                        });
+                        pagination.append(previous, next);
+                        detail.appendChild(pagination);
+                    }
+                }).catch(function (error) {
+                    detail.replaceChildren(backButton, hub.el('p', { class: 'ws-flash err' }, [
+                        error.message || 'Không tải được danh sách đánh giá.'
+                    ]));
+                });
+            }
+
+            branchSelect.addEventListener('change', loadMovies);
+            loadBranches();
+        }
+    });
+
+    // ================================================================
+    //  CONCESSION-PICKUP (QR scan)
+    // ================================================================
+    router.register('concession-pickup', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            var page = hub.el('div', { class: 'ws-page' });
+            page.appendChild(hub.el('div', { class: 'ws-page-header' }, [
+                hub.el('h1', { class: 'ws-page-title' }, ['Quét mã F&B']),
+                hub.el('p', {                 class: 'ws-page-subtitle' }, ['Nhập mã nhận hàng để tra cứu; kiểm tra đơn rồi xác nhận đã giao cho khách.'])
+            ]));
+            var card = hub.el('div', { class: 'ws-card', style: 'padding:24px;max-width:540px' });
+            card.appendChild(hub.el('label', { style: 'display:block;margin-bottom:6px;font-weight:600' }, ['Mã nhận hàng']));
+            var codeInput = hub.el('input', {
+                type: 'text', placeholder: 'PCK-XXXXX',
+                style: 'width:100%;padding:12px;border:1px solid var(--ws-line);border-radius:8px;font-size:1rem;font-family:monospace;text-transform:uppercase'
+            });
+            card.appendChild(codeInput);
+            var scanBtn = hub.el('button', { class: 'ws-btn primary', type: 'button', style: 'margin-top:12px;width:100%' }, ['Tra cứu']);
+            card.appendChild(scanBtn);
+            var result = hub.el('div', { style: 'margin-top:20px' });
+            card.appendChild(result);
+            page.appendChild(card);
+            viewRoot.replaceChildren(page);
+
+            var lookupFn = function () {
+                var code = codeInput.value.trim();
+                if (!code) {
+                    hub.notify('Vui lòng nhập mã nhận hàng hoặc mã đơn!', 'warn');
+                    codeInput.focus();
+                    return;
+                }
+                result.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
+                hub.api('/concession/scan', { method: 'POST', body: { code: code.toUpperCase() } }).then(function (data) {
+                    if (!data.canRedeem) {
+                        result.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                            hub.el('h3', {}, ['Không thể giao đơn này']),
+                            hub.el('p', {}, [data.message || 'Đơn không ở trạng thái sẵn sàng nhận.'])
+                        ]));
+                        return;
+                    }
+                    var box = hub.el('div', { class: 'ws-card', style: 'padding:20px' });
+                    box.appendChild(hub.el('h3', {}, ['✓ Sẵn sàng giao hàng']));
+                    var grid = hub.el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px' });
+                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['Mã đơn:']), ' ', data.orderCode || '—']));
+                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['Khách:']), ' ', data.customerName || '—']));
+                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['Tổng tiền:']), ' ', hub.fmtMoney(data.totalAmount)]));
+                    grid.appendChild(hub.el('div', {}, [hub.el('strong', {}, ['Chi nhánh:']), ' ', data.branchId || '—']));
+                    box.appendChild(grid);
+                    var lines = (data.lines || []).map(function (l) {
+                        return hub.el('div', { style: 'padding:6px 0;border-bottom:1px solid var(--ws-line)' },
+                            [l.productName + ' ×' + l.qty + '  ', hub.el('strong', {}, [hub.fmtMoney(l.subtotal)])]);
+                    });
+                    if (lines.length) {
+                        box.appendChild(hub.el('h4', { style: 'margin-top:16px' }, ['Sản phẩm']));
+                        lines.forEach(function (l) { box.appendChild(l); });
+                    }
+                    var confirmBtn = hub.el('button', { class: 'ws-btn primary', type: 'button', style: 'margin-top:16px;width:100%' }, ['✓ Xác nhận đã giao cho khách']);
+                    confirmBtn.addEventListener('click', function () {
+                        confirmBtn.disabled = true;
+                        confirmBtn.textContent = 'Đang xử lý giao hàng...';
+                        hub.api('/concession/redeem', { method: 'POST', body: { orderId: data.orderId } })
+                            .then(function () {
+                                hub.notify('Giao đơn hàng thành công!', 'ok');
+                                result.replaceChildren();
+                                codeInput.value = '';
+                                codeInput.focus();
+                            })
+                            .catch(function (err) {
+                                confirmBtn.disabled = false;
+                                confirmBtn.textContent = '✓ Xác nhận đã giao cho khách';
+                                notifyError(err);
+                            });
+                    });
+                    box.appendChild(confirmBtn);
+                    result.replaceChildren(box);
+                }).catch(function (e) {
+                    result.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                        hub.el('h3', {}, ['Không tìm thấy đơn']),
+                        hub.el('p', {}, [e.message || 'Vui lòng kiểm tra lại mã.'])
+                    ]));
+                });
+            };
+            scanBtn.addEventListener('click', lookupFn);
+            codeInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') lookupFn(); });
+            codeInput.focus();
+        }
+    });
+
+    // ================================================================
+    //  PROFILE (Customer account)
+    // ================================================================
+    router.register('profile', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            var page = hub.el('div', { class: 'ws-page' });
+            var header = hub.el('div', { class: 'ws-page-header' }, [
+                hub.el('h1', { class: 'ws-page-title' }, ['Hồ sơ cá nhân']),
+                hub.el('p', { class: 'ws-page-subtitle' }, ['Quản lý thông tin tài khoản, hạng thành viên và yêu cầu hoàn tiền.'])
+            ]);
+            var content = hub.el('div', { class: 'ws-card' });
+            content.appendChild(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
+            page.appendChild(header);
+            page.appendChild(content);
+            viewRoot.replaceChildren(page);
+
+            hub.api('/api/profile').then(function (data) {
+                if (!data || !data.user || !data.profile
+                        || typeof data.profile.tier !== 'string'
+                        || !Number.isFinite(data.profile.points)) {
+                    throw new Error('Dữ liệu hồ sơ không hợp lệ.');
+                }
+                var user = data.user;
+                var membership = data.profile;
+                var form = hub.el('form', { class: 'ws-form' });
+                var fields = hub.el('div', { class: 'ws-form-grid' });
+                var fullName = hub.el('input', {
+                    type: 'text', name: 'fullName', required: 'required',
+                    value: user.fullName || '', maxlength: '120'
+                });
+                var phone = hub.el('input', {
+                    type: 'tel', name: 'phone', value: user.phone || '', maxlength: '30'
+                });
+                fields.appendChild(hub.el('label', {}, ['Họ và tên', fullName]));
+                fields.appendChild(hub.el('label', {}, ['Số điện thoại', phone]));
+                fields.appendChild(hub.el('label', {}, ['Email', hub.el('input', {
+                    type: 'email', value: user.email || '', disabled: 'disabled'
+                })]));
+                fields.appendChild(hub.el('label', {}, ['Vai trò', hub.el('input', {
+                    type: 'text', value: user.role || 'CUSTOMER', disabled: 'disabled'
+                })]));
+                form.appendChild(fields);
+                form.appendChild(hub.el('div', { class: 'ws-form-actions' }, [
+                    hub.el('button', { class: 'ws-btn primary', type: 'submit' }, ['Lưu thay đổi'])
+                ]));
+
+                var summary = hub.el('div', { class: 'kpi-grid', style: 'margin-top:20px' }, [
+                    hub.el('div', { class: 'kpi' }, [
+                        hub.el('span', {}, ['Hạng thành viên']),
+                        hub.el('strong', {}, [membership.tier])
+                    ]),
+                    hub.el('div', { class: 'kpi' }, [
+                        hub.el('span', {}, ['Điểm tích lũy']),
+                        hub.el('strong', {}, [String(membership.points)])
+                    ])
+                ]);
+                var tierProgress = hub.el('section', { class: 'profile-tier-progress' });
+                var progressStart = Number(membership.tierProgressStartPoints || 0);
+                var nextTierThreshold = Number(membership.nextTierMinPoints);
+                var hasNextTier = typeof membership.nextTier === 'string'
+                    && Number.isFinite(nextTierThreshold)
+                    && nextTierThreshold > progressStart;
+                var progressTitle = hub.el('h2', {}, ['Tiến độ hạng thành viên']);
+                tierProgress.appendChild(progressTitle);
+                if (hasNextTier) {
+                    var pointsToNext = Math.max(0, nextTierThreshold - membership.points);
+                    var progressPercent = Math.max(0, Math.min(100,
+                        ((membership.points - progressStart) / (nextTierThreshold - progressStart)) * 100));
+                    tierProgress.appendChild(hub.el('div', { class: 'profile-tier-progress-labels' }, [
+                        hub.el('strong', {}, [membership.tier]),
+                        hub.el('span', {}, ['Hạng tiếp theo: ' + membership.nextTier])
+                    ]));
+                    tierProgress.appendChild(hub.el('div', {
+                        class: 'profile-tier-progress-track',
+                        role: 'progressbar',
+                        'aria-label': 'Tiến độ lên hạng ' + membership.nextTier,
+                        'aria-valuemin': '0',
+                        'aria-valuemax': '100',
+                        'aria-valuenow': String(Math.round(progressPercent))
+                    }, [
+                        hub.el('span', { style: 'width:' + progressPercent + '%' })
+                    ]));
+                    tierProgress.appendChild(hub.el('p', { class: 'profile-tier-progress-note' }, [
+                        'Còn ' + pointsToNext.toLocaleString('vi-VN') + ' điểm để đạt hạng '
+                            + membership.nextTier + ' (' + nextTierThreshold.toLocaleString('vi-VN')
+                            + ' điểm).'
+                    ]));
+                    tierProgress.appendChild(hub.el('p', { class: 'profile-tier-progress-footnote' }, [
+                        'Điểm được cộng sau khi giao dịch đủ điều kiện thanh toán thành công.'
+                    ]));
+                } else if (membership.tierProgressAvailable) {
+                    tierProgress.appendChild(hub.el('p', { class: 'profile-tier-progress-note is-max-tier' }, [
+                        'Bạn đã đạt hạng thành viên cao nhất hiện tại.'
+                    ]));
+                    tierProgress.appendChild(hub.el('p', { class: 'profile-tier-progress-footnote' }, [
+                        'Điểm vẫn được cộng sau khi giao dịch đủ điều kiện thanh toán thành công.'
+                    ]));
+                } else {
+                    tierProgress.appendChild(hub.el('p', { class: 'profile-tier-progress-note' }, [
+                        'Chưa có cấu hình hạng thành viên để tính tiến độ.'
+                    ]));
+                }
+                // Ví CinemaHub đã được gỡ — thay bằng điều hướng sang trang vé (chứa nút hoàn tiền).
+                var refundKpi = hub.el('div', { class: 'kpi' }, [
+                    hub.el('span', {}, ['Yêu cầu hoàn tiền']),
+                    hub.el('strong', {}, [hub.el('a', {
+                        href: ctx + '/console?module=my-tickets',
+                        class: 'ws-link'
+                    }, ['Vào vé của tôi →'])])
+                ]);
+                summary.appendChild(refundKpi);
+
+                form.addEventListener('submit', function (event) {
+                    event.preventDefault();
+                    var submit = form.querySelector('button[type="submit"]');
+                    submit.disabled = true;
+                    hub.api('/api/profile', {
+                        method: 'POST',
+                        body: { fullName: fullName.value.trim(), phone: phone.value.trim() }
+                    }).then(function (updated) {
+                        var updatedUser = updated && updated.user ? updated.user : {};
+                        fullName.value = updatedUser.fullName || fullName.value;
+                        phone.value = updatedUser.phone || '';
+                        hub.notify('Đã cập nhật hồ sơ.', 'ok');
+                    }).catch(notifyError).then(function () {
+                        submit.disabled = false;
+                    });
+                });
+
+                var savedBankAccount = data.bankAccount || {};
+                var bankForm = hub.el('form', { class: 'ws-form profile-bank-form' });
+                var bankFields = hub.el('div', { class: 'ws-form-grid' });
+                var bankName = hub.el('input', {
+                    type: 'text', name: 'bankName', maxlength: '120',
+                    value: savedBankAccount.bankName || ''
+                });
+                var bankAccountName = hub.el('input', {
+                    type: 'text', name: 'bankAccountName', maxlength: '120',
+                    value: savedBankAccount.bankAccountName || ''
+                });
+                var bankAccountNumber = hub.el('input', {
+                    type: 'text', name: 'bankAccountNumber', maxlength: '40',
+                    inputmode: 'numeric', pattern: '[0-9]{6,40}',
+                    value: savedBankAccount.bankAccountNumber || ''
+                });
+                bankFields.appendChild(hub.el('label', {}, ['Tên ngân hàng', bankName]));
+                bankFields.appendChild(hub.el('label', {}, ['Chủ tài khoản', bankAccountName]));
+                bankFields.appendChild(hub.el('label', {}, ['Số tài khoản', bankAccountNumber]));
+                bankForm.appendChild(bankFields);
+                bankForm.appendChild(hub.el('p', { class: 'ws-help' }, [
+                    'Lưu một tài khoản nhận hoàn tiền. Để xoá, hãy xoá cả ba trường rồi lưu.'
+                ]));
+                bankForm.appendChild(hub.el('div', { class: 'ws-form-actions' }, [
+                    hub.el('button', { class: 'ws-btn primary', type: 'submit' },
+                        ['Lưu tài khoản nhận hoàn'])
+                ]));
+                bankForm.addEventListener('submit', function (event) {
+                    event.preventDefault();
+                    var submit = bankForm.querySelector('button[type="submit"]');
+                    submit.disabled = true;
+                    hub.api('/api/profile', {
+                        method: 'POST',
+                        body: {
+                            bankName: bankName.value.trim(),
+                            bankAccountName: bankAccountName.value.trim(),
+                            bankAccountNumber: bankAccountNumber.value.trim()
+                        }
+                    }).then(function (updated) {
+                        var saved = updated && updated.bankAccount ? updated.bankAccount : {};
+                        bankName.value = saved.bankName || '';
+                        bankAccountName.value = saved.bankAccountName || '';
+                        bankAccountNumber.value = saved.bankAccountNumber || '';
+                        hub.notify('Đã lưu tài khoản nhận hoàn.', 'ok');
+                    }).catch(notifyError).then(function () {
+                        submit.disabled = false;
+                    });
+                });
+                var bankSection = hub.el('section', { class: 'profile-bank-section' }, [
+                    hub.el('h2', {}, ['Tài khoản ngân hàng nhận hoàn']),
+                    hub.el('p', { class: 'muted' }, [
+                        'Bạn có thể chọn tài khoản này hoặc nhập tài khoản khác khi gửi yêu cầu hoàn tiền.'
+                    ]),
+                    bankForm
+                ]);
+                content.replaceChildren(form, bankSection, summary, tierProgress);
+            }).catch(function (error) {
+                content.replaceChildren(hub.el('div', { class: 'ws-empty' }, [
+                    hub.el('h3', {}, ['Không tải được hồ sơ']),
+                    hub.el('p', {}, [error.message || 'Vui lòng thử lại.'])
+                ]));
+            });
+        }
+    });
+
+
+    // ============================================================
+    // Historical allocation records remain readable; they no longer limit showtime creation.
+    // ============================================================
+    router.register('showtime-allocation', {
+        list: function () {
+            var viewRoot = document.getElementById('viewRoot');
+            if (!viewRoot) return;
+            if (typeof hub.setWorkspaceHeader === 'function') {
+                hub.setWorkspaceHeader('Lịch phân bổ cũ');
+            }
+            viewRoot.replaceChildren();
+
+            Promise.all([
+                hub.api('/branch'),
+                hub.api('/movie')
+            ]).then(function (results) {
+                var branches = results[0] || [];
+                var movies = results[1] || [];
+                var branchNames = new Map(branches.map(function (branch) {
+                    return [String(branch.id), branch.name];
+                }));
+                var movieNames = new Map(movies.map(function (movie) {
+                    return [String(movie.id), movie.title];
+                }));
+                var moviesById = new Map(movies.map(function (movie) {
+                    return [String(movie.id), movie];
+                }));
+                var roleMeta = document.querySelector('meta[name="user-role"]');
+                var userRole = roleMeta ? roleMeta.content : '';
+                var isAdmin = userRole === 'ADMIN';
+
+                var header = hub.el('div', { class: 'ws-page-header' }, [
+                    hub.el('div', {}, [
+                        hub.el('h1', {}, ['Lịch phân bổ cũ']),
+                        hub.el('p', { class: 'ws-tone-muted' }, [
+                            'Hạn mức phân bổ đã ngừng áp dụng. Branch Manager tự tạo lịch chiếu, ',
+                            'không bị giới hạn bởi số lượng phân bổ trước đây.'
+                        ])
+                    ])
+                ]);
+                viewRoot.appendChild(header);
+
+                // Filter bar
+                var filterWrap = hub.el('div', { class: 'ws-card', style: 'margin-bottom:12px' });
+                var filterRow = hub.el('div', { class: 'ws-form-row' });
+                var statusSelect = hub.el('select', { class: 'ws-input' }, [
+                    hub.el('option', { value: '' }, ['-- Tất cả trạng thái --']),
+                    hub.el('option', { value: 'PENDING' }, ['PENDING (chờ)']),
+                    hub.el('option', { value: 'IN_PROGRESS' }, ['IN_PROGRESS (đang làm)']),
+                    hub.el('option', { value: 'COMPLETED' }, ['COMPLETED (đủ)']),
+                    hub.el('option', { value: 'OVER_ALLOCATED' }, ['OVER_ALLOCATED (vượt)'])
+                ]);
+                var branchSelect = hub.el('select', { class: 'ws-input' });
+                branchSelect.appendChild(hub.el('option', { value: '' }, ['-- Tất cả chi nhánh --']));
+                branches.forEach(function (b) {
+                    branchSelect.appendChild(hub.el('option', { value: String(b.id) }, [b.name]));
+                });
+                var movieSelect = hub.el('select', { class: 'ws-input' });
+                movieSelect.appendChild(hub.el('option', { value: '' }, ['-- Tất cả phim --']));
+                movies.forEach(function (m) {
+                    movieSelect.appendChild(hub.el('option', { value: String(m.id) }, [m.title]));
+                });
+                var queryParams = new URLSearchParams(window.location.search);
+                var requestedBranch = queryParams.get('branchId');
+                var requestedMovie = queryParams.get('movieId');
+                if (/^\d+$/.test(requestedBranch || '')
+                        && branches.some(function (branch) {
+                            return String(branch.id) === requestedBranch;
+                        })) {
+                    branchSelect.value = requestedBranch;
+                }
+                if (/^\d+$/.test(requestedMovie || '')
+                        && movies.some(function (movie) {
+                            return String(movie.id) === requestedMovie;
+                        })) {
+                    movieSelect.value = requestedMovie;
+                }
+                if (!isAdmin) {
+                    branchSelect.disabled = true;
+                }
+                filterRow.appendChild(hub.el('div', { class: 'ws-form-col' }, [
+                    hub.el('label', {}, ['Trạng thái']), statusSelect
+                ]));
+                filterRow.appendChild(hub.el('div', { class: 'ws-form-col' }, [
+                    hub.el('label', {}, ['Chi nhánh']), branchSelect
+                ]));
+                filterRow.appendChild(hub.el('div', { class: 'ws-form-col' }, [
+                    hub.el('label', {}, ['Phim']), movieSelect
+                ]));
+                filterWrap.appendChild(filterRow);
+                viewRoot.appendChild(filterWrap);
+
+                var listCard = hub.el('article', { class: 'ws-card' });
+                listCard.appendChild(hub.el('h2', {}, ['Danh sách phân bổ']));
+                var listWrap = hub.el('div', {});
+                listCard.appendChild(listWrap);
+                viewRoot.appendChild(listCard);
+
+                function buildQuery() {
+                    var qs = new URLSearchParams();
+                    if (statusSelect.value) qs.append('status', statusSelect.value);
+                    if (branchSelect.value) qs.append('branchId', branchSelect.value);
+                    if (movieSelect.value) qs.append('movieId', movieSelect.value);
+                    return qs.toString();
+                }
+
+                function load() {
+                    var qs = buildQuery();
+                    var path = '/api/showtime-allocations' + (qs ? '?' + qs : '');
+                    hub.api(path).then(function (resp) {
+                        var data = resp && resp.data ? resp.data : resp;
+                        var items = (data && data.items) || [];
+                        listWrap.replaceChildren();
+                        if (!items.length) {
+                            listWrap.appendChild(hub.el('div', { class: 'ws-empty' }, [
+                                hub.el('p', {}, ['Chưa có phân bổ nào.'])
+                            ]));
+                            return;
+                        }
+                        var table = hub.el('table', { class: 'ws-table' });
+                        var thead = hub.el('thead', {}, [hub.el('tr', {}, [
+                            hub.el('th', {}, ['Phim']),
+                            hub.el('th', {}, ['Chi nhánh']),
+                            hub.el('th', {}, ['Giới hạn cũ']),
+                            hub.el('th', {}, ['Đã tạo']),
+                            hub.el('th', {}, ['Còn thiếu (tham khảo)']),
+                            hub.el('th', {}, ['Trạng thái']),
+                            hub.el('th', {}, ['Ngày phân bổ']),
+                            hub.el('th', {}, ['Thao tác'])
+                        ])]);
+                        table.appendChild(thead);
+                        var tbody = hub.el('tbody');
+                        items.forEach(function (a) {
+                            var row = hub.el('tr');
+                            var remaining = a.remainingQuantity;
+                            var remainingCell = remaining > 0
+                                ? hub.el('span', { class: 'ws-tone-warn' }, [String(remaining)])
+                                : remaining < 0
+                                    ? hub.el('span', { class: 'ws-tone-danger' },
+                                        [(remaining) + ' (vượt)'])
+                                    : hub.el('span', { class: 'ws-tone-ok' }, ['0']);
+                            row.appendChild(hub.el('td', {}, [
+                                a.movieTitle || movieNames.get(String(a.movieId)) || '—'
+                            ]));
+                            row.appendChild(hub.el('td', {}, [
+                                a.branchName || branchNames.get(String(a.branchId)) || '—'
+                            ]));
+                            row.appendChild(hub.el('td', {}, [String(a.allocatedQuantity)]));
+                            row.appendChild(hub.el('td', {}, [String(a.createdQuantity)]));
+                            row.appendChild(hub.el('td', {}, [remainingCell]));
+                            row.appendChild(hub.el('td', {}, [statusBadge(a.status)]));
+                            row.appendChild(hub.el('td', {}, [a.allocatedAt
+                                ? hub.fmtDateTime(a.allocatedAt) : '—']));
+                            var actions = hub.el('div', { class: 'ws-action-group' });
+                            if (!isAdmin) {
+                                var movie = moviesById.get(String(a.movieId));
+                                var createShowtimeUrl = ctx + '/console?module=showtime&action=create'
+                                    + '&movieId=' + encodeURIComponent(a.movieId)
+                                    + '&branchId=' + encodeURIComponent(a.branchId);
+                                if (movie && movie.releaseDate) {
+                                    createShowtimeUrl += '&releaseDate='
+                                        + encodeURIComponent(dateValue(movie.releaseDate));
+                                }
+                                actions.appendChild(hub.el('a', {
+                                    class: 'ws-btn primary small',
+                                    href: createShowtimeUrl
+                                }, ['+ Tạo suất chiếu']));
+                            }
+                            row.appendChild(hub.el('td', {}, [actions]));
+                            tbody.appendChild(row);
+                        });
+                        table.appendChild(tbody);
+                        listWrap.appendChild(table);
+                    }).catch(notifyError);
+                }
+
+                [statusSelect, branchSelect, movieSelect].forEach(function (el) {
+                    el.addEventListener('change', load);
+                });
+
+                load();
+            }).catch(notifyError);
         }
     });
 

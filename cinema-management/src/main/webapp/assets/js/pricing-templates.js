@@ -1,5 +1,13 @@
 /**
  * Reusable ticket-price template library and movie-form picker.
+ *
+ * <p>Pattern mirror: renderMovieForm trong modules-form-pages.js — dùng
+ * {@code form.renderFormPage} (form-page.js) với cấu trúc sections + fields
+ * + onSubmit/onCancel. Phần nhập ma trận 27 khung giá cơ bản + khung giá bổ
+ * sung được nhúng qua {@code renderFooter} (tương tự poster uploader của
+ * movie form). Validation và audit đồng bộ với backend
+ * {@code PriceTemplateService} / {@code PriceTemplate} model (mirror
+ * {@code MovieService} / {@code Movie}).</p>
  */
 (function () {
     'use strict';

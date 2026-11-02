@@ -13,7 +13,6 @@
  *       subtitle: 'CRUD tài khoản nội bộ',
  *       fetcher: async (params) => ({ items: [...], total: N }),
  *       columns: [
- *           { label: 'ID', key: 'id' },
  *           { label: 'Email', key: 'email' },
  *           { label: 'Trạng thái', render: (r) => hub.statusBadge(r.status) }
  *       ],
@@ -26,7 +25,7 @@
  *       ],
  *       searchable: true,
  *       pageSize: 20,
- *       addUrl: '/console?module=users&action=create',
+ *       addUrl: '/console?module=users&action=create' // or a function returning a URL
  *       addLabel: 'Tạo người dùng'
  *   });
  */
@@ -50,6 +49,10 @@
             clearTimeout(t);
             t = setTimeout(fn, ms);
         };
+    }
+
+    function resolveAddUrl(opts) {
+        return typeof opts.addUrl === 'function' ? opts.addUrl() : opts.addUrl;
     }
 
     function buildToolbar(opts) {
@@ -114,9 +117,19 @@
         }
         if (opts.addUrl) {
             const link = el('a', {
-                href: opts.addUrl,
+                href: resolveAddUrl(opts),
                 class: 'ws-btn primary'
             }, ['+ ' + (opts.addLabel || 'Thêm mới')]);
+            if (typeof opts.addUrl === 'function') {
+                link.addEventListener('click', event => {
+                    const href = resolveAddUrl(opts);
+                    if (!href) {
+                        event.preventDefault();
+                        return;
+                    }
+                    link.href = href;
+                });
+            }
             right.appendChild(link);
         }
         bar.appendChild(right);
@@ -214,8 +227,9 @@
         }));
         wrap.appendChild(el('h3', {}, [opts.emptyTitle || 'Chưa có dữ liệu']));
         wrap.appendChild(el('p', {}, [opts.emptyMessage || 'Danh sách đang trống. Hãy thêm mới để bắt đầu.']));
-        if (opts.addUrl && opts.addLabel) {
-            wrap.appendChild(el('a', { href: opts.addUrl, class: 'ws-btn primary' }, ['+ ' + opts.addLabel]));
+        const addUrl = resolveAddUrl(opts);
+        if (addUrl && opts.addLabel) {
+            wrap.appendChild(el('a', { href: addUrl, class: 'ws-btn primary' }, ['+ ' + opts.addLabel]));
         }
         return wrap;
     }
@@ -286,8 +300,8 @@
         return wrap;
     }
 
-    function render(opts) {
-        const viewRoot = document.getElementById('viewRoot');
+    function render(opts, target) {
+        const viewRoot = target || document.getElementById('viewRoot');
         if (!viewRoot) return;
 
         // Đồng bộ topbar `<h1>` + `<title>` với title của list — fix trường hợp
@@ -327,6 +341,19 @@
         page.appendChild(paginationRegion);
 
         viewRoot.replaceChildren(page);
+        if (typeof opts.addUrl === 'function') {
+            const addLink = toolbar.querySelector('.ws-list-toolbar-right a.ws-btn.primary');
+            if (addLink) {
+                const updateAddLink = () => {
+                    const href = resolveAddUrl(opts);
+                    if (href) addLink.href = href;
+                };
+                updateAddLink();
+                toolbar.querySelectorAll('select').forEach(select => {
+                    select.addEventListener('change', updateAddLink);
+                });
+            }
+        }
 
         function reload() {
             // Show loading
