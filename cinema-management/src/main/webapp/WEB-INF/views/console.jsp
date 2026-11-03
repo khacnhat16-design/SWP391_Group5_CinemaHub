@@ -29,6 +29,7 @@
             <title><c:out value="${pageTitle}"/> | Khu vực quản lý CinemaHub</title>
             <link rel="stylesheet" href="${ctx}/assets/css/cinema.css">
             <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261004-branch-pricing-templates-1">
+            <link rel="stylesheet" href="${ctx}/assets/css/rsc.css?v=20261012-review-ui-2">
         </head>
         <body class="workspace-page">
             <%@ include file="/WEB-INF/views/layout/workspace-sidebar.jsp" %>
@@ -44,6 +45,7 @@
             <script src="${ctx}/assets/js/form-page.js?v=20261004-movie-author-validation-1" defer></script>
             <script src="${ctx}/assets/js/modules-form-pages.js?v=20261004-movie-author-validation-1" defer></script>
             <script src="${ctx}/assets/js/console.js?v=20261004-sidebar-active-1" defer></script>
+            <script src="${ctx}/assets/js/modules-rsc.js?v=20261012-review-delete-2" defer></script>
         </body>
         </html>
     </c:when>
@@ -107,6 +109,7 @@
                 <script src="${ctx}/assets/js/form-page.js?v=20261004-movie-author-validation-1" defer></script>
                 <script src="${ctx}/assets/js/modules-form-pages.js?v=20261004-movie-author-validation-1" defer></script>
                 <script src="${ctx}/assets/js/console.js?v=20261004-sidebar-active-1" defer></script>
+                <script src="${ctx}/assets/js/modules-rsc.js?v=20261012-review-delete-2" defer></script>
                 <%@ include file="/WEB-INF/views/layout/footer.jsp" %>
             </c:otherwise>
         </c:choose>

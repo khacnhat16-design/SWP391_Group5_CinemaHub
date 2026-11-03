@@ -1,11 +1,21 @@
 /**
- * modules-rsc.js — Review renderers for ?module=.
+ * modules-rsc.js — Reviews / Support / Complaints renderers for ?module=.
  *
  * Hooks:
- *   CinemaHubPages.reviews
+ *   CinemaHubPages.support      (Customer)
+ *   CinemaHubPages['support-inbox'] (Manager)
+ *   CinemaHubPages.complaints  (Customer own list + Manager inbox based on role)
  *
  * Backed by REST:
  *   /api/reviews?movieId=
+ *   /api/support-requests/mine
+ *   /api/support-requests       (Manager)
+ *   /api/support-requests/{id}/reply
+ *   /api/support-requests/{id}/close
+ *   /api/complaints/mine
+ *   /api/complaints              (Manager)
+ *   /api/complaints/{id}/reply
+ *   /api/complaints/{id}/status
  */(function () {
     'use strict';
 
@@ -78,6 +88,21 @@
         });
     }
 
+    function statusBadge(s) {
+        var map = {
+            'OPEN': 'badge-open', 'IN_PROGRESS': 'badge-progress',
+            'ANSWERED': 'badge-success', 'CLOSED': 'badge-muted',
+            'NEW': 'badge-new', 'RESOLVED': 'badge-success', 'REJECTED': 'badge-danger'
+        };
+        var labels = {
+            'OPEN': 'Mới tiếp nhận', 'IN_PROGRESS': 'Đang xử lý',
+            'ANSWERED': 'Đã phản hồi', 'CLOSED': 'Đã đóng',
+            'NEW': 'Mới tiếp nhận', 'RESOLVED': 'Đã giải quyết', 'REJECTED': 'Đã từ chối'
+        };
+        var cls = map[s] || 'badge-muted';
+        return el('span', { class: 'ws-badge ' + cls }, [labels[s] || s]);
+    }
+
     function starString(rating) {
         var full = Math.floor(rating);
         var half = (rating - full) >= 0.5 ? 1 : 0;
@@ -147,7 +172,430 @@
         return host;
     }
 
-    // ======================== MOVIE REVIEWS ========================
+    // ======================== SUPPORT (Customer) ========================
+    function moduleSupport() {
+        var view = el('div', { class: 'ws-page' }, [
+            el('div', { class: 'ws-page-header' }, [
+                el('div', {}, [
+                    el('span', { class: 'ws-eyebrow' }, ['YÊU CẦU HỖ TRỢ']),
+                    el('h2', {}, ['Gửi yêu cầu hỗ trợ']),
+                    el('p', { class: 'ws-muted' }, ['Đặt câu hỏi hoặc yêu cầu hỗ trợ. Manager sẽ phản hồi qua trang này.'])
+                ])
+            ])
+        ]);
+        var listContainer = el('div', { id: 'support-list', class: 'ws-list' });
+
+        // Form
+        var subjectInput = el('input', { type: 'text', class: 'ws-input', placeholder: 'Tiêu đề (tối đa 150 ký tự)', maxlength: '150' });
+        var messageInput = el('textarea', { class: 'ws-textarea', rows: '4', placeholder: 'Mô tả chi tiết (tối đa 2000 ký tự)', maxlength: '2000' });
+        var submitBtn = el('button', { class: 'ws-btn primary', type: 'button' }, ['Gửi yêu cầu']);
+        var msg = el('div', { class: 'ws-flash', hidden: true });
+
+        submitBtn.addEventListener('click', function () {
+            var subject = subjectInput.value.trim();
+            var message = messageInput.value.trim();
+            if (!subject || !message) {
+                msg.hidden = false;
+                msg.textContent = 'Vui lòng nhập đầy đủ tiêu đề và nội dung';
+                msg.className = 'ws-flash err';
+                return;
+            }
+            api('/api/support-requests', {
+                method: 'POST',
+                body: { subject: subject, message: message }
+            }).then(function (r) {
+                if (r.status === 200 && r.data) {
+                    msg.hidden = false;
+                    msg.textContent = 'Đã gửi yêu cầu. Mã #' + r.data.id;
+                    msg.className = 'ws-flash ok';
+                    subjectInput.value = '';
+                    messageInput.value = '';
+                    load();
+                } else {
+                    msg.hidden = false;
+                    msg.textContent = (r.data && r.data.message) || 'Gửi thất bại';
+                    msg.className = 'ws-flash err';
+                }
+            });
+        });
+
+        var formCard = el('section', { class: 'ws-card' }, [
+            el('h3', {}, ['Tạo yêu cầu mới']),
+            el('label', { class: 'ws-label' }, ['Tiêu đề', subjectInput]),
+            el('label', { class: 'ws-label' }, ['Nội dung', messageInput]),
+            el('div', { class: 'ws-actions' }, [submitBtn]),
+            msg
+        ]);
+
+        function load() {
+            api('/api/support-requests/mine').then(function (r) {
+                listContainer.replaceChildren();
+                if (r.status !== 200 || !r.data || !r.data.items || r.data.items.length === 0) {
+                    listContainer.appendChild(el('p', { class: 'ws-muted' }, ['Bạn chưa có yêu cầu hỗ trợ nào.']));
+                    return;
+                }
+                r.data.items.forEach(function (it) {
+                    var card = el('article', { class: 'ws-card' }, [
+                        el('div', { class: 'ws-card-header' }, [
+                            el('strong', {}, [it.subject]),
+                            statusBadge(it.status)
+                        ]),
+                        el('div', { class: 'ws-muted small' }, ['Gửi lúc: ' + formatDate(it.createdAt)]),
+                        el('p', {}, [it.message]),
+                        it.managerReply ? el('div', { class: 'ws-callout' }, [
+                            el('strong', {}, ['Phản hồi từ Manager']),
+                            el('p', {}, [it.managerReply]),
+                            el('small', { class: 'ws-muted' }, [formatDate(it.repliedAt)])
+                        ]) : null
+                    ]);
+                    listContainer.appendChild(card);
+                });
+            });
+        }
+
+        view.appendChild(formCard);
+        view.appendChild(el('h3', {}, ['Yêu cầu của tôi']));
+        view.appendChild(listContainer);
+        load();
+        return view;
+    }
+
+    // ======================== SUPPORT INBOX (Manager) ========================
+    function moduleSupportInbox() {
+        var view = el('div', { class: 'ws-page' }, [
+            el('div', { class: 'ws-page-header' }, [
+                el('span', { class: 'ws-eyebrow' }, ['QUẢN LÝ HỖ TRỢ']),
+                el('h2', {}, ['Hộp thư hỗ trợ'])
+            ])
+        ]);
+        var listContainer = el('div', { id: 'support-inbox-list' });
+
+        var filterSelect = el('select', { class: 'ws-input' }, [
+            el('option', { value: '' }, ['Tất cả']),
+            el('option', { value: 'OPEN' }, ['OPEN']),
+            el('option', { value: 'IN_PROGRESS' }, ['IN_PROGRESS']),
+            el('option', { value: 'ANSWERED' }, ['ANSWERED']),
+            el('option', { value: 'CLOSED' }, ['CLOSED'])
+        ]);
+        filterSelect.addEventListener('change', load);
+
+        function load() {
+            var status = filterSelect.value;
+            var qs = status ? ('?status=' + encodeURIComponent(status)) : '';
+            api('/api/support-requests' + qs).then(function (r) {
+                listContainer.replaceChildren();
+                if (r.status !== 200 || !r.data || !r.data.items) {
+                    listContainer.appendChild(el('p', { class: 'ws-muted' }, ['Không có yêu cầu nào.']));
+                    return;
+                }
+                r.data.items.forEach(function (it) {
+                    var replyInput = el('textarea', { class: 'ws-textarea', rows: '2', placeholder: 'Phản hồi...', maxlength: '1000' });
+                    var replyBtn = el('button', { class: 'ws-btn primary', type: 'button' }, ['Gửi phản hồi']);
+                    var closeBtn = el('button', { class: 'ws-btn ghost', type: 'button' }, ['Đóng yêu cầu']);
+                    var flash = el('div', { class: 'ws-flash', hidden: true });
+
+                    replyBtn.addEventListener('click', function () {
+                        var reply = replyInput.value.trim();
+                        if (!reply) {
+                            flash.hidden = false; flash.textContent = 'Nhập nội dung phản hồi';
+                            flash.className = 'ws-flash err'; return;
+                        }
+                        api('/api/support-requests/' + it.id + '/reply', { method: 'POST', body: { reply: reply } })
+                            .then(function (res) {
+                                flash.hidden = false;
+                                flash.textContent = res.status === 200 ? 'Đã phản hồi.' : ((res.data && res.data.message) || 'Lỗi');
+                                flash.className = 'ws-flash ' + (res.status === 200 ? 'ok' : 'err');
+                                if (res.status === 200) load();
+                            });
+                    });
+                    closeBtn.addEventListener('click', function () {
+                        api('/api/support-requests/' + it.id + '/close', { method: 'POST' })
+                            .then(function (res) {
+                                flash.hidden = false;
+                                flash.textContent = res.status === 200 ? 'Đã đóng.' : ((res.data && res.data.message) || 'Lỗi');
+                                flash.className = 'ws-flash ' + (res.status === 200 ? 'ok' : 'err');
+                                if (res.status === 200) load();
+                            });
+                    });
+
+                    var card = el('article', { class: 'ws-card' }, [
+                        el('div', { class: 'ws-card-header' }, [
+                            el('strong', {}, [it.subject]),
+                            statusBadge(it.status)
+                        ]),
+                        el('div', { class: 'ws-muted small' }, [
+                            'Từ: ' + it.userFullName + ' (' + it.userEmail + ') · ',
+                            formatDate(it.createdAt)
+                        ]),
+                        el('p', {}, [it.message]),
+                        it.managerReply ? el('div', { class: 'ws-callout' }, [
+                            el('strong', {}, ['Phản hồi hiện tại']),
+                            el('p', {}, [it.managerReply])
+                        ]) : null,
+                        el('div', { class: 'ws-form-row' }, [
+                            el('label', {}, ['Phản hồi cho khách hàng', replyInput])
+                        ]),
+                        el('div', { class: 'ws-actions' }, [replyBtn, closeBtn]),
+                        flash
+                    ]);
+                    listContainer.appendChild(card);
+                });
+            });
+        }
+
+        view.appendChild(el('div', { class: 'ws-row' }, [
+            el('label', { class: 'ws-label' }, ['Trạng thái', filterSelect])
+        ]));
+        view.appendChild(listContainer);
+        load();
+        return view;
+    }
+
+    // ======================== COMPLAINTS ========================
+    function moduleComplaints() {
+        var role = document.querySelector('meta[name="user-role"]')?.content || 'CUSTOMER';
+        var isManager = (role === 'ADMIN' || role === 'BRANCH_MANAGER');
+        return isManager ? moduleComplaintsManager() : moduleComplaintsCustomer();
+    }
+
+    function moduleComplaintsCustomer() {
+        var view = el('div', { class: 'ws-page' }, [
+            el('div', { class: 'ws-page-header' }, [
+                el('span', { class: 'ws-eyebrow' }, ['KHIẾU NẠI VỀ RẠP']),
+                el('h2', {}, ['Phản ánh chất lượng dịch vụ tại rạp']),
+                el('p', { class: 'ws-muted' }, [
+                    'Gửi phản ánh về chi nhánh, nhân viên, cơ sở vật chất hoặc dịch vụ. Nội dung đánh giá phim thuộc mục Đánh giá chất lượng.'
+                ])
+            ])
+        ]);
+        var listContainer = el('div', { id: 'complaint-list' });
+
+        var branchSelect = el('select', { class: 'ws-input', required: 'required' }, [
+            el('option', { value: '' }, ['— Chọn rạp/chi nhánh xảy ra sự việc —'])
+        ]);
+        var categorySelect = el('select', { class: 'ws-input' }, [
+            el('option', { value: 'STAFF' }, ['Nhân viên tại rạp']),
+            el('option', { value: 'FACILITY' }, ['Cơ sở vật chất tại rạp']),
+            el('option', { value: 'PAYMENT' }, ['Thanh toán tại rạp']),
+            el('option', { value: 'OTHER' }, ['Chất lượng dịch vụ khác tại rạp'])
+        ]);
+        var subjectInput = el('input', { type: 'text', class: 'ws-input', placeholder: 'Tiêu đề', maxlength: '150' });
+        var messageInput = el('textarea', { class: 'ws-textarea', rows: '4', placeholder: 'Mô tả chi tiết', maxlength: '2000' });
+        var ticketInput = el('input', { type: 'number', class: 'ws-input', placeholder: 'ID vé liên quan (tuỳ chọn)' });
+        var submitBtn = el('button', { class: 'ws-btn primary', type: 'button' }, ['Gửi khiếu nại']);
+        submitBtn.disabled = true;
+        var msg = el('div', { class: 'ws-flash', hidden: true });
+
+        submitBtn.addEventListener('click', function () {
+            var body = {
+                branchId: branchSelect.value,
+                category: categorySelect.value,
+                subject: subjectInput.value.trim(),
+                message: messageInput.value.trim(),
+                relatedTicketId: ticketInput.value.trim() || ''
+            };
+            if (!body.branchId) {
+                msg.hidden = false; msg.textContent = 'Vui lòng chọn rạp/chi nhánh nơi xảy ra sự việc'; msg.className = 'ws-flash err'; return;
+            }
+            if (!body.subject || !body.message) {
+                msg.hidden = false; msg.textContent = 'Nhập tiêu đề và nội dung'; msg.className = 'ws-flash err'; return;
+            }
+            api('/api/complaints', { method: 'POST', body: body }).then(function (r) {
+                msg.hidden = false;
+                msg.textContent = r.status === 200 ? ('Đã gửi khiếu nại #' + r.data.id) : ((r.data && r.data.message) || 'Lỗi');
+                msg.className = 'ws-flash ' + (r.status === 200 ? 'ok' : 'err');
+                if (r.status === 200) { subjectInput.value = ''; messageInput.value = ''; ticketInput.value = ''; load(); }
+            }).catch(function (error) {
+                msg.hidden = false;
+                msg.textContent = error.message || 'Không gửi được khiếu nại. Vui lòng thử lại.';
+                msg.className = 'ws-flash err';
+            });
+        });
+
+        api('/branch').then(function (r) {
+            if (r.status !== 200 || !Array.isArray(r.data)) {
+                throw new Error((r.data && r.data.message) || 'Không tải được danh sách chi nhánh.');
+            }
+            r.data.forEach(function (branch) {
+                branchSelect.appendChild(el('option', { value: String(branch.id) }, [branch.name || ('Chi nhánh #' + branch.id)]));
+            });
+            submitBtn.disabled = r.data.length === 0;
+            if (!r.data.length) {
+                msg.hidden = false;
+                msg.textContent = 'Hiện không có chi nhánh đang hoạt động để gửi khiếu nại.';
+                msg.className = 'ws-flash err';
+            }
+        }).catch(function (error) {
+            msg.hidden = false;
+            msg.textContent = error.message || 'Không tải được danh sách chi nhánh.';
+            msg.className = 'ws-flash err';
+        });
+
+        function load() {
+            api('/api/complaints/mine').then(function (r) {
+                if (r.status !== 200) {
+                    throw new Error((r.data && r.data.message) || 'Không tải được khiếu nại của bạn.');
+                }
+                if (!r.data || !Array.isArray(r.data.items)) {
+                    throw new Error('Dữ liệu khiếu nại không hợp lệ.');
+                }
+                listContainer.replaceChildren();
+                if (r.data.items.length === 0) {
+                    listContainer.appendChild(el('p', { class: 'ws-muted' }, ['Bạn chưa gửi khiếu nại nào.']));
+                    return;
+                }
+                r.data.items.forEach(function (it) {
+                    listContainer.appendChild(el('article', { class: 'ws-card' }, [
+                        el('div', { class: 'ws-card-header' }, [
+                            el('strong', {}, [it.subject]),
+                            statusBadge(it.status)
+                        ]),
+                        el('div', { class: 'ws-muted small' }, [
+                            'Chi nhánh: ' + (it.branchName || 'Chưa xác định')
+                        ]),
+                        el('div', { class: 'ws-muted small' }, [
+                            categoryTag(it.category),
+                            'Gửi lúc: ' + formatDate(it.createdAt)
+                        ]),
+                        el('p', {}, [it.message]),
+                        it.managerReply ? el('div', { class: 'ws-callout' }, [
+                            el('strong', {}, ['Phản hồi từ Manager']),
+                            el('p', {}, [it.managerReply]),
+                            el('small', { class: 'ws-muted' }, [formatDate(it.repliedAt)])
+                        ]) : null
+                    ]));
+                });
+            }).catch(function (error) {
+                listContainer.replaceChildren(el('p', { class: 'ws-flash err' }, [
+                    error.message || 'Không tải được khiếu nại của bạn.'
+                ]));
+            });
+        }
+
+        view.appendChild(el('section', { class: 'ws-card' }, [
+            el('h3', {}, ['Tạo khiếu nại mới']),
+            el('p', { class: 'ws-muted' }, [
+                'Khiếu nại này gửi tới chi nhánh bạn chọn, không phải phần bình luận/đánh giá nội dung phim.'
+            ]),
+            el('label', { class: 'ws-label' }, ['Rạp/chi nhánh', branchSelect]),
+            el('label', { class: 'ws-label' }, ['Loại', categorySelect]),
+            el('label', { class: 'ws-label' }, ['Tiêu đề', subjectInput]),
+            el('label', { class: 'ws-label' }, ['Nội dung', messageInput]),
+            el('label', { class: 'ws-label' }, ['Mã vé liên quan (tuỳ chọn)', ticketInput]),
+            el('div', { class: 'ws-actions' }, [submitBtn]),
+            msg
+        ]));
+        view.appendChild(el('h3', {}, ['Khiếu nại của tôi']));
+        view.appendChild(listContainer);
+        load();
+        return view;
+    }
+
+    function moduleComplaintsManager() {
+        var view = el('div', { class: 'ws-page' }, [
+            el('div', { class: 'ws-page-header' }, [
+                el('span', { class: 'ws-eyebrow' }, ['PHẢN ÁNH DỊCH VỤ RẠP']),
+                el('h2', {}, ['Khiếu nại khách hàng']),
+                el('p', { class: 'ws-muted' }, [
+                    'Xem và phản hồi các khiếu nại thuộc chi nhánh bạn phụ trách.'
+                ])
+            ])
+        ]);
+        var listContainer = el('div', {});
+
+        var filterSelect = el('select', { class: 'ws-input' }, [
+            el('option', { value: '' }, ['Tất cả']),
+            el('option', { value: 'NEW' }, ['Mới tiếp nhận']),
+            el('option', { value: 'IN_PROGRESS' }, ['Đang xử lý']),
+            el('option', { value: 'RESOLVED' }, ['Đã giải quyết']),
+            el('option', { value: 'REJECTED' }, ['Đã từ chối'])
+        ]);
+        filterSelect.addEventListener('change', load);
+
+        function load() {
+            var status = filterSelect.value;
+            var qs = status ? ('?status=' + encodeURIComponent(status)) : '';
+            api('/api/complaints' + qs).then(function (r) {
+                if (r.status !== 200) {
+                    throw new Error((r.data && r.data.message) || 'Không tải được danh sách khiếu nại.');
+                }
+                listContainer.replaceChildren();
+                if (!r.data || !Array.isArray(r.data.items) || r.data.items.length === 0) {
+                    listContainer.appendChild(el('p', { class: 'ws-muted' }, ['Không có khiếu nại.']));
+                    return;
+                }
+                r.data.items.forEach(function (it) {
+                    var replyInput = el('textarea', { class: 'ws-textarea', rows: '2', placeholder: 'Phản hồi...', maxlength: '1000' });
+                    var replyBtn = el('button', { class: 'ws-btn primary', type: 'button' }, ['Gửi phản hồi']);
+                    var inProgressBtn = el('button', { class: 'ws-btn ghost', type: 'button' }, ['Đang xử lý']);
+                    var resolveBtn = el('button', { class: 'ws-btn success', type: 'button' }, ['Đã giải quyết']);
+                    var rejectBtn = el('button', { class: 'ws-btn danger', type: 'button' }, ['Từ chối']);
+                    var flash = el('div', { class: 'ws-flash', hidden: true });
+
+                    function action(path, body) {
+                        api(path, { method: 'POST', body: body || {} }).then(function (res) {
+                            if (res.status !== 200) {
+                                throw new Error((res.data && res.data.message) || 'Không thể cập nhật khiếu nại.');
+                            }
+                            flash.hidden = false;
+                            flash.textContent = 'Đã cập nhật khiếu nại.';
+                            flash.className = 'ws-flash ok';
+                            load();
+                        }).catch(function (error) {
+                            flash.hidden = false;
+                            flash.textContent = error.message || 'Không thể cập nhật khiếu nại.';
+                            flash.className = 'ws-flash err';
+                        });
+                    }
+
+                    replyBtn.addEventListener('click', function () {
+                        var r = replyInput.value.trim();
+                        if (!r) { flash.hidden = false; flash.textContent = 'Nhập phản hồi'; flash.className = 'ws-flash err'; return; }
+                        action('/api/complaints/' + it.id + '/reply', { reply: r });
+                    });
+                    inProgressBtn.addEventListener('click', function () { action('/api/complaints/' + it.id + '/status', { status: 'IN_PROGRESS' }); });
+                    resolveBtn.addEventListener('click', function () { action('/api/complaints/' + it.id + '/status', { status: 'RESOLVED' }); });
+                    rejectBtn.addEventListener('click', function () { action('/api/complaints/' + it.id + '/status', { status: 'REJECTED' }); });
+
+                    listContainer.appendChild(el('article', { class: 'ws-card' }, [
+                        el('div', { class: 'ws-card-header' }, [
+                            el('strong', {}, [it.subject]),
+                            statusBadge(it.status)
+                        ]),
+                        el('div', { class: 'ws-muted small' }, [
+                            'Từ: ' + it.userFullName + ' (' + it.userEmail + ') · ',
+                            'Chi nhánh: ' + (it.branchName || 'Chưa xác định') + ' · ',
+                            categoryTag(it.category),
+                            formatDate(it.createdAt)
+                        ]),
+                        el('p', {}, [it.message]),
+                        it.managerReply ? el('div', { class: 'ws-callout' }, [
+                            el('strong', {}, ['Phản hồi hiện tại']),
+                            el('p', {}, [it.managerReply])
+                        ]) : null,
+                        el('div', { class: 'ws-form-row' }, [
+                            el('label', {}, ['Phản hồi cho khách hàng', replyInput])
+                        ]),
+                        el('div', { class: 'ws-actions' }, [replyBtn, inProgressBtn, resolveBtn, rejectBtn]),
+                        flash
+                    ]));
+                });
+            }).catch(function (error) {
+                listContainer.replaceChildren(el('div', { class: 'ws-flash err' }, [
+                    error.message || 'Không tải được danh sách khiếu nại.'
+                ]));
+            });
+        }
+
+        view.appendChild(el('div', { class: 'ws-row' }, [
+            el('label', { class: 'ws-label' }, ['Trạng thái', filterSelect])
+        ]));
+        view.appendChild(listContainer);
+        load();
+        return view;
+    }
+
+    // ======================== MOVIE REVIEWS (customer + public detail) ========================
     function moduleReviewsForMovie(movieId, container) {
         if (!movieId) {
             container.appendChild(el('p', { class: 'ws-muted' }, ['Thiếu movieId.']));
@@ -351,6 +799,138 @@
     }
 
     // ======================== CUSTOMER POINTS (Staff adjust) ========================
+    function moduleCustomerPoints() {
+        var view = el('div', { class: 'ws-page' }, [
+            el('div', { class: 'ws-page-header' }, [
+                el('span', { class: 'ws-eyebrow' }, ['ĐIỂM THƯỞNG']),
+                el('h2', {}, ['Điều chỉnh điểm khách hàng'])
+            ]),
+            el('p', { class: 'ws-muted' }, ['Tra cứu điểm hiện tại của khách hàng theo email, sau đó cộng/trừ điểm kèm lý do (tối thiểu 5 ký tự). Mọi thao tác được ghi vào lịch sử.'])
+        ]);
+
+        var emailInput = el('input', { type: 'email', class: 'ws-input', placeholder: 'email@khachhang.com' });
+        var lookupBtn = el('button', { class: 'ws-btn primary', type: 'button' }, ['Tra cứu']);
+        var flash = el('div', { class: 'ws-flash', hidden: true });
+        var lookupResult = el('div', {});
+        var adjustCard = el('div', { hidden: true });
+
+        lookupBtn.addEventListener('click', function () {
+            var email = emailInput.value.trim();
+            if (!email) { showFlash(flash, 'err', 'Nhập email khách hàng'); return; }
+            lookupBtn.disabled = true;
+            lookupBtn.textContent = 'Đang tra…';
+            api('/loyalty/customer-points?email=' + encodeURIComponent(email))
+                .then(function (r) {
+                    lookupBtn.disabled = false; lookupBtn.textContent = 'Tra cứu';
+                    if (r.status !== 200 || !r.data) {
+                        var msg = (r.data && r.data.message) ? r.data.message : 'Không tìm thấy khách hàng';
+                        showFlash(flash, 'err', msg);
+                        lookupResult.replaceChildren();
+                        adjustCard.hidden = true;
+                        return;
+                    }
+                    showFlash(flash, 'ok', 'Đã tra cứu');
+                    renderCustomerCard(lookupResult, r.data);
+                    renderAdjustForm(adjustCard, r.data, function () {
+                        // Sau khi điều chỉnh thành công → cập nhật lại điểm hiện tại
+                        api('/loyalty/customer-points?email=' + encodeURIComponent(email)).then(function (r2) {
+                            if (r2.status === 200 && r2.data) {
+                                renderCustomerCard(lookupResult, r2.data);
+                                renderAdjustForm(adjustCard, r2.data, arguments.callee);
+                            }
+                        });
+                    });
+                    adjustCard.hidden = false;
+                });
+        });
+
+        emailInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); lookupBtn.click(); }
+        });
+
+        var searchCard = el('section', { class: 'ws-card' }, [
+            el('h3', {}, ['Tra cứu khách hàng']),
+            el('label', { class: 'ws-label' }, ['Email khách hàng', emailInput]),
+            el('div', { class: 'ws-actions' }, [lookupBtn]),
+            flash
+        ]);
+
+        view.appendChild(searchCard);
+        view.appendChild(lookupResult);
+        view.appendChild(adjustCard);
+        return view;
+    }
+
+    function renderCustomerCard(host, customer) {
+        host.replaceChildren(el('section', { class: 'ws-card' }, [
+            el('h3', {}, ['Thông tin điểm']),
+            el('div', { class: 'ws-stat-row' }, [
+                el('div', { class: 'ws-stat' }, [
+                    el('div', { class: 'ws-stat-label' }, ['Khách hàng']),
+                    el('div', { class: 'ws-stat-value' }, [customer.fullName || '—'])
+                ]),
+                el('div', { class: 'ws-stat' }, [
+                    el('div', { class: 'ws-stat-label' }, ['Email']),
+                    el('div', { class: 'ws-stat-value small' }, [customer.email || '—'])
+                ]),
+                el('div', { class: 'ws-stat' }, [
+                    el('div', { class: 'ws-stat-label' }, ['Hạng']),
+                    el('div', { class: 'ws-stat-value' }, [customer.tier || '—'])
+                ]),
+                el('div', { class: 'ws-stat primary' }, [
+                    el('div', { class: 'ws-stat-label' }, ['Điểm hiện tại']),
+                    el('div', { class: 'ws-stat-value big' }, [String(customer.points ?? 0)])
+                ])
+            ])
+        ]));
+    }
+
+    function renderAdjustForm(host, customer, onSuccess) {
+        var deltaInput = el('input', { type: 'number', class: 'ws-input', placeholder: 'VD: +50 hoặc -20', step: '1' });
+        var reasonInput = el('textarea', { class: 'ws-textarea', rows: '2', placeholder: 'Lý do điều chỉnh (tối thiểu 5 ký tự)', maxlength: '500' });
+        var submitBtn = el('button', { class: 'ws-btn primary', type: 'button' }, ['Xác nhận điều chỉnh']);
+        var flash = el('div', { class: 'ws-flash', hidden: true });
+
+        submitBtn.addEventListener('click', function () {
+            var delta = parseInt((deltaInput.value || '').trim(), 10);
+            var reason = (reasonInput.value || '').trim();
+            if (isNaN(delta) || delta === 0) { showFlash(flash, 'err', 'Nhập số điểm (+/-)'); return; }
+            if (reason.length < 5) { showFlash(flash, 'err', 'Lý do tối thiểu 5 ký tự'); return; }
+            submitBtn.disabled = true;
+            api('/loyalty/adjust', {
+                method: 'POST',
+                body: { customerId: customer.id, delta: delta, reason: reason }
+            }).then(function (r) {
+                submitBtn.disabled = false;
+                if (r.status !== 200 || !r.data) {
+                    var msg = (r.data && r.data.message) ? r.data.message : 'Điều chỉnh thất bại';
+                    showFlash(flash, 'err', msg);
+                    return;
+                }
+                var newBalance = r.data.newBalance != null ? r.data.newBalance : '?';
+                showFlash(flash, 'ok', 'Đã điều chỉnh. Số dư mới: ' + newBalance + ' điểm.');
+                deltaInput.value = '';
+                reasonInput.value = '';
+                if (typeof onSuccess === 'function') onSuccess();
+            });
+        });
+
+        host.replaceChildren(el('section', { class: 'ws-card' }, [
+            el('h3', {}, ['Điều chỉnh điểm']),
+            el('label', { class: 'ws-label' }, ['Điểm thay đổi (+/-)', deltaInput]),
+            el('label', { class: 'ws-label' }, ['Lý do', reasonInput]),
+            el('div', { class: 'ws-actions' }, [submitBtn]),
+            flash
+        ]));
+    }
+
+    function showFlash(host, type, message) {
+        host.hidden = false;
+        host.textContent = message;
+        host.className = 'ws-flash ' + type;
+    }
+
+    // ======================== TICKETS (Staff/Manager) ========================
     function moduleTicketStaff() {
         var view = el('div', { class: 'ws-page' }, [
             el('div', { class: 'ws-page-header' }, [
@@ -503,6 +1083,10 @@
                     el('div', { class: 'ws-stat-value' }, [ticketStatusBadge(t.status)])
                 ]),
                 el('div', { class: 'ws-stat' }, [
+                    el('div', { class: 'ws-stat-label' }, ['Điểm tích luỹ']),
+                    el('div', { class: 'ws-stat-value' }, [t.pointsEarned != null ? String(t.pointsEarned) : '—'])
+                ]),
+                el('div', { class: 'ws-stat' }, [
                     el('div', { class: 'ws-stat-label' }, ['Tạo lúc']),
                     el('div', { class: 'ws-stat-value small' }, [formatDate(t.createdAt)])
                 ]),
@@ -540,6 +1124,10 @@
 
     // Public registration
     window.CinemaHubPages = window.CinemaHubPages || {};
+    window.CinemaHubPages['support'] = moduleSupport;
+    window.CinemaHubPages['support-inbox'] = moduleSupportInbox;
+    window.CinemaHubPages['complaints'] = moduleComplaints;
+    window.CinemaHubPages['customer-points'] = moduleCustomerPoints;
     // Expose moduleTicketStaff globally so console.js can dispatch for module=ticket.
     window.moduleTicketStaff = moduleTicketStaff;
     window.CinemaHubPages['reviews'] = function (ctx) {

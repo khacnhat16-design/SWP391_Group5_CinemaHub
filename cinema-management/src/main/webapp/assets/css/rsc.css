@@ -1,5 +1,5 @@
 /* ============================================================================
- * rsc.css — Stylesheet riêng cho module Reviews
+ * rsc.css — Stylesheet riêng cho các module RSC (Reviews / Support / Complaints)
  * được nhúng trong customer area (header.jsp với cờ loadRscCss=true).
  *
  * Tách ra khỏi workspace.css để tránh kéo theo:
