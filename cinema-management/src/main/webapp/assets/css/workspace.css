@@ -2051,6 +2051,7 @@
 .pos-seat.vip.selected { background: var(--red, #ef4444); }
 .pos-seat.couple { background: #db2777; min-width: 70px; }
 .pos-seat.couple.selected { background: var(--red, #ef4444); }
+.pos-seat.maintenance { background: repeating-linear-gradient(135deg, #64748b, #64748b 3px, #475569 3px, #475569 6px); cursor: not-allowed; }
 
 .pos-seat-legend {
     display: flex;
