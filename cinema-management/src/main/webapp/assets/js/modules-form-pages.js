@@ -118,11 +118,11 @@
             'aria-modal': 'true',
             'aria-labelledby': 'showtime-bookings-title'
         });
-        var title = [showtime.movieTitle || 'Suất chiếu', 'Ghế đã đặt'].join(' · ');
+        var title = [showtime.movieTitle || 'Suất chiếu', 'Trạng thái ghế'].join(' · ');
         var closeButton = hub.el('button', {
             class: 'ws-modal-x',
             type: 'button',
-            'aria-label': 'Đóng danh sách ghế đã đặt'
+            'aria-label': 'Đóng trạng thái ghế'
         }, ['×']);
         var heading = hub.el('div', { class: 'ws-modal-head' }, [
             hub.el('h2', { id: 'showtime-bookings-title' }, [title]),
@@ -192,7 +192,9 @@
             hub.api('/showtime/' + encodeURIComponent(String(showtime.id))).then(function (data) {
                 var seats = Array.isArray(data.seats) ? data.seats : [];
                 var rows = new Map();
-                var counts = { SOLD: 0, HOLD: 0, AVAILABLE: 0, MAINTENANCE: 0 };
+                var counts = {
+                    SOLD: 0, HOLD: 0, AVAILABLE: 0, MAINTENANCE: 0, UNAVAILABLE: 0
+                };
                 var capacity = 0;
                 seats.forEach(function (seat) {
                     var rowLabel = String(seat.rowLabel || '?');
@@ -200,8 +202,9 @@
                     rows.get(rowLabel).push(seat);
                     var seatCapacity = String(seat.seatType || '').toUpperCase() === 'COUPLE' ? 2 : 1;
                     capacity += seatCapacity;
-                    if (Object.prototype.hasOwnProperty.call(counts, seat.status)) {
-                        counts[seat.status] += seatCapacity;
+                    var seatStatus = String(seat.status || '').toUpperCase();
+                    if (Object.prototype.hasOwnProperty.call(counts, seatStatus)) {
+                        counts[seatStatus] += seatCapacity;
                     }
                 });
                 seatMap.replaceChildren();
@@ -213,7 +216,8 @@
                 seatMapStatus.textContent = 'Tổng ' + capacity + ' chỗ · '
                     + counts.SOLD + ' đã đặt · ' + counts.HOLD + ' đang giữ · '
                     + counts.AVAILABLE + ' còn trống'
-                    + (counts.MAINTENANCE ? ' · ' + counts.MAINTENANCE + ' bảo trì' : '') + '.';
+                    + (counts.MAINTENANCE ? ' · ' + counts.MAINTENANCE + ' bảo trì' : '')
+                    + (counts.UNAVAILABLE ? ' · ' + counts.UNAVAILABLE + ' không khả dụng' : '') + '.';
                 seatMap.appendChild(hub.el('div', {
                     class: 'ws-showtime-seat-map-screen',
                     'aria-hidden': 'true'
@@ -232,7 +236,7 @@
                     }).forEach(function (seat) {
                         var seatCol = Number(seat.colNo) || 0;
                         if (seatCol <= occupiedThrough) return;
-                        var seatStatus = String(seat.status || 'MAINTENANCE').toUpperCase();
+                        var seatStatus = String(seat.status || 'UNAVAILABLE').toUpperCase();
                         var className = seatStatus === 'SOLD' ? 'sold'
                             : seatStatus === 'HOLD' ? 'hold'
                             : seatStatus === 'AVAILABLE' ? 'available' : 'maintenance';
@@ -241,7 +245,8 @@
                             ? seatCode + '-' + (seatCol + 1) : seatCode;
                         var statusLabel = seatStatus === 'SOLD' ? 'đã đặt'
                             : seatStatus === 'HOLD' ? 'đang được giữ'
-                            : seatStatus === 'AVAILABLE' ? 'còn trống' : 'bảo trì';
+                            : seatStatus === 'AVAILABLE' ? 'còn trống'
+                                : seatStatus === 'UNAVAILABLE' ? 'không khả dụng' : 'bảo trì';
                         var seatNode = hub.el('span', {
                             class: 'ws-showtime-seat-map-seat ' + className
                                 + (seat.seatType === 'COUPLE' ? ' couple' : ''),
@@ -3302,9 +3307,9 @@
                             var button = hub.el('button', {
                                 class: 'ws-btn ws-btn-sm secondary',
                                 type: 'button',
-                                'aria-label': 'Xem suất chiếu và sơ đồ ghế đã đặt của '
+                                'aria-label': 'Xem trạng thái ghế của '
                                     + (showtime.movieTitle || 'suất chiếu')
-                            }, ['Xem ghế đã đặt']);
+                            }, ['Xem trạng thái ghế']);
                             button.addEventListener('click', function () {
                                 openShowtimeBookings(showtime);
                             });

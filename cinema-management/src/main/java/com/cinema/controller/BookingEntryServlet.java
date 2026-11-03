@@ -137,6 +137,11 @@ public final class BookingEntryServlet extends HttpServlet {
               function money(value) {
                 return Number(value || 0).toLocaleString('vi-VN') + 'đ';
               }
+              function seatCode(seat) {
+                const start = String(seat.rowLabel || '') + String(seat.colNo || '');
+                return String(seat.seatType || '').toUpperCase() === 'COUPLE'
+                  ? start + '-' + (Number(seat.colNo) + 1) : start;
+              }
               function holdOwnerId(seat) {
                 return seat.holdUserId ?? seat.hold_user_id ?? seat.userId ?? seat.user_id;
               }
@@ -200,10 +205,12 @@ public final class BookingEntryServlet extends HttpServlet {
                 }
                 const seats = selectedSeats.slice();
                 const seatIds = seats.map(seat => seat.seatId);
+                const selectedCapacity = seats.reduce((total, seat) =>
+                  total + (String(seat.seatType || '').toUpperCase() === 'COUPLE' ? 2 : 1), 0);
                 summary.replaceChildren(
                   node('div', { class: 'summary-line' }, currentShow.movieTitle || 'Suất chiếu'),
-                  node('div', { class: 'summary-line' }, 'Đang chọn: ' + seats.length + ' ghế'),
-                  node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seat => seat.rowLabel + seat.colNo).join(', ')),
+                  node('div', { class: 'summary-line' }, 'Đang chọn: ' + selectedCapacity + ' chỗ'),
+                  node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seatCode).join(', ')),
                   node('div', { class: 'summary-line total' }, 'Đang tính giá…')
                 );
                 paymentArea.hidden = !holdId;
@@ -214,8 +221,8 @@ public final class BookingEntryServlet extends HttpServlet {
                   if (revision !== quoteRevision) return;
                   const lines = [
                     node('div', { class: 'summary-line' }, currentShow.movieTitle || 'Suất chiếu'),
-                    node('div', { class: 'summary-line' }, 'Đang chọn: ' + seats.length + ' ghế'),
-                    node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seat => seat.rowLabel + seat.colNo).join(', '))
+                    node('div', { class: 'summary-line' }, 'Đang chọn: ' + selectedCapacity + ' chỗ'),
+                    node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seatCode).join(', '))
                   ];
                   lines.push(node('div', { class: 'summary-line total' },
                     'Tổng thanh toán: ' + money(order.baseTotal)));
@@ -241,7 +248,9 @@ public final class BookingEntryServlet extends HttpServlet {
                   const rowLabel = String.fromCharCode(65 + rowIndex);
                   const row = node('div', { class: 'seat-row' });
                   row.appendChild(node('small', {}, rowLabel));
+                  let occupiedThrough = 0;
                   for (let colNo = 1; colNo <= seatColumns; colNo++) {
+                    if (colNo <= occupiedThrough) continue;
                     const seat = seatsByPosition.get(rowLabel + ':' + colNo);
                     if (!seat) {
                       row.appendChild(node('span', {
@@ -253,18 +262,24 @@ public final class BookingEntryServlet extends HttpServlet {
                     const status = seatStatus(seat);
                     const seatType = String(seat.seatType || 'STANDARD').toUpperCase();
                     const typeClass = seatType === 'VIP' ? 'vip' : seatType === 'COUPLE' ? 'couple' : '';
-                    const statusClass = status === 'SOLD' ? 'sold' : status === 'HOLD' ? 'hold' : '';
+                    const isMaintenance = status === 'MAINTENANCE' || status === 'UNAVAILABLE'
+                      || status === 'INACTIVE';
+                    const statusClass = status === 'SOLD' ? 'sold'
+                      : status === 'HOLD' ? 'hold' : isMaintenance ? 'maintenance' : '';
                     const button = node('button', {
                       class: ['seat', typeClass, statusClass].filter(Boolean).join(' '),
                       type: 'button'
-                    }, String(seat.colNo));
-                    button.title = rowLabel + seat.colNo + ' - ' + seat.seatType;
+                    }, seatType === 'COUPLE'
+                      ? String(seat.colNo) + '-' + (Number(seat.colNo) + 1)
+                      : String(seat.colNo));
+                    button.title = seatCode(seat) + ' - ' + seat.seatType;
                     const typeLabel = seatType === 'VIP' ? 'VIP'
                       : seatType === 'COUPLE' ? 'đôi' : 'thường';
                     const statusLabel = status === 'SOLD' ? 'đã bán'
-                      : status === 'HOLD' ? 'đang được giữ' : 'còn trống';
+                      : status === 'HOLD' ? 'đang được giữ'
+                        : isMaintenance ? 'bảo trì/không khả dụng' : 'còn trống';
                     button.setAttribute('aria-label',
-                      'Ghế ' + rowLabel + seat.colNo + ', loại ' + typeLabel + ', ' + statusLabel);
+                      'Ghế ' + seatCode(seat) + ', loại ' + typeLabel + ', ' + statusLabel);
                     const isOwnHold = belongsToCurrentUser(seat);
                     const isSelected = isOwnHold || selectedSeats.some(item => item.seatId === seat.seatId);
                     if (isSelected) button.classList.add('selected');
@@ -317,6 +332,7 @@ public final class BookingEntryServlet extends HttpServlet {
                       }
                     });
                     row.appendChild(button);
+                    if (seatType === 'COUPLE') occupiedThrough = Number(seat.colNo) + 1;
                   }
                   seatsNode.appendChild(row);
                 }

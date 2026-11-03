@@ -31,7 +31,8 @@ public class ShowtimeDAO {
         """;
 
     private static final String AVAILABLE_SEATS_COLUMN = """
-        (SELECT COUNT(*) FROM dbo.showtime_seat ss
+        (SELECT COALESCE(SUM(CASE WHEN se.seat_type = 'COUPLE' THEN 2 ELSE 1 END), 0)
+         FROM dbo.showtime_seat ss
           JOIN dbo.seat se ON se.id = ss.seat_id AND se.status = 'ACTIVE'
           WHERE ss.showtime_id = s.id
             AND (ss.status = 'AVAILABLE'
@@ -359,8 +360,11 @@ public class ShowtimeDAO {
     /** Trạng thái ghế của một lịch chiếu (Req 6.3): seatId → status/hold info. */
     public List<ShowtimeSeat> seatStatus(long showtimeId) throws Exception {
         String sql = """
-            SELECT ss.seat_id,
+            SELECT se.id AS seat_id,
                    CASE
+                       WHEN ss.status = 'SOLD' THEN 'SOLD'
+                       WHEN se.status <> 'ACTIVE' THEN 'MAINTENANCE'
+                       WHEN ss.seat_id IS NULL THEN 'UNAVAILABLE'
                        WHEN ss.hold_id IS NOT NULL
                             AND sh.status = 'ACTIVE'
                             AND ss.hold_expires_at > SYSUTCDATETIME() THEN 'HOLD'
@@ -369,13 +373,16 @@ public class ShowtimeDAO {
                                  OR ss.hold_expires_at <= SYSUTCDATETIME()) THEN 'AVAILABLE'
                        ELSE ss.status
                    END AS seat_status,
-                   ss.hold_id, ss.hold_expires_at,
-                   sh.user_id AS hold_user_id,
+                   CASE WHEN se.status = 'ACTIVE' THEN ss.hold_id END AS hold_id,
+                   CASE WHEN se.status = 'ACTIVE' THEN ss.hold_expires_at END AS hold_expires_at,
+                   CASE WHEN se.status = 'ACTIVE' THEN sh.user_id END AS hold_user_id,
                    se.row_label, se.col_no, se.seat_type
-            FROM dbo.showtime_seat ss
-            JOIN dbo.seat se ON se.id = ss.seat_id AND se.status = 'ACTIVE'
+            FROM dbo.showtime st
+            JOIN dbo.seat se ON se.screen_id = st.screen_id
+            LEFT JOIN dbo.showtime_seat ss
+              ON ss.showtime_id = st.id AND ss.seat_id = se.id
             LEFT JOIN dbo.seat_hold sh ON sh.id = ss.hold_id
-            WHERE ss.showtime_id = ?
+            WHERE st.id = ?
             ORDER BY se.row_label, se.col_no
             """;
         List<ShowtimeSeat> seats = new ArrayList<>();

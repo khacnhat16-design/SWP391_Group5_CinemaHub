@@ -107,6 +107,12 @@ public class ShowtimeController extends HttpServlet {
             if (pathInfo != null && pathInfo.matches("/\\d+")) {
                 long showtimeId = Long.parseLong(pathInfo.substring(1));
                 var detail = showtimeService.getDetail(showtimeId);
+                AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
+                if (scope != null && scope.role() == Role.BRANCH_MANAGER
+                        && !scope.includesBranch(detail.showtime().branchId())) {
+                    sendForbidden(response, "Không có quyền xem ghế của chi nhánh này");
+                    return;
+                }
                 var screen = screenDao.findById(detail.showtime().screenId())
                         .orElseThrow(() -> new ServiceException.NotFound("Phòng chiếu không tồn tại"));
                 Object sessionUserId = request.getSession(false) == null

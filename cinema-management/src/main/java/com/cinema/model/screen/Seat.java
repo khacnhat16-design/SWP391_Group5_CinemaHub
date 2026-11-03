@@ -11,6 +11,7 @@ public class Seat {
 
     public static final String TYPE_STANDARD = "STANDARD";
     public static final String TYPE_VIP = "VIP";
+    /** A couple seat is stored at its left slot and occupies the adjacent slot too. */
     public static final String TYPE_COUPLE = "COUPLE";
 
     public Long id() { return id; }
