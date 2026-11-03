@@ -5943,11 +5943,7 @@
 
             var lookupFn = function () {
                 var code = codeInput.value.trim();
-                if (!code) {
-                    hub.notify('Vui lòng nhập mã nhận hàng hoặc mã đơn!', 'warn');
-                    codeInput.focus();
-                    return;
-                }
+                if (!code) return;
                 result.replaceChildren(hub.el('div', { class: 'ws-list-loading' }, [hub.el('div', { class: 'ws-spinner' })]));
                 hub.api('/concession/scan', { method: 'POST', body: { code: code.toUpperCase() } }).then(function (data) {
                     if (!data.canRedeem) {
@@ -5975,20 +5971,13 @@
                     }
                     var confirmBtn = hub.el('button', { class: 'ws-btn primary', type: 'button', style: 'margin-top:16px;width:100%' }, ['✓ Xác nhận đã giao cho khách']);
                     confirmBtn.addEventListener('click', function () {
-                        confirmBtn.disabled = true;
-                        confirmBtn.textContent = 'Đang xử lý giao hàng...';
                         hub.api('/concession/redeem', { method: 'POST', body: { orderId: data.orderId } })
                             .then(function () {
-                                hub.notify('Giao đơn hàng thành công!', 'ok');
+                                hub.notify('Đã giao đơn hàng.', 'ok');
                                 result.replaceChildren();
                                 codeInput.value = '';
-                                codeInput.focus();
                             })
-                            .catch(function (err) {
-                                confirmBtn.disabled = false;
-                                confirmBtn.textContent = '✓ Xác nhận đã giao cho khách';
-                                notifyError(err);
-                            });
+                            .catch(notifyError);
                     });
                     box.appendChild(confirmBtn);
                     result.replaceChildren(box);

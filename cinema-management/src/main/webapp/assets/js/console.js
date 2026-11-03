@@ -1338,48 +1338,29 @@
 
   // ============ Pickup (customer) ============
   function modulePickup() {
-    var box = card("Nhận đơn online", "Nhập pickup code để nhận đơn bắp nước.");
-    viewRoot.replaceChildren(box);
-    var inp = el("input", {
-      type: "text",
-      placeholder: "Pickup code...",
-      class: "pos-input",
-      style: "width:300px;padding:10px",
-    });
-    var btn = el("button", { class: "ws-btn primary", type: "button" }, [
-      "Xác nhận",
-    ]);
-    var flash = el("div", { class: "flash", style: "display:none" });
-    box.appendChild(
-      el("div", { style: "display:flex;gap:10px;margin-top:10px" }, [
-        inp,
-        btn,
-        flash,
-      ]),
-    );
-    btn.addEventListener("click", function () {
-      var code = (inp.value || "").trim();
-      if (!code) return;
-      flash.style.display = "block";
-      flash.className = "flash";
-      flash.textContent = "Dang xu ly...";
-      hub
-        .api("/concession/pickup", {
-          method: "POST",
-          body: { pickupCode: code },
-        })
-        .then(function () {
-          flash.className = "flash flash-ok";
-          flash.textContent = "Da giao thanh cong.";
-        })
-        .catch(function (e) {
-          flash.className = "flash flash-err";
-          flash.textContent = e.message || "Loi";
+        var box = card('Nhan don online', 'Nhap pickup code de nhan don bap nuoc.');
+        viewRoot.replaceChildren(box);
+        var inp = el('input', { type: 'text', placeholder: 'Pickup code...', class: 'pos-input', style: 'width:300px;padding:10px' });
+        var btn = el('button', { class: 'ws-btn primary', type: 'button' }, ['Xac nhan']);
+        var flash = el('div', { class: 'flash', style: 'display:none' });
+        box.appendChild(el('div', { style: 'display:flex;gap:10px;margin-top:10px' }, [inp, btn, flash]));
+        btn.addEventListener('click', function () {
+            var code = (inp.value || '').trim();
+            if (!code) return;
+            flash.style.display = 'block';
+            flash.className = 'flash';
+            flash.textContent = 'Dang xu ly...';
+            hub.api('/concession/pickup', { method: 'POST', body: { pickupCode: code } }).then(function () {
+                flash.className = 'flash flash-ok';
+                flash.textContent = 'Da giao thanh cong.';
+            }).catch(function (e) {
+                flash.className = 'flash flash-err';
+                flash.textContent = e.message || 'Loi';
+            });
         });
-    });
-  }
+    }
 
-  // ============ POS (delegate to pos-staff.js) ============
+    // ============ POS (delegate to pos-staff.js) ============
   function modulePosTicket() {
     if (window.modulePosTicket) return window.modulePosTicket();
     emptyModule("Ban ve tai quay", "Module POS chua san sang.");
