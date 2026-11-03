@@ -341,5 +341,41 @@
         <servlet-name>inventoryController</servlet-name>
         <url-pattern>/inventory/*</url-pattern>
     </servlet-mapping>
+    <servlet>
+        <servlet-name>reviewController</servlet-name>
+        <servlet-class>com.cinema.controller.ReviewController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>reviewController</servlet-name>
+        <url-pattern>/api/reviews</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>reviewController</servlet-name>
+        <url-pattern>/api/reviews/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
+        <servlet-name>supportRequestController</servlet-name>
+        <servlet-class>com.cinema.controller.SupportRequestController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>supportRequestController</servlet-name>
+        <url-pattern>/api/support-requests</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>supportRequestController</servlet-name>
+        <url-pattern>/api/support-requests/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
+        <servlet-name>complaintController</servlet-name>
+        <servlet-class>com.cinema.controller.ComplaintController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>complaintController</servlet-name>
+        <url-pattern>/api/complaints</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>complaintController</servlet-name>
+        <url-pattern>/api/complaints/*</url-pattern>
+    </servlet-mapping>
 
 </web-app>

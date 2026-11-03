@@ -33,12 +33,17 @@
             <meta name="csrf-token" content="${sessionScope.csrfToken}">
             <title><c:out value="${pageTitle}"/> | Khu vực quản lý CinemaHub</title>
             <link rel="stylesheet" href="${ctx}/assets/css/cinema.css">
+<<<<<<< HEAD
             <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261031-customer-fnb-bright-1">
             <%-- rsc.css định nghĩa .ws-input/.ws-label/.ws-btn dùng chung cho các module
                  (review-branch, customer-points, voucher…). Không load thì các select/input
                  mất style nền trắng → mặc định nền đen của trình duyệt. --%>
             <link rel="stylesheet" href="${ctx}/assets/css/rsc.css?v=20261031-console-form-1">
             <link rel="stylesheet" href="${ctx}/assets/css/inventory.css?v=20261102-unified-ui-1">
+=======
+            <link rel="stylesheet" href="${ctx}/assets/css/workspace.css?v=20261004-branch-pricing-templates-1">
+            <link rel="stylesheet" href="${ctx}/assets/css/rsc.css?v=20261012-review-ui-2">
+>>>>>>> vu
         </head>
         <body class="workspace-page">
             <%@ include file="/WEB-INF/views/layout/workspace-sidebar.jsp" %>
@@ -50,6 +55,7 @@
             </main>
             <script src="${ctx}/assets/js/app.js?v=20261102-inventory-notif-1" defer></script>
             <script src="${ctx}/assets/js/page-router.js?v=20260925-1" defer></script>
+<<<<<<< HEAD
             <script src="${ctx}/assets/js/list-page.js?v=20261003-no-list-ids-1" defer></script>
             <script src="${ctx}/assets/js/form-page.js?v=20261031-points-validation-1" defer></script>
             <script src="${ctx}/assets/js/modules-form-pages.js?v=20261031-fnb-datetime-confirm-1" defer></script>
@@ -66,6 +72,13 @@
             <script src="${ctx}/assets/js/inventory/inventory-material.js?v=20261102-unified-ui-1" defer></script>
             <script src="${ctx}/assets/js/inventory/inventory-recipe.js?v=20261102-unified-ui-1" defer></script>
             <script src="${ctx}/assets/js/inventory/inventory-main.js?v=20261102-unified-ui-1" defer></script>
+=======
+            <script src="${ctx}/assets/js/list-page.js?v=20261003-pricing-target-1" defer></script>
+            <script src="${ctx}/assets/js/form-page.js?v=20261004-movie-author-validation-1" defer></script>
+            <script src="${ctx}/assets/js/modules-form-pages.js?v=20261004-movie-author-validation-1" defer></script>
+            <script src="${ctx}/assets/js/console.js?v=20261004-sidebar-active-1" defer></script>
+            <script src="${ctx}/assets/js/modules-rsc.js?v=20261012-review-delete-2" defer></script>
+>>>>>>> vu
         </body>
         </html>
     </c:when>
@@ -126,10 +139,16 @@
                 <script src="${ctx}/assets/js/app.js?v=20261102-inventory-notif-1" defer></script>
                 <script src="${ctx}/assets/js/page-router.js?v=20260925-1" defer></script>
                 <script src="${ctx}/assets/js/list-page.js?v=20261003-no-list-ids-1" defer></script>
+<<<<<<< HEAD
                 <script src="${ctx}/assets/js/form-page.js?v=20261031-points-validation-1" defer></script>
                 <script src="${ctx}/assets/js/modules-form-pages.js?v=20261031-fnb-datetime-confirm-1" defer></script>
                 <script src="${ctx}/assets/js/fnb-customer.js?v=20261031-fnb-utc-time-1" defer></script>
                 <script src="${ctx}/assets/js/console.js?v=20260525-fnb-refunds-1" defer></script>
+=======
+                <script src="${ctx}/assets/js/form-page.js?v=20261004-movie-author-validation-1" defer></script>
+                <script src="${ctx}/assets/js/modules-form-pages.js?v=20261004-movie-author-validation-1" defer></script>
+                <script src="${ctx}/assets/js/console.js?v=20261004-sidebar-active-1" defer></script>
+>>>>>>> vu
                 <script src="${ctx}/assets/js/modules-rsc.js?v=20261012-review-delete-2" defer></script>
                 <%@ include file="/WEB-INF/views/layout/footer.jsp" %>
             </c:otherwise>

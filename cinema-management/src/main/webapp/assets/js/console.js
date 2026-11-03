@@ -1366,10 +1366,64 @@
     emptyModule("Ban ve tai quay", "Module POS chua san sang.");
   }
 
+<<<<<<< HEAD
   function modulePosConcession() {
     if (window.modulePosConcession) return window.modulePosConcession();
     emptyModule("POS bap nuoc", "Module POS chua san sang.");
   }
+=======
+    // ============ MODULE DISPATCH MAP ============
+    var MODULES = {
+        profile: function () {
+            if (role !== 'CUSTOMER') return moduleProfileInternal();
+            var handler = dispatchBusiness('profile');
+            if (handler) return handler();
+            return moduleProfile();
+        },
+        discovery: moduleDiscovery,
+        reviews: function () {
+            var handler = dispatchBusiness('reviews');
+            return (handler && handler()) || emptyModule('Đánh giá phim', 'Chức năng đánh giá chưa sẵn sàng.');
+        },
+        support: function () {
+            var handler = dispatchBusiness('support');
+            return (handler && handler()) || emptyModule('Hỗ trợ', 'Chức năng chưa sẵn sàng.');
+        },
+        'support-inbox': function () {
+            var handler = dispatchBusiness('support-inbox');
+            return (handler && handler()) || emptyModule('Hỗ trợ', 'Chức năng chưa sẵn sàng.');
+        },
+        complaints: function () {
+            var handler = dispatchBusiness('complaints');
+            return (handler && handler()) || emptyModule('Khiếu nại', 'Chức năng chưa sẵn sàng.');
+        },
+        branch: function () { var h = dispatchBusiness('branch'); return (h && h()) || emptyModule('Chi nhanh', 'Chuc nang chua sang'); },
+        movie: function () { var h = dispatchBusiness('movie'); return (h && h()) || emptyModule('Phim', 'Chuc nang chua sang'); },
+        genres: function () { var h = dispatchBusiness('genres'); return (h && h()) || emptyModule('Thể loại phim', 'Chức năng chưa sẵn sàng'); },
+        screen: function () { var h = dispatchBusiness('screen'); return (h && h()) || emptyModule('Phong chieu', 'Chuc nang chua sang'); },
+        showtime: function () { var h = dispatchBusiness('showtime'); return (h && h()) || emptyModule('Lich chieu', 'Chuc nang chua sang'); },
+        booking: function () { var h = dispatchBusiness('booking'); return (h && h()) || emptyModule('Dat ve', 'Chuc nang chua sang'); },
+        ticket: function () {
+            if (typeof window.moduleTicketStaff === 'function') return window.moduleTicketStaff();
+            return emptyModule('Ve', 'Chuc nang chua sang');
+        },
+        pricing: function () { var h = dispatchBusiness('pricing'); return (h && h()) || emptyModule('Khung gia', 'Chuc nang chua sang'); },
+        notification: function () { var h = dispatchBusiness('notification'); return (h && h()) || emptyModule('Thong bao', 'Chuc nang chua sang'); },
+        'pos-ticket': modulePosTicket,
+        seat: moduleSeat,
+        'my-tickets': function () {
+            // Customer tickets are registered as a form-page renderer, not in the
+            // legacy CinemaHubPages registry used by the other console modules.
+            var formPages = window.CinemaHubFormPages || {};
+            if (formPages.booking && typeof formPages.booking.list === 'function') {
+                formPages.booking.list();
+                return;
+            }
+            emptyModule('Ve cua toi', 'Chuc nang chua sang');
+        },
+        // Reviews.
+    };
+>>>>>>> vu
 
   // ============ MODULE DISPATCH MAP ============
   var MODULES = {
