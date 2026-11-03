@@ -302,6 +302,26 @@
         <url-pattern>/loyalty/*</url-pattern>
     </servlet-mapping>
     <servlet>
+        <servlet-name>voucherController</servlet-name>
+        <servlet-class>com.cinema.controller.VoucherController</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>voucherController</servlet-name>
+        <url-pattern>/voucher</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>voucherController</servlet-name>
+        <url-pattern>/voucher/*</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>voucherController</servlet-name>
+        <url-pattern>/api/vouchers</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>voucherController</servlet-name>
+        <url-pattern>/api/vouchers/*</url-pattern>
+    </servlet-mapping>
+    <servlet>
         <servlet-name>pageController</servlet-name>
         <servlet-class>com.cinema.controller.PageController</servlet-class>
     </servlet>

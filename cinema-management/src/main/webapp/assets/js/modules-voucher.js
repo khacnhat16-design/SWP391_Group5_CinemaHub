@@ -221,7 +221,7 @@
             }).catch(notifyError);
         }
     });
-
+    
     function notifyError(err) {
         hub.notify((err && err.message) || 'Có lỗi xảy ra. Vui lòng thử lại.', 'err');
     }
