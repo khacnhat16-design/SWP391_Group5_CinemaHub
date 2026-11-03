@@ -120,7 +120,7 @@ public class BookingService {
                     }
 
                     boolean isExpiredHold = row.holdExpiresAt != null &&
-                            LocalDateTime.now(ZoneOffset.UTC).isAfter(row.holdExpiresAt);
+                            !LocalDateTime.now(ZoneOffset.UTC).isBefore(row.holdExpiresAt);
 
                     if (!"AVAILABLE".equalsIgnoreCase(row.status) && !isExpiredHold) {
                         conn.rollback();
@@ -175,6 +175,103 @@ public class BookingService {
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Lỗi kết nối cơ sở dữ liệu khi giữ ghế", e);
             return HoldResult.rejected("Lỗi kết nối cơ sở dữ liệu");
+        }
+    }
+
+    /**
+     * Add newly selected seats to a customer's existing active hold.
+     * The caller sends the full selection so existing seats can be verified
+     * before the new seats and ticket total are updated atomically.
+     */
+    public HoldResult addSeatsToHold(long showtimeId, List<Long> requestedSeatIds,
+                                     Long userId, long holdId) throws Exception {
+        if (requestedSeatIds == null || requestedSeatIds.isEmpty()) {
+            return HoldResult.rejected("Vui lòng chọn ít nhất một ghế");
+        }
+
+        List<Long> orderedSeatIds = new ArrayList<>(new TreeSet<>(requestedSeatIds));
+        try (Connection conn = DBContext.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
+                if (hold == null || userId == null || !userId.equals(hold.userId)) {
+                    throw new ServiceException.Forbidden("Bạn không có quyền sửa lượt giữ ghế này");
+                }
+                if (hold.showtimeId != showtimeId) {
+                    throw new ServiceException.Conflict("Lượt giữ ghế thuộc suất chiếu khác");
+                }
+                if (!"ACTIVE".equalsIgnoreCase(hold.status) || hold.expiresAt == null
+                        || !LocalDateTime.now(ZoneOffset.UTC).isBefore(hold.expiresAt)) {
+                    throw new ServiceException.Conflict(
+                            "Giữ ghế đã hết hạn — vui lòng chọn lại ghế");
+                }
+
+                Ticket ticket = ticketDao.findByHoldIdLocked(conn, holdId)
+                        .orElseThrow(() -> new ServiceException.NotFound(
+                                "Không tìm thấy vé đang giữ"));
+                if (!Ticket.STATUS_PENDING.equalsIgnoreCase(ticket.getStatus())
+                        || !userId.equals(ticket.getUserId())
+                        || ticket.getShowtimeId() != showtimeId) {
+                    throw new ServiceException.Conflict(
+                            "Vé này không còn có thể thay đổi ghế");
+                }
+
+                List<Long> existingSeatIds = seatHoldDao.findSeatIdsOfHold(conn, holdId);
+                if (existingSeatIds.isEmpty()
+                        || !orderedSeatIds.containsAll(existingSeatIds)) {
+                    throw new ServiceException.Conflict(
+                            "Danh sách ghế không khớp với lượt giữ hiện tại. Vui lòng tải lại.");
+                }
+                java.util.Set<Long> existingSeatIdSet = new java.util.HashSet<>(existingSeatIds);
+                List<SeatHoldDAO.SeatRow> additions = new ArrayList<>();
+                for (Long seatId : orderedSeatIds) {
+                    SeatHoldDAO.SeatRow seat = seatHoldDao.lockSeat(conn, showtimeId, seatId);
+                    if (seat == null) {
+                        throw new ServiceException.Conflict(
+                                "Ghế không thuộc phòng chiếu của suất này");
+                    }
+                    if (existingSeatIdSet.contains(seatId)) {
+                        if (!"HOLD".equalsIgnoreCase(seat.status)
+                                || !Long.valueOf(holdId).equals(seat.holdId)) {
+                            throw new ServiceException.Conflict(
+                                    "Một ghế đang giữ không còn hợp lệ. Vui lòng tải lại.");
+                        }
+                    } else if ("AVAILABLE".equalsIgnoreCase(seat.status)) {
+                        additions.add(seat);
+                    } else {
+                        throw new ServiceException.Conflict("Ghế " + seat.rowLabel + seat.colNo
+                                + " không còn trống");
+                    }
+                }
+
+                if (!additions.isEmpty()) {
+                    long addedTotal = 0;
+                    List<Ticket.TicketSeat> pricedSeats = new ArrayList<>();
+                    for (SeatHoldDAO.SeatRow seat : additions) {
+                        long price = calculateSeatPrice(seat.seatType);
+                        addedTotal += price;
+                        pricedSeats.add(new Ticket.TicketSeat(
+                                seat.seatId, seat.rowLabel, seat.colNo,
+                                seat.seatType, "ADULT", price));
+                    }
+                    if (!ticketDao.updatePendingTotalGuarded(
+                            conn, ticket.getId(), ticket.getTotalAmount() + addedTotal)) {
+                        throw new ServiceException.Conflict(
+                                "Vé không còn ở trạng thái chờ thanh toán");
+                    }
+                    ticketDao.insertSeats(conn, ticket.getId(), pricedSeats);
+                    for (SeatHoldDAO.SeatRow seat : additions) {
+                        seatHoldDao.markSeatHeld(
+                                conn, showtimeId, seat.seatId, holdId, hold.expiresAt);
+                    }
+                }
+
+                conn.commit();
+                return HoldResult.accepted(String.valueOf(holdId));
+            } catch (Exception ex) {
+                conn.rollback();
+                throw ex;
+            }
         }
     }
 
@@ -535,26 +632,65 @@ public class BookingService {
     /**
      * Giải phóng ghế khi khách hàng bỏ chọn hoặc chủ động hủy giữ.
      */
-    public boolean releaseHold(long showtimeId, List<Long> seatIds, Long userId) {
-        if (seatIds == null || seatIds.isEmpty())
-            return false;
-
+    public void releaseHold(long showtimeId, List<Long> seatIds, Long userId,
+                            Long requestedHoldId) throws Exception {
+        if (seatIds == null || seatIds.isEmpty() || userId == null) {
+            throw new ServiceException.Validation("Thiếu thông tin ghế cần nhả");
+        }
+        List<Long> orderedSeatIds = new ArrayList<>(new TreeSet<>(seatIds));
         try (Connection conn = DBContext.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                for (Long seatId : seatIds) {
+                Long holdId = requestedHoldId;
+                if (holdId == null) {
+                    for (Long seatId : orderedSeatIds) {
+                        holdId = seatHoldDao.findHoldIdForSeat(conn, showtimeId, seatId);
+                        if (holdId != null) {
+                            break;
+                        }
+                    }
+                }
+                if (holdId == null) {
+                    throw new ServiceException.Conflict("Ghế không còn được giữ");
+                }
+
+                SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
+                if (hold == null || !userId.equals(hold.userId)
+                        || !"ACTIVE".equalsIgnoreCase(hold.status)
+                        || hold.showtimeId != showtimeId) {
+                    throw new ServiceException.Forbidden("Bạn không có quyền hủy chỗ này");
+                }
+
+                List<Long> heldSeatIds = seatHoldDao.findSeatIdsOfHold(conn, holdId);
+                if (heldSeatIds.isEmpty()) {
+                    throw new ServiceException.Conflict("Lượt giữ ghế không còn ghế hợp lệ");
+                }
+                for (Long seatId : orderedSeatIds) {
+                    SeatHoldDAO.SeatRow seat = seatHoldDao.lockSeat(conn, showtimeId, seatId);
+                    if (seat == null || !"HOLD".equalsIgnoreCase(seat.status)
+                            || !holdId.equals(seat.holdId)) {
+                        throw new ServiceException.Conflict(
+                                "Một ghế không còn thuộc lượt giữ này");
+                    }
+                }
+                var ticket = ticketDao.findByHoldIdLocked(conn, holdId)
+                        .orElseThrow(() -> new ServiceException.NotFound(
+                                "Không tìm thấy vé đang giữ"));
+                if (!ticketDao.cancelPendingGuarded(conn, ticket.getId())) {
+                    throw new ServiceException.Conflict(
+                            "Vé đã được thanh toán hoặc không còn chờ thanh toán");
+                }
+                for (Long seatId : heldSeatIds) {
                     seatHoldDao.releaseSeat(conn, showtimeId, seatId);
                 }
+                if (!seatHoldDao.updateHoldStatus(conn, holdId, "CANCELLED", "ACTIVE")) {
+                    throw new ServiceException.Conflict("Lượt giữ ghế đã được xử lý");
+                }
                 conn.commit();
-                return true;
             } catch (Exception ex) {
                 conn.rollback();
-                logger.log(Level.WARNING, "Lỗi khi giải phóng ghế", ex);
-                return false;
+                throw ex;
             }
-        } catch (SQLException e) {
-            logger.log(Level.SEVERE, "Lỗi kết nối cơ sở dữ liệu khi nhả ghế", e);
-            return false;
         }
     }
 

@@ -322,7 +322,7 @@ public class BookingController extends HttpServlet {
     }
 
     /** Req 7.1-7.3 — Customer giữ ghế 10 phút. */
-    private void hold(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    private void hold(HttpServletRequest request, HttpServletResponse response) throws Exception {
         AccessScope scope = (AccessScope) request.getAttribute(AuthFilter.SCOPE_ATTRIBUTE);
         if (scope == null || scope.isGuest() || scope.role() != Role.CUSTOMER) {
             sendForbidden(response, "Chỉ Customer đã đăng nhập mới được giữ ghế online");
@@ -351,12 +351,20 @@ public class BookingController extends HttpServlet {
                         + " showtimeId=" + showtimeId + " seatIds=" + seatIds
                         + " ticketType=" + ticketType);
 
+        showtimeService.requireBookable(showtimeId);
         String existingHoldId = request.getParameter("holdId");
-        if (existingHoldId != null && !existingHoldId.isBlank()) {
-            throw new ServiceException.Validation(
-                    "Không thể thêm ghế vào lượt giữ hiện tại; vui lòng tạo lượt giữ mới");
+        HoldResult result;
+        if (existingHoldId == null || existingHoldId.isBlank()) {
+            result = bookingService.holdSeats(showtimeId, seatIds, userId);
+        } else {
+            long holdId;
+            try {
+                holdId = Long.parseLong(existingHoldId.trim());
+            } catch (NumberFormatException e) {
+                throw new ServiceException.Validation("Mã lượt giữ ghế không hợp lệ");
+            }
+            result = bookingService.addSeatsToHold(showtimeId, seatIds, userId, holdId);
         }
-        HoldResult result = bookingService.holdSeats(showtimeId, seatIds, userId);
         if (result.success()) {
             sendOk(response, result);
         } else {
@@ -399,7 +407,10 @@ public class BookingController extends HttpServlet {
         }
         long showtimeId = Long.parseLong(requireParam(request, "showtimeId"));
         List<Long> seatIds = parseSeatIds(requireParam(request, "seatIds"));
-        bookingService.releaseHold(showtimeId, seatIds, userId);
+        String rawHoldId = request.getParameter("holdId");
+        Long holdId = rawHoldId == null || rawHoldId.isBlank()
+                ? null : Long.parseLong(rawHoldId.trim());
+        bookingService.releaseHold(showtimeId, seatIds, userId, holdId);
         sendOk(response, Map.of("success", true));
     }
 

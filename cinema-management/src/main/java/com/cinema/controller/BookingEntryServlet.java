@@ -486,7 +486,7 @@ public final class BookingEntryServlet extends HttpServlet {
                         <canvas class="ticket-barcode" width="240" height="82"></canvas>
                       </div>
                       <div class="booking-payment-foot">
-                        <a class="btn secondary" href="${ctx}/console/booking/list">Xem vé của tôi</a>
+                        <a class="btn secondary" href="${ctx}/console?module=my-tickets">Xem vé của tôi</a>
                         <button type="button" class="btn" id="__closeAndReload">Đóng</button>
                       </div>
                     </div>`;

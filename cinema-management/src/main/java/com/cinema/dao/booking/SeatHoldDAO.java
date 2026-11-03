@@ -184,6 +184,23 @@ public class SeatHoldDAO {
         }
     }
 
+    /** Read a seat's hold id before locking the hold row (keeps lock order consistent). */
+    public Long findHoldIdForSeat(Connection conn, long showtimeId, long seatId) throws SQLException {
+        String sql = """
+            SELECT hold_id FROM dbo.showtime_seat
+            WHERE showtime_id = ? AND seat_id = ?
+            """;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, showtimeId);
+            ps.setLong(2, seatId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return null;
+                long holdId = rs.getLong("hold_id");
+                return rs.wasNull() ? null : holdId;
+            }
+        }
+    }
+
     /**
      * Quét hold ACTIVE hết hạn → EXPIRED + giải phóng ghế (Req 7.4 lazy expiry;
      * scheduler 30s ở task 11.1 gọi cùng hàm). Idempotent.

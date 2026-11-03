@@ -290,6 +290,21 @@ public class TicketDAO {
         }
     }
 
+    /** Update a pending ticket total while seats are added to its active hold. */
+    public boolean updatePendingTotalGuarded(Connection conn, long ticketId, long totalAmount)
+            throws SQLException {
+        String sql = """
+            UPDATE dbo.ticket
+            SET total_amount = ?, version = version + 1
+            WHERE id = ? AND status = 'PENDING'
+            """;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, totalAmount);
+            ps.setLong(2, ticketId);
+            return ps.executeUpdate() == 1;
+        }
+    }
+
     /**
      * CONFIRMED → CANCELLED guarded (Req 11.1, 11.6): hai yêu cầu hủy đồng thời →
      * đúng một thắng; ghi refund_amount theo bậc thang.
