@@ -325,6 +325,18 @@
             var handler = dispatchBusiness('reviews');
             return (handler && handler()) || emptyModule('Đánh giá phim', 'Chức năng đánh giá chưa sẵn sàng.');
         },
+        support: function () {
+            var handler = dispatchBusiness('support');
+            return (handler && handler()) || emptyModule('Hỗ trợ', 'Chức năng chưa sẵn sàng.');
+        },
+        'support-inbox': function () {
+            var handler = dispatchBusiness('support-inbox');
+            return (handler && handler()) || emptyModule('Hỗ trợ', 'Chức năng chưa sẵn sàng.');
+        },
+        complaints: function () {
+            var handler = dispatchBusiness('complaints');
+            return (handler && handler()) || emptyModule('Khiếu nại', 'Chức năng chưa sẵn sàng.');
+        },
         branch: function () { var h = dispatchBusiness('branch'); return (h && h()) || emptyModule('Chi nhanh', 'Chuc nang chua sang'); },
         movie: function () { var h = dispatchBusiness('movie'); return (h && h()) || emptyModule('Phim', 'Chuc nang chua sang'); },
         genres: function () { var h = dispatchBusiness('genres'); return (h && h()) || emptyModule('Thể loại phim', 'Chức năng chưa sẵn sàng'); },

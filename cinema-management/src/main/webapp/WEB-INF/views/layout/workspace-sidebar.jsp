@@ -144,6 +144,13 @@
                         Đăng xuất
                     </a>
                 </div>
+                <div class="ws-menu-group">
+                    <div class="ws-menu-group-label">Phản hồi khách hàng</div>
+                    <a class="ws-menu-link ${wsActive == 'review-branch' ? 'active' : ''}" href="${wsCtx}/console?module=review-branch">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                        Đánh giá phim theo rạp
+                    </a>
+                </div>
             </c:when>
 
             <%-- ============================================================
@@ -243,6 +250,13 @@
                     <a class="ws-menu-link ${wsActive == 'report' ? 'active' : ''}" href="${wsCtx}/console?module=report">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                         Báo cáo
+                    </a>
+                </div>
+                <div class="ws-menu-group">
+                    <div class="ws-menu-group-label">Khiếu nại khách hàng</div>
+                    <a class="ws-menu-link ${wsActive == 'complaints' ? 'active' : ''}" href="${wsCtx}/console?module=complaints">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        Khiếu nại khách hàng
                     </a>
                 </div>
 
