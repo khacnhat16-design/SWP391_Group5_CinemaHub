@@ -30,7 +30,7 @@ import java.util.logging.Logger;
  *   <li>Tạo phòng: branch tồn tại + ACTIVE, mã phòng unique trong branch,
  *       row/col là số nguyên dương; sinh ghế rowLabel A.., colNo 1.. (Req 3.1, 3.2).</li>
  *   <li>Cập nhật sơ đồ ghế: chặn thay đổi làm giảm số ghế hoặc đổi loại ghế
- *       của ghế đã có vé/hold khi phòng còn lịch chiếu tương lai (Req 3.3, 3.4).</li>
+ *       của ghế đã có vé/hold khi lịch chiếu chưa kết thúc (Req 3.3, 3.4).</li>
  *   <li>Vô hiệu hóa phòng: chặn khi còn lịch chiếu tương lai chưa kết thúc (Req 3.5).</li>
  *   <li>Branch scope: caller phải truyền branchId đã được filter xác thực;
  *       thao tác sai chi nhánh bị từ chối (Req 3.6).</li>
@@ -127,8 +127,8 @@ public class ScreenService {
     }
 
     /**
-     * Cập nhật sơ đồ ghế (Req 3.3, 3.4). Chỉ cho phép khi phòng không còn lịch chiếu
-     * tương lai đã mở bán có vé/hold trên các ghế bị ảnh hưởng.
+     * Cập nhật sơ đồ ghế (Req 3.3, 3.4). Chặn thay đổi ghế đã có vé/hold ở suất
+     * đang diễn ra hoặc sắp tới.
      */
     public Screen updateSeatMap(Long actorBranchScope, long screenId,
                                 int rowCount, int colCount, String vipRows) throws Exception {
@@ -172,9 +172,10 @@ public class ScreenService {
                             return desired == null || !desired.seatType().equals(seat.seatType());
                         })
                         .toList();
-                if (hasFutureBookedSeats(conn, screenId, affectedSeats)) {
+                if (hasUnfinishedBookedSeats(conn, screenId, affectedSeats)) {
                     throw new ServiceException.BusinessRule("SCREEN_HAS_FUTURE_TICKETS",
-                            "Không thể xóa hoặc đổi loại ghế đã có vé/giữ chỗ cho suất chiếu tương lai");
+                            "Không thể xóa, bảo trì hoặc đổi loại ghế đã có vé/giữ chỗ "
+                                    + "cho suất chiếu đang diễn ra hoặc sắp tới");
                 }
                 seatDao.synchronize(conn, screenId, seats);
                 seatDao.initializeFutureShowtimeSeats(conn, screenId);
@@ -206,7 +207,7 @@ public class ScreenService {
             throw new ServiceException.Validation("Sơ đồ phải có ít nhất một ghế");
         }
         List<Seat> seats = new ArrayList<>();
-        Set<String> positions = new HashSet<>();
+        Set<String> occupiedPositions = new HashSet<>();
         for (SeatLayoutInput input : requestedLayout) {
             if (input == null || input.rowLabel() == null
                     || !input.rowLabel().matches("[A-Z]")
@@ -217,8 +218,21 @@ public class ScreenService {
             }
             String row = input.rowLabel();
             String type = input.seatType().toUpperCase();
-            if (!positions.add(row + ":" + input.colNo())) {
-                throw new ServiceException.Validation("Sơ đồ có vị trí ghế bị trùng");
+            String position = row + ":" + input.colNo();
+            if (!occupiedPositions.add(position)) {
+                throw new ServiceException.Validation(
+                        "Sơ đồ có vị trí ghế bị trùng hoặc bị ghế đôi chiếm");
+            }
+            if (Seat.TYPE_COUPLE.equals(type)) {
+                if (input.colNo() == colCount) {
+                    throw new ServiceException.Validation(
+                            "Ghế đôi cần hai cột liền nhau và không thể đặt ở cột cuối");
+                }
+                String partnerPosition = row + ":" + (input.colNo() + 1);
+                if (!occupiedPositions.add(partnerPosition)) {
+                    throw new ServiceException.Validation(
+                            "Ghế đôi cần hai cột liền nhau và không thể chồng lên ghế khác");
+                }
             }
             Seat seat = new Seat();
             seat.setScreenId(screenId);
@@ -235,8 +249,8 @@ public class ScreenService {
         return seat.rowLabel() + ":" + seat.colNo();
     }
 
-    private boolean hasFutureBookedSeats(Connection conn, long screenId,
-                                         List<Seat> affectedSeats) throws Exception {
+    private boolean hasUnfinishedBookedSeats(Connection conn, long screenId,
+                                             List<Seat> affectedSeats) throws Exception {
         if (affectedSeats.isEmpty()) return false;
         StringBuilder sql = new StringBuilder("""
             SELECT TOP 1 1 FROM dbo.showtime s WITH (UPDLOCK, HOLDLOCK)
@@ -244,7 +258,7 @@ public class ScreenService {
               ON ss.showtime_id = s.id
             JOIN dbo.seat se ON se.id = ss.seat_id
             WHERE s.screen_id = ? AND s.status = 'OPEN'
-              AND s.start_time > SYSUTCDATETIME()
+              AND DATEADD(minute, s.cleaning_buffer_min, s.end_time) > SYSUTCDATETIME()
               AND (ss.status = 'SOLD'
                    OR (ss.status = 'HOLD' AND ss.hold_expires_at > SYSUTCDATETIME()))
               AND (
