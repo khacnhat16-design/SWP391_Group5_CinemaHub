@@ -235,11 +235,13 @@ public class UserDAO {
         if (term == null || term.isBlank()) return List.of();
         String like = "%" + term.trim() + "%";
         String sql = """
-            SELECT TOP (?) id, email, phone, full_name, status
-            FROM dbo.user_account
-            WHERE role_code = 'CUSTOMER'
-              AND (email LIKE ? OR phone LIKE ? OR full_name LIKE ?)
-            ORDER BY id DESC
+            SELECT TOP (?) u.id, u.email, u.phone, u.full_name, u.status,
+                   ISNULL(p.points, 0) AS points, p.tier AS tier
+            FROM dbo.user_account u
+            LEFT JOIN dbo.customer_profile p ON p.user_id = u.id
+            WHERE u.role_code = 'CUSTOMER'
+              AND (u.email LIKE ? OR u.phone LIKE ? OR u.full_name LIKE ?)
+            ORDER BY u.id DESC
             """;
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -255,7 +257,9 @@ public class UserDAO {
                             rs.getString("email"),
                             rs.getString("phone"),
                             rs.getString("full_name"),
-                            rs.getString("status")
+                            rs.getString("status"),
+                            rs.getInt("points"),
+                            rs.getString("tier")
                     ));
                 }
                 return out;
@@ -270,10 +274,12 @@ public class UserDAO {
      */
     public List<CustomerSummary> listCustomers(int limit) throws Exception {
         String sql = """
-            SELECT TOP (?) id, email, phone, full_name, status
-            FROM dbo.user_account
-            WHERE role_code = 'CUSTOMER'
-            ORDER BY id DESC
+            SELECT TOP (?) u.id, u.email, u.phone, u.full_name, u.status,
+                   ISNULL(p.points, 0) AS points, p.tier AS tier
+            FROM dbo.user_account u
+            LEFT JOIN dbo.customer_profile p ON p.user_id = u.id
+            WHERE u.role_code = 'CUSTOMER'
+            ORDER BY u.id DESC
             """;
         try (Connection conn = DBContext.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -286,7 +292,9 @@ public class UserDAO {
                             rs.getString("email"),
                             rs.getString("phone"),
                             rs.getString("full_name"),
-                            rs.getString("status")
+                            rs.getString("status"),
+                            rs.getInt("points"),
+                            rs.getString("tier")
                     ));
                 }
                 return out;

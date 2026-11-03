@@ -4,29 +4,28 @@ import com.cinema.filter.AuthFilter;
 import com.cinema.model.branch.Branch;
 
 import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Objects;
 import java.util.Set;
 
 /** Immutable authorization scope resolved from the authenticated account. */
 public final class AccessScope {
     private static final Set<String> PUBLIC_PERMISSIONS = Set.of("SHOWTIME_BROWSE");
     private static final Set<String> CUSTOMER_PERMISSIONS = Set.of(
-            "SHOWTIME_BROWSE", "BOOKING_CREATE", "BOOKING_VIEW_OWN", "BOOKING_CANCEL_OWN");
+            "SHOWTIME_BROWSE", "BOOKING_CREATE", "BOOKING_VIEW_OWN", "BOOKING_CANCEL_OWN",
+            "CONCESSION_PREORDER", "LOYALTY_VIEW");
     private static final Set<String> STAFF_PERMISSIONS = Set.of(
-            "SHOWTIME_BROWSE", "TICKET_CANCEL_BRANCH", "TICKET_VALIDATE", "CONCESSION_SELL",
-            "CONCESSION_PICKUP", "SHIFT_OPEN", "SHIFT_CLOSE", "INVENTORY_VIEW",
-            "LOYALTY_ADJUST", "SHIFT_ASSIGNMENT_VIEW_OWN", "SHIFT_REQUEST_SUBMIT");
+            "SHOWTIME_BROWSE", "TICKET_SELL", "TICKET_VALIDATE", "CONCESSION_SELL",
+            "CONCESSION_PICKUP", "INVENTORY_VIEW", "LOYALTY_ADJUST");
     private static final Set<String> MANAGER_PERMISSIONS = Set.of(
-            "SHOWTIME_BROWSE", "SCREEN_MANAGE", "SHOWTIME_MANAGE", "INVENTORY_VIEW", "INVENTORY_MANAGE",
-            "SHIFT_APPROVE", "REPORT_VIEW", "REFUND_APPROVE", "TICKET_CANCEL_BRANCH", "TICKET_VALIDATE",
+            "SHOWTIME_BROWSE", "SCREEN_MANAGE", "SHOWTIME_MANAGE", "INVENTORY_MANAGE",
+            "REPORT_VIEW", "REFUND_APPROVE", "TICKET_SELL",
             "CONCESSION_SELL", "LOYALTY_ADJUST", "VOUCHER_MANAGE", "HOLIDAY_MANAGE",
-            "PRICING_MANAGE",
-            "SHIFT_TEMPLATE_MANAGE", "SHIFT_ASSIGNMENT_MANAGE", "SHIFT_REQUEST_REVIEW");
+            "PRICING_MANAGE", "PRODUCT_MANAGE");
     private static final Set<String> ADMIN_PERMISSIONS = Set.of(
             "SHOWTIME_BROWSE", "BRANCH_MANAGE", "MOVIE_MANAGE", "PRICING_MANAGE",
             "VOUCHER_MANAGE", "HOLIDAY_MANAGE", "LOYALTY_MANAGE", "PRODUCT_MANAGE", "USER_MANAGE",
-            "REPORT_VIEW", "AUDIT_VIEW",
-            "SHIFT_TEMPLATE_MANAGE", "SHIFT_ASSIGNMENT_MANAGE", "SHIFT_ASSIGNMENT_VIEW_OWN",
-            "SHIFT_REQUEST_SUBMIT", "SHIFT_REQUEST_REVIEW");
+            "REPORT_VIEW", "AUDIT_VIEW");
 
     private final Role role;
     private final Set<Long> branchIds;
@@ -83,6 +82,11 @@ public final class AccessScope {
             return true;
         }
         return permissionsFor(role).contains(permission);
+    }
+
+    /** Check if this scope can adjust customer loyalty points. */
+    public boolean canAdjustPoints() {
+        return can("LOYALTY_ADJUST");
     }
 
     private static Set<String> permissionsFor(Role role) {
