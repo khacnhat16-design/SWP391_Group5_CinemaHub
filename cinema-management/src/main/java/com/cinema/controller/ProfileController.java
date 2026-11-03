@@ -3,6 +3,8 @@ package com.cinema.controller;
 import com.cinema.service.auth.AuthService;
 import com.cinema.model.auth.CustomerProfile;
 import com.cinema.dao.auth.CustomerProfileDAO;
+import com.cinema.dao.loyalty.LoyaltyDAO;
+import com.cinema.model.loyalty.LoyaltyTier;
 import com.cinema.model.auth.Role;
 import com.cinema.model.auth.User;
 import com.cinema.dao.auth.UserDAO;
@@ -18,6 +20,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -28,12 +31,14 @@ public final class ProfileController extends HttpServlet {
 
     private UserDAO userDao;
     private CustomerProfileDAO profileDao;
+    private LoyaltyDAO loyaltyDao;
     private AuthService authService;
 
     @Override
     public void init() throws ServletException {
         this.userDao = new UserDAO();
         this.profileDao = new CustomerProfileDAO();
+        this.loyaltyDao = new LoyaltyDAO();
         this.authService = new AuthService(userDao, profileDao);
     }
 
@@ -55,6 +60,11 @@ public final class ProfileController extends HttpServlet {
         try {
             Long userId = requireCustomer(request, response);
             if (userId == null) return;
+            if (hasBankAccountParameters(request)) {
+                saveBankAccount(userId, request);
+                sendOk(response, profilePayload(userId));
+                return;
+            }
             User updated = authService.updateProfile(userId,
                     request.getParameter("fullName"), request.getParameter("phone"));
             var session = request.getSession(false);
@@ -82,11 +92,68 @@ public final class ProfileController extends HttpServlet {
                 .orElseThrow(() -> new ServiceException.NotFound("Hồ sơ khách hàng không tồn tại"));
         membership.put("tier", profile.tier());
         membership.put("points", profile.points());
+        List<LoyaltyTier> tiers = loyaltyDao.findAllTiers().stream()
+                .filter(tier -> !"SYSTEM".equalsIgnoreCase(tier.tierName()))
+                .toList();
+        membership.put("tierProgressAvailable", !tiers.isEmpty());
+        LoyaltyTier currentTier = tiers.stream()
+                .filter(tier -> tier.tierName().equalsIgnoreCase(profile.tier()))
+                .findFirst()
+                .orElseGet(() -> tiers.stream()
+                        .filter(tier -> tier.minPoints() <= profile.points())
+                        .max(java.util.Comparator.comparingInt(LoyaltyTier::minPoints))
+                        .orElse(null));
+        LoyaltyTier nextTier = tiers.stream()
+                .filter(tier -> tier.minPoints() > profile.points())
+                .min(java.util.Comparator.comparingInt(LoyaltyTier::minPoints))
+                .orElse(null);
+        membership.put("tierProgressStartPoints",
+                currentTier == null ? 0 : currentTier.minPoints());
+        membership.put("nextTier", nextTier == null ? null : nextTier.tierName());
+        membership.put("nextTierMinPoints", nextTier == null ? null : nextTier.minPoints());
+        membership.put("pointsToNextTier",
+                nextTier == null ? null : nextTier.minPoints() - profile.points());
+
+        Map<String, Object> bankAccount = new LinkedHashMap<>();
+        bankAccount.put("bankName", profile.bankName());
+        bankAccount.put("bankAccountName", profile.bankAccountName());
+        bankAccount.put("bankAccountNumber", profile.bankAccountNumber());
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("user", account);
         result.put("profile", membership);
+        result.put("bankAccount", bankAccount);
         return result;
+    }
+
+    private boolean hasBankAccountParameters(HttpServletRequest request) {
+        return request.getParameter("bankName") != null
+                || request.getParameter("bankAccountName") != null
+                || request.getParameter("bankAccountNumber") != null;
+    }
+
+    private void saveBankAccount(long userId, HttpServletRequest request) throws Exception {
+        String bankName = trimToNull(request.getParameter("bankName"));
+        String accountName = trimToNull(request.getParameter("bankAccountName"));
+        String accountNumber = trimToNull(request.getParameter("bankAccountNumber"));
+        boolean allEmpty = bankName == null && accountName == null && accountNumber == null;
+        if (!allEmpty) {
+            if (bankName == null || accountName == null || accountNumber == null) {
+                throw new ServiceException.Validation("Vui lòng nhập đầy đủ thông tin tài khoản ngân hàng");
+            }
+            if (bankName.length() > 120 || accountName.length() > 120) {
+                throw new ServiceException.Validation("Tên ngân hàng và chủ tài khoản tối đa 120 ký tự");
+            }
+            if (!accountNumber.matches("[0-9]{6,40}")) {
+                throw new ServiceException.Validation("Số tài khoản phải gồm 6–40 chữ số");
+            }
+        }
+        profileDao.updateBankAccount(userId, bankName, accountName, accountNumber);
+    }
+
+    private String trimToNull(String value) {
+        if (value == null || value.isBlank()) return null;
+        return value.trim();
     }
 
     private Long requireCustomer(HttpServletRequest request, HttpServletResponse response)
