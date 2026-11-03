@@ -97,7 +97,7 @@ public final class BranchScopeRBACFilter implements Filter {
             // Admin/Manager CRM-style paths
             "/payroll", "/api/payroll-complaints",
             // Voucher CRUD (Admin/Manager per scope; Staff can read holiday for context)
-            "/voucher", "/holiday",
+            "/voucher", "/api/vouchers", "/holiday",
             // Work Scheduling
             "/shift-templates", "/shift-assignments", "/shift-requests",
             "/branch-schedule-config",
