@@ -219,6 +219,14 @@ public final class CinemaApplication {
         Tomcat.addServlet(context, "refundController", new RefundController());
         context.addServletMappingDecoded("/api/refunds", "refundController");
         context.addServletMappingDecoded("/api/refunds/*", "refundController");
+        Tomcat.addServlet(context, "voucherController", new VoucherController());
+        context.addServletMappingDecoded("/voucher", "voucherController");
+        context.addServletMappingDecoded("/voucher/*", "voucherController");
+        context.addServletMappingDecoded("/api/vouchers", "voucherController");
+        context.addServletMappingDecoded("/api/vouchers/*", "voucherController");
+        Tomcat.addServlet(context, "staffLoyaltyController", new StaffLoyaltyController());
+        context.addServletMappingDecoded("/loyalty", "staffLoyaltyController");
+        context.addServletMappingDecoded("/loyalty/*", "staffLoyaltyController");
         // Image upload via UploadThing — Admin / Branch Manager only.
         // NOTE: Tomcat.addServlet(name, instance) does NOT honor @MultipartConfig
         // annotation
