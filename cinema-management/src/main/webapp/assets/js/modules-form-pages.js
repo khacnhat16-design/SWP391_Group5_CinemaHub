@@ -118,11 +118,11 @@
             'aria-modal': 'true',
             'aria-labelledby': 'showtime-bookings-title'
         });
-        var title = [showtime.movieTitle || 'Suất chiếu', 'Trạng thái ghế'].join(' · ');
+        var title = [showtime.movieTitle || 'Suất chiếu', 'Ghế đã đặt'].join(' · ');
         var closeButton = hub.el('button', {
             class: 'ws-modal-x',
             type: 'button',
-            'aria-label': 'Đóng trạng thái ghế'
+            'aria-label': 'Đóng danh sách ghế đã đặt'
         }, ['×']);
         var heading = hub.el('div', { class: 'ws-modal-head' }, [
             hub.el('h2', { id: 'showtime-bookings-title' }, [title]),
@@ -283,7 +283,7 @@
 
         function loadBookings() {
             status.className = 'ws-showtime-bookings-status';
-            status.textContent = 'Đang tải danh sách ghế…';
+            status.textContent = 'Đang tải danh sách ghế đã đặt…';
             tableWrap.replaceChildren();
             previousButton.disabled = true;
             nextButton.disabled = true;
@@ -297,7 +297,7 @@
                 var total = Number(data.total) || 0;
                 status.textContent = total
                     ? 'Có ' + total.toLocaleString('vi-VN') + ' vé đang giữ, đã đặt hoặc đã sử dụng.'
-                    : 'Chưa có khách đặt ghế cho suất chiếu này.';
+                    : 'Chưa có vé nào cho suất chiếu này.';
                 if (items.length) {
                     var table = hub.el('table', { class: 'ws-table' });
                     var headRow = hub.el('tr');
@@ -3307,9 +3307,9 @@
                             var button = hub.el('button', {
                                 class: 'ws-btn ws-btn-sm secondary',
                                 type: 'button',
-                                'aria-label': 'Xem trạng thái ghế của '
+                                'aria-label': 'Xem ghế đã đặt của '
                                     + (showtime.movieTitle || 'suất chiếu')
-                            }, ['Xem trạng thái ghế']);
+                            }, ['Xem ghế đã đặt']);
                             button.addEventListener('click', function () {
                                 openShowtimeBookings(showtime);
                             });

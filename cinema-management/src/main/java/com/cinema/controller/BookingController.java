@@ -25,6 +25,7 @@ import com.cinema.service.payment.PaymentService;
 import com.cinema.model.payment.VnPayConfig;
 import com.cinema.service.payment.VnPayProvider;
 import com.cinema.model.payment.Payment;
+import com.cinema.model.screen.Seat;
 import com.cinema.dao.pricing.PriceRuleDAO;
 import com.cinema.service.pricing.PricingService;
 import com.cinema.model.pricing.TicketType;
@@ -155,6 +156,11 @@ public class BookingController extends HttpServlet {
         Long branchScope = (scope.role() == Role.ADMIN) ? null : singleBranch(scope);
         String q = trimOrNull(request.getParameter("q"));
         String status = trimOrNull(request.getParameter("status"));
+        String showtimeIdRaw = trimOrNull(request.getParameter("showtimeId"));
+        Long showtimeId = showtimeIdRaw == null ? null : Long.parseLong(showtimeIdRaw);
+        if (showtimeId != null && showtimeId <= 0) {
+            throw new ServiceException.Validation("showtimeId phải là số nguyên dương");
+        }
 
         // SELECT thêm total + filter theo q/status; ORDER BY created_at DESC + OFFSET/FETCH NEXT.
         StringBuilder countSql = new StringBuilder("""
@@ -180,6 +186,11 @@ public class BookingController extends HttpServlet {
             sql.append(" AND t.branch_id = ?");
             countSql.append(" AND t.branch_id = ?");
             filterParams.add(branchScope);
+        }
+        if (showtimeId != null) {
+            sql.append(" AND t.showtime_id = ?");
+            countSql.append(" AND t.showtime_id = ?");
+            filterParams.add(showtimeId);
         }
         if (q != null) {
             String like = "%" + q + "%";
@@ -213,7 +224,8 @@ public class BookingController extends HttpServlet {
                 try (java.sql.ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
                         java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
-                        m.put("id", rs.getLong("id"));
+                        long ticketId = rs.getLong("id");
+                        m.put("id", ticketId);
                         m.put("ticketCode", rs.getString("ticket_code"));
                         m.put("customerName", rs.getString("customer"));
                         m.put("movieTitle", rs.getString("movie"));
@@ -223,6 +235,31 @@ public class BookingController extends HttpServlet {
                         m.put("status", rs.getString("status"));
                         items.add(m);
                     }
+                }
+            }
+            if (showtimeId != null) {
+                java.util.List<Long> ticketIds = items.stream()
+                        .map(item -> (Long) item.get("id"))
+                        .toList();
+                java.util.Map<Long, List<Ticket.TicketSeat>> seatsByTicket =
+                        ticketDao.findSeatsByTickets(conn, ticketIds);
+                for (java.util.Map<String, Object> item : items) {
+                    long ticketId = (Long) item.get("id");
+                    List<java.util.Map<String, Object>> seats = new ArrayList<>();
+                    for (Ticket.TicketSeat seat : seatsByTicket.getOrDefault(ticketId, List.of())) {
+                        java.util.Map<String, Object> seatRow = new java.util.LinkedHashMap<>();
+                        seatRow.put("seatId", seat.seatId());
+                        seatRow.put("rowLabel", seat.rowLabel());
+                        seatRow.put("colNo", seat.colNo());
+                        seatRow.put("seatType", seat.seatType());
+                        seatRow.put("seatCode", seat.seatType() != null
+                                && Seat.TYPE_COUPLE.equalsIgnoreCase(seat.seatType())
+                                ? seat.rowLabel() + seat.colNo() + "-" + (seat.colNo() + 1)
+                                : seat.rowLabel() + seat.colNo());
+                        seatRow.put("price", seat.price());
+                        seats.add(seatRow);
+                    }
+                    item.put("seats", seats);
                 }
             }
         }
