@@ -1,36 +1,40 @@
 package com.cinema.service.booking;
 
-import com.cinema.common.ServiceException;
-import com.cinema.infrastructure.database.DBContext;
 import com.cinema.dao.booking.SeatHoldDAO;
 import com.cinema.dao.booking.TicketDAO;
-import com.cinema.model.auth.Transaction;
+import com.cinema.infrastructure.database.DBContext;
+import com.cinema.listener.ExpiryScheduler;
 import com.cinema.model.booking.HoldResult;
 import com.cinema.model.booking.Ticket;
 import com.cinema.model.branch.Branch;
-import com.cinema.model.movie.Movie;
-import com.cinema.model.screen.Screen;
-import com.cinema.model.screen.Seat;
+import com.cinema.model.concession.ConcessionOrder;
+import com.cinema.model.notification.Notification;
+import com.cinema.service.audit.AuditService;
+import com.cinema.service.concession.ConcessionService;
+import com.cinema.service.notification.NotificationService;
+
+import com.cinema.common.ServiceException;
+import com.cinema.service.loyalty.LoyaltyService;
+import com.cinema.model.payment.Payment;
+import com.cinema.dao.payment.PaymentDAO;
+import com.cinema.service.payment.PaymentService;
+import com.cinema.service.pricing.PricingService;
+import com.cinema.model.pricing.TicketType;
 import com.cinema.model.showtime.Showtime;
+import com.cinema.service.showtime.ShowtimeService;
+import com.cinema.util.TransactionTemplate;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -38,423 +42,877 @@ import java.util.logging.Logger;
 
 /**
  * Service đặt vé trọng tâm đồng thời (Req 7.1-7.7, 8.1-8.6, 11.1-11.7, 12.1-12.6).
- * Chức năng: Xử lý nghiệp vụ đặt vé, giữ chỗ, xác nhận vé, chính sách hoàn tiền và soát vé.
  *
  * <p>Concurrency (design.md BookingService):
  * <ul>
  *   <li>holdSeats: khóa showtime_seat theo seat_id TĂNG DẦN bằng
- *       SELECT ... WITH (UPDLOCK, HOLDLOCK, ROWLOCK) trong transaction để hai Customer
- *       giữ cùng ghế đồng thời thì đúng một người thắng (Req 8.1-8.3).</li>
- *   <li>confirmBooking: khóa hold + vé, kiểm tra hiệu lực, ghi nhận thanh toán,
- *       chuyển ghế SOLD — nguyên tử trong MỘT transaction (Req 8.2).</li>
- *   <li>Lazy expiry: hold hết hạn coi như AVAILABLE khi đọc; sweep dọn hold
- *       quá hạn (Req 7.4, 8.4).</li>
- *   <li>cancelTicket: bậc thang >=24h hoàn 100%, 2–24h hoàn 50%, <2h không hoàn,
- *       USED chặn (Req 11.1); hai hủy đồng thời thì đúng một người thắng (Req 11.6).</li>
+ *       SELECT ... WITH (UPDLOCK, HOLDLOCK, ROWLOCK) trong transaction → hai Customer
+ *       giữ cùng ghế đồng thời thì đúng một thắng (Req 8.1-8.3).</li>
+ *   <li>confirmBooking: khóa hold + vé, kiểm còn hiệu lực, áp voucher guarded,
+ *       thanh toán, chuyển ghế SOLD — nguyên tử trong MỘT transaction (Req 8.2).</li>
+ *   <li>Lazy expiry: hold hết hạn coi như AVAILABLE khi đọc; sweep dọn hold/ticket
+ *       PENDING quá hạn (Req 7.4, 8.4; scheduler 30s ở task 11.1 gọi cùng hàm).</li>
+ *   <li>cancelTicket: bậc thang ≥24h hoàn 100%, 2–24h hoàn 50%, <2h không hoàn,
+ *       USED chặn (Req 11.1); hai hủy đồng thời → đúng một thắng (Req 11.6).</li>
  *   <li>validateTicket: một lần soát tại đúng chi nhánh, showtime chưa kết thúc (Req 12).</li>
  * </ul>
  */
 public class BookingService {
     private static final Logger logger = Logger.getLogger(BookingService.class.getName());
-    public static final ZoneId BUSINESS_TZ = ZoneId.of("Asia/Ho_Chi_Minh");
+    private static final ZoneId BUSINESS_TZ = ZoneId.of("Asia/Ho_Chi_Minh");
 
     private final SeatHoldDAO seatHoldDao;
     private final TicketDAO ticketDao;
-
-    public BookingService() {
-        this(new SeatHoldDAO(), new TicketDAO());
+    private final ShowtimeService showtimeService;
+    private final PricingService pricingService;
+    private final LoyaltyService loyaltyService;
+    private final PaymentService paymentService;
+    private final PaymentDAO paymentDao = new PaymentDAO();
+    /** Optional — F&B pre-order gắn vé (Req 21.1, 21.6); null khi chưa cần tích hợp. */
+    private final com.cinema.service.concession.ConcessionService concessionService;
+    /** Optional — thông báo in-app (Req 23.1, 23.2); best-effort, không rollback luồng chính. */
+    private final com.cinema.service.notification.NotificationService notificationService;
+    /** Req 15.3/11.2 — audit mọi state transition của vé. */
+    private final com.cinema.service.audit.AuditService audit = new com.cinema.service.audit.AuditService();
+    private final TransactionTemplate tx = new TransactionTemplate();
+    public BookingService(SeatHoldDAO seatHoldDao, TicketDAO ticketDao,
+                          ShowtimeService showtimeService, PricingService pricingService,
+                          LoyaltyService loyaltyService,
+                          PaymentService paymentService) {
+        this(seatHoldDao, ticketDao, showtimeService, pricingService,
+                loyaltyService, paymentService, null, null);
     }
 
-    public BookingService(SeatHoldDAO seatHoldDao, TicketDAO ticketDao) {
+    public BookingService(SeatHoldDAO seatHoldDao, TicketDAO ticketDao,
+                          ShowtimeService showtimeService, PricingService pricingService,
+                          LoyaltyService loyaltyService,
+                          PaymentService paymentService,
+                          com.cinema.service.concession.ConcessionService concessionService) {
+        this(seatHoldDao, ticketDao, showtimeService, pricingService,
+                loyaltyService, paymentService, concessionService, null);
+    }
+
+    public BookingService(SeatHoldDAO seatHoldDao, TicketDAO ticketDao,
+                          ShowtimeService showtimeService, PricingService pricingService,
+                          LoyaltyService loyaltyService,
+                          PaymentService paymentService,
+                          com.cinema.service.concession.ConcessionService concessionService,
+                          com.cinema.service.notification.NotificationService notificationService) {
         this.seatHoldDao = seatHoldDao;
         this.ticketDao = ticketDao;
+        this.showtimeService = showtimeService;
+        this.pricingService = pricingService;
+        this.loyaltyService = loyaltyService;
+        this.paymentService = paymentService;
+        this.concessionService = concessionService;
+        this.notificationService = notificationService;
     }
 
     /**
-     * Báo giá trước khi giữ ghế (Snapshot Pricing Quote).
-     */
-    public Map<String, Object> quoteOrder(long showtimeId, List<Long> seatIds) {
-        if (seatIds == null || seatIds.isEmpty()) {
-            return Map.of("baseTotal", 0L, "tierDiscount", 0L, "voucherDiscount", 0L, "payable", 0L);
-        }
-
-        long total = 0;
-        try (Connection conn = DBContext.getConnection()) {
-            for (Long seatId : seatIds) {
-                String seatType = getSeatType(conn, seatId);
-                total += calculateSeatPrice(seatType);
-            }
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Không lấy được giá chuẩn, sử dụng giá mặc định", e);
-            total = seatIds.size() * 75_000L;
-        }
-
-        Map<String, Object> quote = new HashMap<>();
-        quote.put("baseTotal", total);
-        quote.put("tierDiscount", 0L);
-        quote.put("voucherDiscount", 0L);
-        quote.put("payable", total);
-        return quote;
-    }
-
-    /**
-     * Req 7.1-7.3, 8.1 — Giữ ghế 10 phút và chống tranh chấp đồng thời (Concurrency Control).
+     * Tạo seat hold 10 phút (Req 7.1-7.3, 8.1-8.6): kiểm showtime mở bán, toàn bộ ghế
+     * trống (AVAILABLE hoặc hold đã hết hạn — lazy), khóa theo seatId tăng dần rồi
+     * chuyển HOLD + tạo hold + vé PENDING trong cùng transaction.
      */
     public HoldResult holdSeats(long showtimeId, List<Long> seatIds, Long userId) {
+        return holdSeats(showtimeId, seatIds, userId, null);
+    }
+
+    /**
+     * Hold seats + resolve giá theo {@code ticketType} (Req 9). Backend ignore
+     * {@code unitPrice} client gửi — luôn resolve qua PricingService.
+     */
+    public HoldResult holdSeats(long showtimeId, List<Long> seatIds, Long userId, TicketType ticketType) {
+        // Sweep các hold đã hết hạn trước khi check ghế AVAILABLE — nếu không,
+        // user phải đợi scheduler 30s mới thấy ghế "stale" được giải phóng.
+        expireElapsed();
         if (seatIds == null || seatIds.isEmpty()) {
             return HoldResult.rejected("Vui lòng chọn ít nhất một ghế");
         }
+        // Chuẩn hóa: distinct + sắp TĂNG DẦN theo seatId (khóa đúng thứ tự tránh deadlock, Req 8.3)
+        TreeSet<Long> ordered = new TreeSet<>(seatIds);
+        Showtime showtime;
+        try {
+            showtime = showtimeService.requireBookable(showtimeId);
+        } catch (Exception e) {
+            return HoldResult.rejected(safeMessage(e, "Suất chiếu không khả dụng"));
+        }
 
-        List<Long> orderedSeatIds = new ArrayList<>(new TreeSet<>(seatIds));
-
-        try (Connection conn = DBContext.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                List<SeatHoldDAO.SeatRow> lockedSeats = new ArrayList<>();
-
-                for (Long seatId : orderedSeatIds) {
+        try {
+            return tx.execute(conn -> {
+                // Khóa + kiểm từng ghế theo thứ tự tăng dần
+                List<SeatHoldDAO.SeatRow> locked = new ArrayList<>();
+                for (Long seatId : ordered) {
                     SeatHoldDAO.SeatRow row = seatHoldDao.lockSeat(conn, showtimeId, seatId);
                     if (row == null) {
-                        conn.rollback();
-                        return HoldResult.rejected("Ghế không tồn tại hoặc không thuộc suất chiếu này");
+                        throw new ServiceException.Conflict(
+                                "Ghế " + seatId + " không thuộc phòng chiếu của suất này");
                     }
-
-                    boolean isExpiredHold = row.holdExpiresAt != null &&
-                            !LocalDateTime.now(ZoneOffset.UTC).isBefore(row.holdExpiresAt);
-
-                    if (!"AVAILABLE".equalsIgnoreCase(row.status) && !isExpiredHold) {
-                        conn.rollback();
-                        return HoldResult.rejected("Ghế " + row.rowLabel + row.colNo + " không còn trống");
+                    boolean expiredHold = isHoldExpired(row);
+                    if (!"AVAILABLE".equals(row.status) && !expiredHold) {
+                        throw new ServiceException.Conflict("Ghế " + row.rowLabel + row.colNo
+                                + " không còn trống (trạng thái: " + row.status + ")");
                     }
-                    lockedSeats.add(row);
+                    locked.add(row);
                 }
 
+                // Tạo hold + chuyển ghế HOLD
                 long holdId = seatHoldDao.insertHold(conn, showtimeId, userId);
                 LocalDateTime expiresAt = LocalDateTime.now(ZoneOffset.UTC).plusMinutes(SeatHoldDAO.HOLD_MINUTES);
-
-                for (SeatHoldDAO.SeatRow row : lockedSeats) {
+                for (SeatHoldDAO.SeatRow row : locked) {
                     seatHoldDao.markSeatHeld(conn, showtimeId, row.seatId, holdId, expiresAt);
                 }
 
-                long branchId = queryBranchId(conn, showtimeId);
-                long totalAmount = 0;
-                List<Ticket.TicketSeat> snapshotSeats = new ArrayList<>();
-
-                for (SeatHoldDAO.SeatRow row : lockedSeats) {
-                    long price = calculateSeatPrice(row.seatType);
-                    totalAmount += price;
-                    snapshotSeats.add(new Ticket.TicketSeat(
-                            row.seatId, row.rowLabel, row.colNo, row.seatType, "ADULT", price
-                    ));
+                // Tính giá snapshot cho từng ghế + tạo vé PENDING (Req 7.1, 8, 11)
+                long total = 0;
+                List<Ticket.TicketSeat> pricedSeats = new ArrayList<>();
+                for (SeatHoldDAO.SeatRow row : locked) {
+                    long price = pricingService.priceSeatFor(showtime, row.seatType, ticketType).price();
+                    total += price;
+                    pricedSeats.add(new Ticket.TicketSeat(row.seatId, row.rowLabel, row.colNo,
+                            row.seatType, ticketType == null ? null : ticketType.code(), price));
                 }
-
                 Ticket ticket = new Ticket();
                 ticket.setTicketCode(generateTicketCode());
                 ticket.setShowtimeId(showtimeId);
-                ticket.setBranchId(branchId);
+                ticket.setBranchId(showtime.branchId());
                 ticket.setUserId(userId);
                 ticket.setStatus(Ticket.STATUS_PENDING);
-                ticket.setTotalAmount(totalAmount);
+                ticket.setTotalAmount(total);
                 ticket.setHoldId(holdId);
-                ticket.setCreatedAt(LocalDateTime.now());
-                ticket.setSeats(snapshotSeats);
-
                 long ticketId = ticketDao.insert(conn, ticket);
-                ticket.setId(ticketId);
-                ticketDao.insertSeats(conn, ticketId, snapshotSeats);
+                ticketDao.insertSeats(conn, ticketId, pricedSeats);
 
-                conn.commit();
-                logger.info("Giữ thành công " + orderedSeatIds.size() + " ghế (holdId=" + holdId + ")");
+                // Req 15.3 — audit tạo hold + vé PENDING trong cùng transaction
+                audit.record(conn, userId, "CREATE_HOLD", "TICKET", ticketId, null,
+                        "{\"holdId\":" + holdId + ",\"showtimeId\":" + showtimeId
+                                + ",\"seats\":" + ordered.size() + ",\"status\":\"PENDING\"}",
+                        com.cinema.service.audit.AuditService.SUCCESS);
+
+                logger.info("Hold " + holdId + " created for ticket " + ticketId
+                        + " (" + locked.size() + " seats, showtime " + showtimeId + ")");
                 return HoldResult.accepted(String.valueOf(holdId));
-
-            } catch (Exception ex) {
-                conn.rollback();
-                logger.log(Level.SEVERE, "Lỗi transaction khi giữ ghế", ex);
-                return HoldResult.rejected("Lỗi hệ thống khi xử lý giữ ghế");
-            }
-        } catch (SQLException e) {
-            logger.log(Level.SEVERE, "Lỗi kết nối cơ sở dữ liệu khi giữ ghế", e);
-            return HoldResult.rejected("Lỗi kết nối cơ sở dữ liệu");
+            });
+        } catch (ServiceException e) {
+            return HoldResult.rejected(e.getMessage());
+        } catch (Exception e) {
+            logger.log(java.util.logging.Level.WARNING, "holdSeats failed", e);
+            return HoldResult.rejected("Không giữ được ghế — vui lòng thử lại");
         }
     }
 
-    /**
-     * Add newly selected seats to a customer's existing active hold.
-     * The caller sends the full selection so existing seats can be verified
-     * before the new seats and ticket total are updated atomically.
-     */
+    /** Atomically adds newly selected seats to an existing customer hold. */
     public HoldResult addSeatsToHold(long showtimeId, List<Long> requestedSeatIds,
-                                     Long userId, long holdId) throws Exception {
+                                     Long userId, long holdId, TicketType ticketType) {
+        expireElapsed();
         if (requestedSeatIds == null || requestedSeatIds.isEmpty()) {
             return HoldResult.rejected("Vui lòng chọn ít nhất một ghế");
         }
-
-        List<Long> orderedSeatIds = new ArrayList<>(new TreeSet<>(requestedSeatIds));
-        try (Connection conn = DBContext.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
+        TreeSet<Long> ordered = new TreeSet<>(requestedSeatIds);
+        try {
+            return tx.execute(conn -> {
                 SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
-                if (hold == null || userId == null || !userId.equals(hold.userId)) {
+                if (hold == null) {
+                    throw new ServiceException.NotFound("Không tìm thấy lượt giữ ghế");
+                }
+                if (userId == null || !userId.equals(hold.userId)) {
                     throw new ServiceException.Forbidden("Bạn không có quyền sửa lượt giữ ghế này");
                 }
                 if (hold.showtimeId != showtimeId) {
                     throw new ServiceException.Conflict("Lượt giữ ghế thuộc suất chiếu khác");
                 }
-                if (!"ACTIVE".equalsIgnoreCase(hold.status) || hold.expiresAt == null
-                        || !LocalDateTime.now(ZoneOffset.UTC).isBefore(hold.expiresAt)) {
+                if (!"ACTIVE".equals(hold.status) || hold.expiresAt == null
+                        || LocalDateTime.now(ZoneOffset.UTC).isAfter(hold.expiresAt)) {
                     throw new ServiceException.Conflict(
                             "Giữ ghế đã hết hạn — vui lòng chọn lại ghế");
                 }
 
-                Ticket ticket = ticketDao.findByHoldIdLocked(conn, holdId)
-                        .orElseThrow(() -> new ServiceException.NotFound(
-                                "Không tìm thấy vé đang giữ"));
-                if (!Ticket.STATUS_PENDING.equalsIgnoreCase(ticket.getStatus())
-                        || !userId.equals(ticket.getUserId())
-                        || ticket.getShowtimeId() != showtimeId) {
-                    throw new ServiceException.Conflict(
-                            "Vé này không còn có thể thay đổi ghế");
+                long ticketId = ticketIdOfHold(conn, holdId);
+                Ticket ticket = ticketDao.findByIdLocked(conn, ticketId)
+                        .orElseThrow(() -> new ServiceException.NotFound("Không tìm thấy vé đang giữ"));
+                if (!Ticket.STATUS_PENDING.equals(ticket.status()) || !userId.equals(ticket.userId())) {
+                    throw new ServiceException.Conflict("Vé này không còn có thể thay đổi ghế");
                 }
 
-                List<Long> existingSeatIds = seatHoldDao.findSeatIdsOfHold(conn, holdId);
-                if (existingSeatIds.isEmpty()
-                        || !orderedSeatIds.containsAll(existingSeatIds)) {
+                List<Long> existingIds = seatHoldDao.findSeatIdsOfHold(conn, holdId);
+                if (!ordered.containsAll(existingIds)) {
                     throw new ServiceException.Conflict(
                             "Danh sách ghế không khớp với lượt giữ hiện tại. Vui lòng tải lại.");
                 }
-                java.util.Set<Long> existingSeatIdSet = new java.util.HashSet<>(existingSeatIds);
+                java.util.Set<Long> existingIdSet = new java.util.HashSet<>(existingIds);
                 List<SeatHoldDAO.SeatRow> additions = new ArrayList<>();
-                for (Long seatId : orderedSeatIds) {
-                    SeatHoldDAO.SeatRow seat = seatHoldDao.lockSeat(conn, showtimeId, seatId);
-                    if (seat == null) {
+                for (Long seatId : ordered) {
+                    SeatHoldDAO.SeatRow row = seatHoldDao.lockSeat(conn, showtimeId, seatId);
+                    if (row == null) {
                         throw new ServiceException.Conflict(
-                                "Ghế không thuộc phòng chiếu của suất này");
+                                "Ghế " + seatId + " không thuộc phòng chiếu của suất này");
                     }
-                    if (existingSeatIdSet.contains(seatId)) {
-                        if (!"HOLD".equalsIgnoreCase(seat.status)
-                                || !Long.valueOf(holdId).equals(seat.holdId)) {
+                    if (existingIdSet.contains(seatId)) {
+                        if (!"HOLD".equals(row.status) || !Long.valueOf(holdId).equals(row.holdId)) {
                             throw new ServiceException.Conflict(
                                     "Một ghế đang giữ không còn hợp lệ. Vui lòng tải lại.");
                         }
-                    } else if ("AVAILABLE".equalsIgnoreCase(seat.status)) {
-                        additions.add(seat);
+                    } else if ("AVAILABLE".equals(row.status)) {
+                        additions.add(row);
                     } else {
-                        throw new ServiceException.Conflict("Ghế " + seat.rowLabel + seat.colNo
+                        throw new ServiceException.Conflict("Ghế " + row.rowLabel + row.colNo
                                 + " không còn trống");
                     }
                 }
 
                 if (!additions.isEmpty()) {
+                    Showtime showtime = showtimeService.requireBookable(showtimeId);
                     long addedTotal = 0;
                     List<Ticket.TicketSeat> pricedSeats = new ArrayList<>();
-                    for (SeatHoldDAO.SeatRow seat : additions) {
-                        long price = calculateSeatPrice(seat.seatType);
+                    for (SeatHoldDAO.SeatRow row : additions) {
+                        long price = pricingService.priceSeatFor(showtime, row.seatType, ticketType).price();
                         addedTotal += price;
-                        pricedSeats.add(new Ticket.TicketSeat(
-                                seat.seatId, seat.rowLabel, seat.colNo,
-                                seat.seatType, "ADULT", price));
+                        pricedSeats.add(new Ticket.TicketSeat(row.seatId, row.rowLabel, row.colNo,
+                                row.seatType, ticketType == null ? null : ticketType.code(), price));
                     }
-                    if (!ticketDao.updatePendingTotalGuarded(
-                            conn, ticket.getId(), ticket.getTotalAmount() + addedTotal)) {
-                        throw new ServiceException.Conflict(
-                                "Vé không còn ở trạng thái chờ thanh toán");
+                    if (!ticketDao.updatePendingTotalGuarded(conn, ticketId,
+                            ticket.totalAmount() + addedTotal)) {
+                        throw new ServiceException.Conflict("Vé không còn ở trạng thái chờ thanh toán");
                     }
-                    ticketDao.insertSeats(conn, ticket.getId(), pricedSeats);
-                    for (SeatHoldDAO.SeatRow seat : additions) {
-                        seatHoldDao.markSeatHeld(
-                                conn, showtimeId, seat.seatId, holdId, hold.expiresAt);
+                    ticketDao.insertSeats(conn, ticketId, pricedSeats);
+                    for (SeatHoldDAO.SeatRow row : additions) {
+                        seatHoldDao.markSeatHeld(conn, showtimeId, row.seatId, holdId, hold.expiresAt);
                     }
                 }
-
-                conn.commit();
                 return HoldResult.accepted(String.valueOf(holdId));
-            } catch (Exception ex) {
-                conn.rollback();
-                throw ex;
-            }
+            });
+        } catch (ServiceException e) {
+            return HoldResult.rejected(e.getMessage());
+        } catch (Exception e) {
+            logger.log(java.util.logging.Level.WARNING, "addSeatsToHold failed", e);
+            return HoldResult.rejected("Không thể thêm ghế vào lượt giữ — vui lòng thử lại");
         }
     }
 
     /**
-     * Req 7.5, 7.6, 8.2 — Xác nhận đặt vé trong thời hạn hold (PENDING -> CONFIRMED).
+     * Xác nhận booking trong thời hạn hold (Req 7.5, 7.6, 8.2, 10.3, 10.4, 17.2):
+     * hold còn hiệu lực → voucher guarded → thanh toán → vé CONFIRMED + ghế SOLD
+     * + cộng điểm, nguyên tử. Confirm sau expiry bị từ chối (Req 7.6).
+     *
+     * @param paymentMethod CASH/MOCK_GATEWAY/BANK_TRANSFER (null = CASH quầy)
      */
-    public Ticket confirmBooking(long holdId, Long actorUserId) throws Exception {
-        sweepExpiredHolds();
+    public Ticket confirmBooking(long holdId, String paymentMethod, String voucherCode,
+                                 Long actorUserId, Long actorBranchId) throws Exception {
+        return confirmBooking(holdId, paymentMethod, voucherCode, actorUserId, actorBranchId, false);
+    }
 
-        try (Connection conn = DBContext.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
-                if (hold == null) {
-                    throw new ServiceException.NotFound("Không tìm thấy thông tin giữ ghế");
-                }
+    public Ticket confirmBooking(long holdId, String paymentMethod, String voucherCode,
+                                 Long actorUserId, Long actorBranchId, boolean usePoints) throws Exception {
+        return confirmBooking(holdId, paymentMethod, voucherCode, actorUserId, actorBranchId,
+                usePoints ? -1 : 0);
+    }
 
-                if (actorUserId == null || hold.userId == null || !actorUserId.equals(hold.userId)) {
-                    throw new ServiceException.Forbidden("Bạn không có quyền xác nhận phiên đặt vé này");
-                }
-
-                if (!"ACTIVE".equalsIgnoreCase(hold.status) || 
-                        (hold.expiresAt != null && LocalDateTime.now(ZoneOffset.UTC).isAfter(hold.expiresAt))) {
-                    throw new ServiceException.Conflict("Thời hạn giữ ghế 10 phút đã hết hạn, vui lòng chọn lại ghế");
-                }
-
-                Ticket ticket = ticketDao.findByHoldIdLocked(conn, holdId)
-                        .orElseThrow(() -> new ServiceException.NotFound("Không tìm thấy thông tin vé tương ứng"));
-
-                if (!Ticket.STATUS_PENDING.equalsIgnoreCase(ticket.getStatus())) {
-                    throw new ServiceException.Conflict("Vé đã được xử lý hoặc không ở trạng thái chờ xác nhận");
-                }
-
-                boolean ticketUpdated = ticketDao.confirmGuarded(
-                        conn, ticket.getId(), ticket.getTotalAmount(), ticket.getVoucherCode(), 0
-                );
-                if (!ticketUpdated) {
-                    throw new ServiceException.Conflict("Không thể xác nhận vé (trạng thái vé đã bị thay đổi)");
-                }
-
-                List<Long> seatIds = seatHoldDao.findSeatIdsOfHold(conn, holdId);
-                if (seatIds.isEmpty()) {
-                    throw new ServiceException.Conflict("Phiên giữ ghế không còn ghế hợp lệ");
-                }
-                for (Long seatId : seatIds) {
-                    seatHoldDao.markSeatSold(conn, hold.showtimeId, seatId);
-                }
-
-                seatHoldDao.updateHoldStatus(conn, holdId, "CONFIRMED", "ACTIVE");
-
-                List<Ticket.TicketSeat> seats = ticketDao.findSeats(conn, ticket.getId());
-                ticket.setSeats(seats);
-                ticket.setStatus(Ticket.STATUS_CONFIRMED);
-                ticket.setConfirmedAt(LocalDateTime.now());
-
-                conn.commit();
-                logger.info("Xác nhận thành công vé " + ticket.getTicketCode() + " (holdId=" + holdId + ")");
-                return ticket;
-
-            } catch (Exception ex) {
-                conn.rollback();
-                throw ex;
+    public Ticket confirmBooking(long holdId, String paymentMethod, String voucherCode,
+                                 Long actorUserId, Long actorBranchId, int pointsUsed) throws Exception {
+        expireElapsed();
+        return tx.execute(conn -> {
+            SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
+            if (hold == null) {
+                throw new ServiceException.NotFound("Không tìm thấy bản ghi giữ ghế");
             }
-        }
+            if (actorUserId == null || hold.userId == null || !actorUserId.equals(hold.userId)) {
+                throw new ServiceException.Forbidden(
+                        "Bạn không có quyền xác nhận booking này");
+            }
+            // Req 7.6 — hold đã hết hạn → từ chối
+            if (!"ACTIVE".equals(hold.status)) {
+                throw new ServiceException.Conflict(
+                        "Giữ ghế đã hết hạn — vui lòng chọn lại ghế");
+            }
+            if (hold.expiresAt != null && LocalDateTime.now(ZoneOffset.UTC).isAfter(hold.expiresAt)) {
+                throw new ServiceException.Conflict(
+                        "Giữ ghế đã hết hạn — vui lòng chọn lại ghế");
+            }
+            List<Long> seatIds = seatHoldDao.findSeatIdsOfHold(conn, holdId);
+            if (seatIds.isEmpty()) {
+                throw new ServiceException.Conflict("Giữ ghế không còn ghế hợp lệ");
+            }
+            Showtime showtime = showtimeService.requireBookable(hold.showtimeId);
+
+            Ticket ticket = ticketDao.findByIdLocked(conn, ticketIdOfHold(conn, holdId))
+                    .orElseThrow(() -> new ServiceException.NotFound("Vé không tồn tại"));
+            if (!actorUserId.equals(ticket.userId())) {
+                throw new ServiceException.Forbidden(
+                        "Vé không thuộc tài khoản đang đăng nhập");
+            }
+
+            // Tính lại tổng theo giá snapshot + tier discount + voucher (Req 10.3, 17.7)
+            long baseTotal = ticket.totalAmount();
+            Long buyerId = ticket.userId() != null ? ticket.userId() : actorUserId;
+            long tierDiscount = loyaltyService.tierDiscountFor(buyerId, baseTotal);
+            long afterTier = baseTotal - tierDiscount;
+            // Voucher don gian: tru luot trong cung transaction booking
+            String appliedVoucher = null;
+            long voucherDiscount = new com.cinema.service.voucher.VoucherService()
+                    .applyInTx(conn, voucherCode, afterTier);
+            if (voucherDiscount > 0) {
+                appliedVoucher = voucherCode == null ? null : voucherCode.trim().toUpperCase();
+            }
+            long payable = afterTier - voucherDiscount;
+            payable = applyTicketPointRedemption(conn, ticket, buyerId, payable, pointsUsed);
+
+            // Req 21.1 — gộp giá trị đơn bắp nước PENDING gắn vé vào tổng thanh toán
+            long concessionTotal = 0;
+            if (concessionService != null) {
+                concessionTotal = concessionService.pendingTotalForTicket(conn, ticket.id());
+            }
+            long totalPayable = payable + concessionTotal;
+
+            String method = paymentMethod == null || paymentMethod.isBlank()
+                    ? Payment.METHOD_CASH : paymentMethod.trim().toUpperCase();
+            if (totalPayable == 0) {
+                paymentService.confirmZeroAmountTicket(conn, ticket.id(), totalPayable);
+                String settlementMethod = ticket.pointsUsed() > 0 ? "POINTS" : "NO_CHARGE";
+                audit.record(conn, buyerId, "CONFIRM_ZERO_AMOUNT_TICKET", "TICKET", ticket.id(),
+                        "{\"status\":\"PENDING\"}",
+                        "{\"method\":\"" + settlementMethod + "\",\"payable\":0}",
+                        com.cinema.service.audit.AuditService.SUCCESS);
+                logger.info("Confirmed zero-amount ticket " + ticket.id()
+                        + " (method=" + settlementMethod + ")");
+            } else {
+                // Customer thanh toán online = tạo payment PENDING chờ IPN/confirm.
+                paymentService.createSession(ticket.id(), method, totalPayable, buyerId);
+                audit.record(conn, buyerId, "CREATE_PAYMENT_SESSION", "TICKET", ticket.id(),
+                        "{\"status\":\"PENDING\"}",
+                        "{\"method\":\"" + method + "\",\"payable\":" + totalPayable + "}",
+                        com.cinema.service.audit.AuditService.SUCCESS);
+                logger.info("Payment session created (" + method + ") for ticket "
+                        + ticket.id() + ", payable " + totalPayable);
+            }
+
+            return reloadWithSeats(conn, ticket.id());
+        });
     }
 
     /**
-     * Validate an active hold and return its pending ticket before a payment session
-     * is created. The payment callback performs the final guarded confirmation.
+     * Bán vé tại quầy (Req 7.7): Branch Staff chọn ghế trống, xác nhận tiền mặt ngay,
+     * bỏ qua hold 10 phút nhưng vẫn khóa ghế + ép branch scope.
      */
-    public Ticket pendingTicketForPayment(long holdId, Long actorUserId) throws Exception {
-        sweepExpiredHolds();
+    public Ticket sellAtCounter(long showtimeId, List<Long> seatIds, String voucherCode,
+                                Long customerId, long staffId, long staffBranchId) throws Exception {
+        return sellAtCounter(showtimeId, seatIds, voucherCode, customerId, staffId, staffBranchId, null);
+    }
 
+    /** Sell + extended variant với ticketType (Req 9). */
+    public Ticket sellAtCounter(long showtimeId, List<Long> seatIds, String voucherCode,
+                                Long customerId, long staffId, long staffBranchId,
+                                TicketType ticketType) throws Exception {
+        return sellAtCounter(showtimeId, seatIds, voucherCode, customerId, staffId,
+                staffBranchId, ticketType, 0);
+    }
+
+    /** Counter sale with optional customer point redemption. */
+    public Ticket sellAtCounter(long showtimeId, List<Long> seatIds, String voucherCode,
+                                Long customerId, long staffId, long staffBranchId,
+                                TicketType ticketType, int requestedPoints) throws Exception {
+        return sellAtCounter(showtimeId, seatIds, voucherCode, customerId, staffId,
+                staffBranchId, ticketType, requestedPoints, Payment.METHOD_CASH);
+    }
+
+    /** Counter sale with explicit cash or bank-transfer payment confirmation. */
+    public Ticket sellAtCounter(long showtimeId, List<Long> seatIds, String voucherCode,
+                                Long customerId, long staffId, long staffBranchId,
+                                TicketType ticketType, int requestedPoints,
+                                String paymentMethod) throws Exception {
+        return sellAtCounter(showtimeId, seatIds, voucherCode, customerId, staffId,
+                staffBranchId, ticketType, requestedPoints, paymentMethod, null);
+    }
+
+    public Ticket sellAtCounter(long showtimeId, List<Long> seatIds, String voucherCode,
+                                Long customerId, long staffId, long staffBranchId,
+                                TicketType ticketType, int requestedPoints,
+                                String paymentMethod, String paymentReference) throws Exception {
+        String method = normalizeCounterPaymentMethod(paymentMethod);
+        String reference = requireCounterPaymentReference(method, paymentReference);
+        if (staffBranchId <= 0) {
+            throw new ServiceException.Forbidden("Tài khoản chưa được gán chi nhánh");
+        }
+        if (requestedPoints < 0) {
+            throw new ServiceException.Validation("Số điểm sử dụng không hợp lệ");
+        }
+        if (requestedPoints > 0 && customerId == null) {
+            throw new ServiceException.Validation("Cần chọn khách hàng để sử dụng điểm");
+        }
+        expireElapsed();
+        TreeSet<Long> ordered = new TreeSet<>(seatIds == null ? List.of() : seatIds);
+        Showtime showtime = showtimeService.requireBookable(showtimeId);
+        // Req 7.7 — staff chỉ bán vé cho suất thuộc chi nhánh mình
+        if (showtime.branchId() != staffBranchId) {
+            throw new ServiceException.Forbidden(
+                    "Vi phạm phạm vi chi nhánh: suất chiếu thuộc chi nhánh khác");
+        }
+
+        return tx.execute(conn -> {
+            List<SeatHoldDAO.SeatRow> locked = new ArrayList<>();
+            for (Long seatId : ordered) {
+                SeatHoldDAO.SeatRow row = seatHoldDao.lockSeat(conn, showtimeId, seatId);
+                if (row == null) {
+                    throw new ServiceException.Conflict(
+                            "Ghế " + seatId + " không thuộc phòng chiếu của suất này");
+                }
+                if (!"AVAILABLE".equals(row.status) && !isHoldExpired(row)) {
+                    throw new ServiceException.Conflict("Ghế " + row.rowLabel + row.colNo
+                            + " không còn trống");
+                }
+                locked.add(row);
+            }
+
+            long total = 0;
+            List<Ticket.TicketSeat> pricedSeats = new ArrayList<>();
+            for (SeatHoldDAO.SeatRow row : locked) {
+                long price = pricingService.priceSeatFor(showtime, row.seatType, ticketType).price();
+                total += price;
+                pricedSeats.add(new Ticket.TicketSeat(row.seatId, row.rowLabel, row.colNo,
+                        row.seatType, ticketType == null ? null : ticketType.code(), price));
+            }
+
+            Long buyerId = customerId;
+            long tierDiscount = loyaltyService.tierDiscountFor(buyerId, total);
+            long afterTier = total - tierDiscount;
+            String appliedVoucher = null;
+            long voucherDiscount = new com.cinema.service.voucher.VoucherService()
+                    .applyInTx(conn, voucherCode, afterTier);
+            if (voucherDiscount > 0) {
+                appliedVoucher = voucherCode == null ? null : voucherCode.trim().toUpperCase();
+            }
+            long payable = afterTier - voucherDiscount;
+
+            Ticket ticket = new Ticket();
+            ticket.setTicketCode(generateTicketCode());
+            ticket.setShowtimeId(showtimeId);
+            ticket.setBranchId(showtime.branchId());
+            ticket.setUserId(buyerId);
+            ticket.setStatus(Ticket.STATUS_PENDING);
+            ticket.setTotalAmount(payable);
+            ticket.setVoucherCode(appliedVoucher);
+            long ticketId = ticketDao.insert(conn, ticket);
+            ticketDao.insertSeats(conn, ticketId, pricedSeats);
+            payable = applyTicketPointRedemption(conn, ticket, buyerId, payable, requestedPoints);
+
+            // Bán tại quầy: tiền mặt xác nhận ngay → CONFIRMED + ghế SOLD (Req 7.7)
+            int points = buyerId != null ? earnPoints(conn, buyerId, payable, ticket.id()) : 0;
+            if (!ticketDao.confirmGuarded(conn, ticketId, payable, appliedVoucher, points)) {
+                throw new ServiceException.Conflict("Không xác nhận được vé tại quầy");
+            }
+            recordCounterPayment(conn, ticketId, method, payable, reference);
+            for (Long seatId : ordered) {
+                seatHoldDao.markSeatSold(conn, showtimeId, seatId);
+            }
+
+            logger.info("Counter sale: ticket " + ticketId + " by staff " + staffId
+                    + " (" + locked.size() + " seats, " + payable + "đ)");
+            // Req 15.3 — audit bán vé tại quầy (actor = staff)
+            audit.record(conn, staffId, "SELL_AT_COUNTER", "TICKET", ticketId, null,
+                    "{\"showtimeId\":" + showtimeId + ",\"seats\":" + locked.size()
+                            + ",\"payable\":" + payable + ",\"method\":\"" + method
+                            + "\",\"status\":\"CONFIRMED\"}",
+                    com.cinema.service.audit.AuditService.SUCCESS);
+            return reloadWithSeats(conn, ticketId);
+        });
+    }
+
+    /**
+     * Kết quả counter-sale: vé chính + đơn F&B đi kèm (nếu có). Dùng cho luồng
+     * POS bán vé + combo bắp nước tại quầy (counter-sale bundle).
+     */
+    public record CounterSaleResult(Ticket ticket, ConcessionOrder concessionOrder) {
+    }
+
+    /**
+     * Bán vé tại quầy + (tuỳ chọn) tạo đơn F&B offline cùng transaction
+     * (POS counter-sale bundle). Tổng thanh toán = vé (sau tier/voucher) + đơn F&B.
+     * Trừ kho F&B thất bại → rollback toàn bộ (vé cũng không được tạo).
+     *
+     * @param concessionLines danh sách (productId, qty); null/rỗng = chỉ bán vé
+     * @return {@link CounterSaleResult} — concessionOrder = null nếu không có F&B
+     */
+    public CounterSaleResult sellAtCounterWithConcession(long showtimeId,
+                                                         List<Long> seatIds,
+                                                         String voucherCode,
+                                                         Long customerId,
+                                                         long staffId,
+                                                         long staffBranchId,
+                                                         TicketType ticketType,
+                                                         List<com.cinema.service.concession.ConcessionService.OrderLineInput> concessionLines)
+            throws Exception {
+        return sellAtCounterWithConcession(showtimeId, seatIds, voucherCode, customerId,
+                staffId, staffBranchId, ticketType, concessionLines, 0);
+    }
+
+    /** Counter-sale bundle with optional point redemption on ticket subtotal. */
+    public CounterSaleResult sellAtCounterWithConcession(long showtimeId,
+                                                         List<Long> seatIds,
+                                                         String voucherCode,
+                                                         Long customerId,
+                                                         long staffId,
+                                                         long staffBranchId,
+                                                         TicketType ticketType,
+                                                         List<com.cinema.service.concession.ConcessionService.OrderLineInput> concessionLines,
+                                                         int requestedPoints)
+            throws Exception {
+        return sellAtCounterWithConcession(showtimeId, seatIds, voucherCode, customerId,
+                staffId, staffBranchId, ticketType, concessionLines, requestedPoints,
+                Payment.METHOD_CASH);
+    }
+
+    /** Counter-sale ticket + concession bundle with an explicit payment method. */
+    public CounterSaleResult sellAtCounterWithConcession(long showtimeId,
+                                                         List<Long> seatIds,
+                                                         String voucherCode,
+                                                         Long customerId,
+                                                         long staffId,
+                                                         long staffBranchId,
+                                                         TicketType ticketType,
+                                                         List<com.cinema.service.concession.ConcessionService.OrderLineInput> concessionLines,
+                                                         int requestedPoints,
+                                                         String paymentMethod)
+            throws Exception {
+        return sellAtCounterWithConcession(showtimeId, seatIds, voucherCode, customerId,
+                staffId, staffBranchId, ticketType, concessionLines, requestedPoints,
+                paymentMethod, null);
+    }
+
+    public CounterSaleResult sellAtCounterWithConcession(long showtimeId,
+                                                         List<Long> seatIds,
+                                                         String voucherCode,
+                                                         Long customerId,
+                                                         long staffId,
+                                                         long staffBranchId,
+                                                         TicketType ticketType,
+                                                         List<com.cinema.service.concession.ConcessionService.OrderLineInput> concessionLines,
+                                                         int requestedPoints,
+                                                         String paymentMethod,
+                                                         String paymentReference)
+            throws Exception {
+        String method = normalizeCounterPaymentMethod(paymentMethod);
+        String reference = requireCounterPaymentReference(method, paymentReference);
+        if (staffBranchId <= 0) {
+            throw new ServiceException.Forbidden("Tài khoản chưa được gán chi nhánh");
+        }
+        if (requestedPoints < 0) {
+            throw new ServiceException.Validation("Số điểm sử dụng không hợp lệ");
+        }
+        if (requestedPoints > 0 && customerId == null) {
+            throw new ServiceException.Validation("Cần chọn khách hàng để sử dụng điểm");
+        }
+        if (concessionLines != null && !concessionLines.isEmpty() && concessionService == null) {
+            throw new ServiceException.BusinessRule("CONCESSION_DISABLED",
+                    "Chức năng bắp nước chưa được kích hoạt cho tenant này");
+        }
+        expireElapsed();
+        TreeSet<Long> ordered = new TreeSet<>(seatIds == null ? List.of() : seatIds);
+        Showtime showtime = showtimeService.requireBookable(showtimeId);
+        if (showtime.branchId() != staffBranchId) {
+            throw new ServiceException.Forbidden(
+                    "Vi phạm phạm vi chi nhánh: suất chiếu thuộc chi nhánh khác");
+        }
+
+        return tx.execute(conn -> {
+            // 1) Khóa + check ghế trống (giống sellAtCounter)
+            List<SeatHoldDAO.SeatRow> locked = new ArrayList<>();
+            for (Long seatId : ordered) {
+                SeatHoldDAO.SeatRow row = seatHoldDao.lockSeat(conn, showtimeId, seatId);
+                if (row == null) {
+                    throw new ServiceException.Conflict(
+                            "Ghế " + seatId + " không thuộc phòng chiếu của suất này");
+                }
+                if (!"AVAILABLE".equals(row.status) && !isHoldExpired(row)) {
+                    throw new ServiceException.Conflict("Ghế " + row.rowLabel + row.colNo
+                            + " không còn trống");
+                }
+                locked.add(row);
+            }
+
+            // 2) Tính giá snapshot cho từng ghế
+            long seatTotal = 0;
+            List<Ticket.TicketSeat> pricedSeats = new ArrayList<>();
+            for (SeatHoldDAO.SeatRow row : locked) {
+                long price = pricingService.priceSeatFor(showtime, row.seatType, ticketType).price();
+                seatTotal += price;
+                pricedSeats.add(new Ticket.TicketSeat(row.seatId, row.rowLabel, row.colNo,
+                        row.seatType, ticketType == null ? null : ticketType.code(), price));
+            }
+
+            // 3) Loyalty tier + voucher don gian
+            Long buyerId = customerId;
+            long tierDiscount = loyaltyService.tierDiscountFor(buyerId, seatTotal);
+            long afterTier = seatTotal - tierDiscount;
+            String appliedVoucher = null;
+            long voucherDiscount = new com.cinema.service.voucher.VoucherService()
+                    .applyInTx(conn, voucherCode, afterTier);
+            if (voucherDiscount > 0) {
+                appliedVoucher = voucherCode == null ? null : voucherCode.trim().toUpperCase();
+            }
+            long ticketPayable = afterTier - voucherDiscount;
+
+            // 4) Tạo vé PENDING
+            Ticket ticket = new Ticket();
+            ticket.setTicketCode(generateTicketCode());
+            ticket.setShowtimeId(showtimeId);
+            ticket.setBranchId(showtime.branchId());
+            ticket.setUserId(buyerId);
+            ticket.setStatus(Ticket.STATUS_PENDING);
+            ticket.setTotalAmount(ticketPayable);
+            ticket.setVoucherCode(appliedVoucher);
+            long ticketId = ticketDao.insert(conn, ticket);
+            ticketDao.insertSeats(conn, ticketId, pricedSeats);
+            ticketPayable = applyTicketPointRedemption(
+                    conn, ticket, buyerId, ticketPayable, requestedPoints);
+
+            // 5) Bundle F&B (nếu có) — tạo + confirm trong cùng tx
+            ConcessionOrder order = null;
+            long concessionTotal = 0;
+            if (concessionLines != null && !concessionLines.isEmpty()) {
+                order = concessionService.createAndConfirmOfflineInTx(
+                        conn, staffBranchId, concessionLines, customerId, ticketId,
+                        staffId, method, reference);
+                concessionTotal = order.totalAmount();
+            }
+
+            // 6) Total payable = vé (sau giảm) + F&B; cộng điểm trên tổng
+            long finalPayable = ticketPayable + concessionTotal;
+            int points = buyerId != null ? earnPoints(conn, buyerId, finalPayable, ticket.id()) : 0;
+
+            // 7) Confirm vé
+            if (!ticketDao.confirmGuarded(conn, ticketId, finalPayable, appliedVoucher, points)) {
+                throw new ServiceException.Conflict("Không xác nhận được vé tại quầy");
+            }
+            recordCounterPayment(conn, ticketId, method, ticketPayable, reference);
+            for (Long seatId : ordered) {
+                seatHoldDao.markSeatSold(conn, showtimeId, seatId);
+            }
+
+            // 8) Audit
+            audit.record(conn, staffId, "SELL_AT_COUNTER", "TICKET", ticketId, null,
+                    "{\"showtimeId\":" + showtimeId + ",\"seats\":" + locked.size()
+                            + ",\"ticketPayable\":" + ticketPayable
+                            + ",\"concessionTotal\":" + concessionTotal
+                            + ",\"finalPayable\":" + finalPayable
+                            + ",\"method\":\"" + method
+                            + ",\"status\":\"CONFIRMED\"}",
+                    com.cinema.service.audit.AuditService.SUCCESS);
+
+            logger.info("Counter sale bundle: ticket " + ticketId
+                    + (order != null ? " + concession order " + order.id() : "")
+                    + " by staff " + staffId
+                    + " (" + locked.size() + " seats, final " + finalPayable + "đ)");
+
+            return new CounterSaleResult(reloadWithSeats(conn, ticketId), order);
+        });
+    }
+
+    private String normalizeCounterPaymentMethod(String paymentMethod) {
+        String method = paymentMethod == null || paymentMethod.isBlank()
+                ? Payment.METHOD_CASH : paymentMethod.trim().toUpperCase();
+        if (!Payment.METHOD_CASH.equals(method) && !Payment.METHOD_BANK_TRANSFER.equals(method)) {
+            throw new ServiceException.Validation(
+                    "Phương thức thanh toán tại quầy phải là CASH hoặc BANK_TRANSFER");
+        }
+        return method;
+    }
+
+    private String requireCounterPaymentReference(String method, String reference) {
+        if (Payment.METHOD_BANK_TRANSFER.equals(method)
+                && (reference == null || !reference.matches("(?i)[A-Z0-9]{1,25}"))) {
+            throw new ServiceException.Validation(
+                    "Cần mã tham chiếu QR hợp lệ cho thanh toán chuyển khoản");
+        }
+        return reference == null ? null : reference.toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private void recordCounterPayment(Connection conn, long ticketId, String method,
+                                      long amount, String reference) throws Exception {
+        Payment payment = new Payment();
+        payment.setTicketId(ticketId);
+        payment.setMethod(method);
+        payment.setAmount(amount);
+        payment.setStatus(Payment.STATUS_SUCCESS);
+        payment.setIdempotencyKey("POS-TICKET-" + ticketId + "-" + UUID.randomUUID());
+        payment.setProviderReference(reference);
+        paymentDao.insertConfirmed(conn, payment);
+    }
+
+    /**
+     * Đọc lại vé vừa tạo sau khi transaction counter-sale bundle commit. Lấy vé
+     * mới nhất tại chi nhánh thuộc suất này (ticketCode là duy nhất nhưng ta dùng
+     * ticketId DESC là đủ — staff chỉ vừa tạo).
+     */
+    private Ticket reloadTicketFreshly(long showtimeId, long staffBranchId) throws SQLException {
         try (Connection conn = DBContext.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
-                if (hold == null) {
-                    throw new ServiceException.NotFound("Không tìm thấy thông tin giữ ghế");
+            String sql = "SELECT TOP 1 id FROM dbo.ticket WHERE showtime_id = ? AND branch_id = ?"
+                    + " ORDER BY id DESC";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setLong(1, showtimeId);
+                ps.setLong(2, staffBranchId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        throw new ServiceException.NotFound("Không tìm thấy vé vừa tạo");
+                    }
+                    long ticketId = rs.getLong("id");
+                    return reloadWithSeats(conn, ticketId);
                 }
-                if (actorUserId == null || hold.userId == null || !actorUserId.equals(hold.userId)) {
-                    throw new ServiceException.Forbidden("Bạn không có quyền thanh toán phiên đặt vé này");
-                }
-                if (!"ACTIVE".equalsIgnoreCase(hold.status)
-                        || hold.expiresAt == null
-                        || !LocalDateTime.now(ZoneOffset.UTC).isBefore(hold.expiresAt)) {
-                    throw new ServiceException.Conflict(
-                            "Thời hạn giữ ghế 10 phút đã hết hạn, vui lòng chọn lại ghế");
-                }
-
-                Ticket ticket = ticketDao.findByHoldIdLocked(conn, holdId)
-                        .orElseThrow(() -> new ServiceException.NotFound(
-                                "Không tìm thấy thông tin vé tương ứng"));
-                if (!Ticket.STATUS_PENDING.equalsIgnoreCase(ticket.getStatus())
-                        || !actorUserId.equals(ticket.getUserId())
-                        || ticket.getShowtimeId() != hold.showtimeId) {
-                    throw new ServiceException.Conflict(
-                            "Vé không còn ở trạng thái chờ thanh toán");
-                }
-                ticket.setSeats(ticketDao.findSeats(conn, ticket.getId()));
-                conn.commit();
-                return ticket;
-            } catch (Exception ex) {
-                conn.rollback();
-                throw ex;
             }
         }
     }
 
     /**
-     * Req 11 — Hủy vé kèm chính sách hoàn tiền bậc thang (Tiered Refund Policy).
-     * >= 24h: hoàn 100%
-     * 2h - 24h: hoàn 50%
-     * < 2h: hoàn 0%
+     * Hủy vé + hoàn tiền bậc thang (Req 11.1-11.7): ≥24h hoàn 100%, 2–24h hoàn 50%,
+     * <2h không hoàn, USED chặn; hoàn voucher lượt/điểm/ví, giải phóng ghế.
+     * Hai yêu cầu hủy đồng thời → đúng một thắng qua cancelGuarded (Req 11.6).
+     *
+     * @return vé CANCELLED kèm số tiền hoàn
      */
     public Ticket cancelTicket(long ticketId, Long actorCustomerId, Long actorStaffBranchId) throws Exception {
-        sweepExpiredHolds();
+        expireElapsed();
+        return tx.execute(conn -> {
+            Ticket ticket = ticketDao.findByIdLocked(conn, ticketId)
+                    .orElseThrow(() -> new ServiceException.NotFound("Vé không tồn tại"));
 
-        try (Connection conn = DBContext.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                Ticket ticket = ticketDao.findByIdLocked(conn, ticketId)
-                        .orElseThrow(() -> new ServiceException.NotFound("Vé không tồn tại"));
-
-                if (actorStaffBranchId != null) {
-                    if (ticket.getBranchId() != actorStaffBranchId) {
-                        throw new ServiceException.Forbidden("Vi phạm phạm vi chi nhánh: vé thuộc chi nhánh khác");
-                    }
-                } else if (actorCustomerId != null) {
-                    if (ticket.getUserId() == null || !actorCustomerId.equals(ticket.getUserId())) {
-                        throw new ServiceException.Forbidden("Chỉ chủ vé mới được hủy vé");
-                    }
-                } else {
-                    throw new ServiceException.Forbidden("Không có quyền hủy vé");
+            // Quyền: Customer hủy vé của mình; Staff hủy tại quầy đúng chi nhánh (Req 11.3)
+            if (actorStaffBranchId != null) {
+                if (ticket.branchId() != actorStaffBranchId) {
+                    throw new ServiceException.Forbidden(
+                            "Vi phạm phạm vi chi nhánh: vé thuộc chi nhánh khác");
                 }
-
-                if (Ticket.STATUS_PENDING.equals(ticket.getStatus())) {
-                    throw new ServiceException.BusinessRule("TICKET_NOT_CONFIRMED",
-                            "Vé chưa thanh toán — không thể hủy theo chính sách hoàn tiền");
+            } else if (actorCustomerId != null) {
+                if (!actorCustomerId.equals(ticket.userId())) {
+                    throw new ServiceException.Forbidden("Chỉ chủ vé mới được hủy vé");
                 }
-                if (Ticket.STATUS_USED.equals(ticket.getStatus())) {
-                    throw new ServiceException.BusinessRule("TICKET_USED",
-                            "Vé đã được soát — không thể hủy hoặc hoàn tiền");
-                }
-                if (Ticket.STATUS_CANCELLED.equals(ticket.getStatus())) {
-                    throw new ServiceException.Conflict("Vé đã bị hủy trước đó");
-                }
-
-                LocalDateTime showtimeStart = queryShowtimeStartTime(conn, ticket.getShowtimeId());
-                long refundRate = refundRatePercent(Instant.now(), showtimeStart);
-                long refundAmount = ticket.getTotalAmount() * refundRate / 100;
-
-                List<Ticket.TicketSeat> ticketSeats = ticketDao.findSeats(conn, ticketId);
-                if (ticketSeats.isEmpty()) {
-                    throw new ServiceException.Conflict("Vé không có ghế để giải phóng");
-                }
-
-                if (!ticketDao.cancelGuarded(conn, ticketId, refundAmount)) {
-                    throw new ServiceException.Conflict("Vé vừa được xử lý bởi một yêu cầu khác");
-                }
-
-                for (Ticket.TicketSeat seat : ticketSeats) {
-                    seatHoldDao.releaseSeat(conn, ticket.getShowtimeId(), seat.seatId());
-                }
-
-                conn.commit();
-                logger.info("Cancelled ticket " + ticketId + " refund " + refundAmount + " (" + refundRate + "%)");
-
-                ticket.setStatus(Ticket.STATUS_CANCELLED);
-                ticket.setRefundAmount(refundAmount);
-                ticket.setSeats(ticketSeats);
-                return ticket;
-
-            } catch (Exception ex) {
-                conn.rollback();
-                throw ex;
+            } else {
+                throw new ServiceException.Forbidden("Không có quyền hủy vé");
             }
-        }
+
+            // Req 11.2, 11.7 — PENDING/CANCELLED/USED không hủy được
+            if (Ticket.STATUS_PENDING.equals(ticket.status())) {
+                throw new ServiceException.BusinessRule("TICKET_NOT_CONFIRMED",
+                        "Vé chưa thanh toán — không thể hủy theo chính sách hoàn tiền");
+            }
+            if (Ticket.STATUS_USED.equals(ticket.status())) {
+                throw new ServiceException.BusinessRule("TICKET_USED",
+                        "Vé đã được soát — không thể hủy hoặc hoàn tiền");
+            }
+            if (Ticket.STATUS_CANCELLED.equals(ticket.status())) {
+                throw new ServiceException.Conflict("Vé đã bị hủy trước đó");
+            }
+
+            // Bậc thang theo thời gian còn lại tới giờ chiếu (Req 11.1)
+            Showtime showtime = showtimeService.requireBookableForCancel(ticket.showtimeId());
+            long refundRatePercent = refundRatePercent(Instant.now(), showtime.startTime());
+            long refundAmount = ticket.totalAmount() * refundRatePercent / 100;
+            List<Ticket.TicketSeat> ticketSeats = ticketDao.findSeats(conn, ticketId);
+            if (ticketSeats.isEmpty()) {
+                throw new ServiceException.Conflict("Vé không có ghế để giải phóng");
+            }
+
+            // Req 11.6 — đúng một hủy thắng; guarded update WHERE status='CONFIRMED'
+            if (!ticketDao.cancelGuarded(conn, ticketId, refundAmount)) {
+                throw new ServiceException.Conflict("Vé vừa được xử lý bởi một yêu cầu khác");
+            }
+
+            // Hoàn điểm (Req 17.4)
+            // Refund tiền KHÔNG ghi ví nội bộ nữa — luồng hoàn tiền chính thức là
+            // refund_request (khách cung cấp NH, manager duyệt, email xác nhận).
+            // Staff hủy tại quầy sẽ hoàn tiền mặt trực tiếp cho khách (Req 18.5 deprecated).
+            if (ticket.pointsEarned() > 0 && ticket.userId() != null) {
+                loyaltyService.deductPointsForRefund(conn, ticket.userId(),
+                        ticket.pointsEarned(), "TICKET_CANCEL", ticket.id());
+            }
+            if (ticket.pointsUsed() > 0 && ticket.userId() != null) {
+                if (ticket.pointsRedemptionKey() == null) {
+                    throw new ServiceException.Conflict("Thiếu mã đối soát điểm đã sử dụng");
+                }
+                int pointsToRefund = (int) (ticket.pointsUsed() * refundRatePercent / 100);
+                loyaltyService.refundPoints(conn, ticket.userId(), pointsToRefund,
+                        "TICKET_REDEMPTION_CANCEL", ticket.id(),
+                        ticket.pointsRedemptionKey() + "-CANCEL");
+            }
+            // Đánh dấu payment liên quan là REFUNDED để đối soát.
+            paymentDao.markTicketPaymentsRefunded(conn, ticket.id());
+
+            // Req 11.5 — giải phóng ghế, đặt lại được ngay
+            for (Ticket.TicketSeat seat : ticketSeats) {
+                seatHoldDao.releaseSeat(conn, showtime.id(), seat.seatId());
+            }
+
+            // Req 21.6 — hủy pre-order bắp nước gắn vé: refund + hoàn kho, nguyên tử với hủy vé
+            if (concessionService != null) {
+                concessionService.cascadeTicketCancelInTx(conn, ticketId);
+            }
+
+            // Req 23.2 — thông báo hủy/hoàn tiền kèm lý do và số tiền hoàn (best-effort)
+            if (notificationService != null) {
+                String note = actorStaffBranchId != null
+                        ? "Hủy tại quầy (hoàn " + refundRatePercent + "% theo chính sách bậc thang)"
+                        : "Hủy theo yêu cầu duyệt hoàn (hoàn " + refundRatePercent + "% theo chính sách)";
+                notificationService.notifyCancelledOrRefund(conn, ticket.userId(),
+                        com.cinema.model.notification.Notification.TYPE_TICKET_CANCELLED,
+                        ticket.ticketCode(),
+                        note,
+                        refundAmount);
+            }
+
+            logger.info("Cancelled ticket " + ticketId + " refund " + refundAmount
+                    + " (" + refundRatePercent + "%)");
+            // Req 15.3 — audit hủy vé + hoàn tiền bậc thang (actor = customer hoặc staff)
+            Long cancelActor = actorStaffBranchId != null ? null : ticket.userId();
+            audit.record(conn, cancelActor, "CANCEL_TICKET", "TICKET", ticketId,
+                    "{\"status\":\"CONFIRMED\"}",
+                    "{\"status\":\"CANCELLED\",\"refundAmount\":" + refundAmount
+                            + ",\"refundRate\":" + refundRatePercent + "}",
+                    com.cinema.service.audit.AuditService.SUCCESS);
+            return reloadWithSeats(conn, ticketId);
+        });
+    }
+
+    /** Hủy hold đang hoạt động của Customer và giải phóng toàn bộ ghế thuộc hold đó. */
+    public void releaseHold(long showtimeId, List<Long> seatIds, long customerId) throws Exception {
+        releaseHold(showtimeId, seatIds, customerId, null);
+    }
+
+    public void releaseHold(long showtimeId, List<Long> seatIds, long customerId,
+                            Long requestedHoldId) throws Exception {
+        expireElapsed();
+        tx.execute(conn -> {
+            Long holdId = requestedHoldId;
+            if (holdId == null) {
+                for (Long seatId : new TreeSet<>(seatIds)) {
+                    SeatHoldDAO.SeatRow seat = seatHoldDao.lockSeat(conn, showtimeId, seatId);
+                    if (seat != null && "HOLD".equals(seat.status) && seat.holdId != null) {
+                        holdId = seat.holdId;
+                        break;
+                    }
+                }
+            }
+            if (holdId == null) {
+                throw new ServiceException.Conflict("Ghế không còn được giữ");
+            }
+            SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
+            if (hold == null || !Long.valueOf(customerId).equals(hold.userId)
+                    || !"ACTIVE".equals(hold.status) || hold.showtimeId != showtimeId) {
+                throw new ServiceException.Forbidden("Bạn không có quyền hủy chỗ này");
+            }
+            List<Long> heldSeatIds = seatHoldDao.findSeatIdsOfHold(conn, holdId);
+            for (Long seatId : new TreeSet<>(seatIds)) {
+                SeatHoldDAO.SeatRow seat = seatHoldDao.lockSeat(conn, showtimeId, seatId);
+                if (seat == null || !Long.valueOf(holdId).equals(seat.holdId)) {
+                    throw new ServiceException.Conflict("Một ghế không còn thuộc lượt giữ này");
+                }
+            }
+            for (Long seatId : heldSeatIds) {
+                seatHoldDao.releaseSeat(conn, showtimeId, seatId);
+            }
+            seatHoldDao.updateHoldStatus(conn, holdId, "CANCELLED", "ACTIVE");
+            return null;
+        });
     }
 
     /**
-     * Req 12 — Soát vé (Check-in) một lần tại đúng chi nhánh.
-     * Concurrency guarded row lock: 2 nhân viên quét cùng lúc chỉ 1 người thành công.
+     * Soát vé một lần tại đúng chi nhánh (Req 12.1-12.6): vé tồn tại, CONFIRMED,
+     * đúng branch, showtime chưa kết thúc; chuyển USED một lần.
      */
     public Ticket validateTicket(String ticketCode, long validatorStaffId, long validatorBranchId) throws Exception {
         if (ticketCode == null || ticketCode.isBlank()) {
@@ -463,362 +921,203 @@ public class BookingService {
         if (validatorBranchId <= 0) {
             throw new ServiceException.Forbidden("Tài khoản chưa được gán chi nhánh");
         }
-        sweepExpiredHolds();
+        expireElapsed();
 
-        try (Connection conn = DBContext.getConnection()) {
+        return tx.execute(conn -> {
+            // Req 12.4 — lock vé; hai lần soát đồng thời đúng một thắng
+            Ticket ticket = ticketDao.findByCodeLocked(conn, ticketCode.trim().toUpperCase())
+                    .orElseThrow(() -> new ServiceException.NotFound("Mã vé không tồn tại"));
+
+            // Req 12.5 — sai chi nhánh
+            if (ticket.branchId() != validatorBranchId) {
+                throw new ServiceException.Forbidden(
+                        "Vé thuộc chi nhánh khác — không thể soát tại chi nhánh này");
+            }
+            // Req 12.2 — pending/cancelled/used
+            switch (ticket.status()) {
+                case Ticket.STATUS_PENDING -> throw new ServiceException.BusinessRule(
+                        "TICKET_PENDING", "Vé chưa thanh toán — không thể soát vé");
+                case Ticket.STATUS_CANCELLED -> throw new ServiceException.BusinessRule(
+                        "TICKET_CANCELLED", "Vé đã bị hủy — không thể soát vé");
+                case Ticket.STATUS_USED -> throw new ServiceException.Conflict(
+                        "Vé đã được sử dụng trước đó");
+                default -> { /* CONFIRMED — hợp lệ */ }
+            }
+            // Req 12.6 — showtime đã kết thúc
+            Showtime showtime = showtimeService.requireBookableForCancel(ticket.showtimeId());
+            if (Showtime.STATUS_CANCELLED.equals(showtime.status())) {
+                throw new ServiceException.BusinessRule("SHOWTIME_CANCELLED",
+                        "Suất chiếu đã bị hủy — không thể soát vé");
+            }
+            LocalDateTime now = LocalDateTime.now(BUSINESS_TZ);
+            if (showtime.endTime() != null && now.isAfter(showtime.endTime())) {
+                throw new ServiceException.BusinessRule("SHOWTIME_ENDED",
+                        "Suất chiếu đã kết thúc — không thể soát vé");
+            }
+            // Req 12.7 — chỉ soát trong cửa sổ ±30 phút quanh showtime.startTime.
+            // Tránh nhân viên quét sớm quá (lỗi thao tác) và chặn scan sau khi đã hết giờ chiếu.
+            if (showtime.startTime() != null && isTooEarlyForCheckIn(now, showtime.startTime())) {
+                throw new ServiceException.BusinessRule("TOO_EARLY",
+                        "Suất chiếu chưa bắt đầu — chỉ soát trước giờ chiếu tối đa 30 phút");
+            }
+
+            if (!ticketDao.useGuarded(conn, ticket.id(), validatorStaffId)) {
+                throw new ServiceException.Conflict(
+                        "Vé vừa được soát bởi một yêu cầu khác");
+            }
+
+            logger.info("Ticket " + ticket.ticketCode() + " validated by staff "
+                    + validatorStaffId);
+            // Req 15.3 — audit soát vé (actor = staff soát)
+            audit.record(conn, validatorStaffId, "VALIDATE_TICKET", "TICKET", ticket.id(),
+                    "{\"status\":\"CONFIRMED\"}", "{\"status\":\"USED\"}",
+                    com.cinema.service.audit.AuditService.SUCCESS);
+            return reloadWithSeats(conn, ticket.id());
+        });
+    }
+
+    /**
+     * Quét dọn hold/ticket PENDING hết hạn (Req 7.4, 8.6, 9.4) — idempotent,
+     * lazy gọi ở đầu luồng booking; ExpiryScheduler (task 11.1) gọi định kỳ 30s.
+     */
+    public void expireElapsed() {
+        try (Connection conn = com.cinema.infrastructure.database.DBContext.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                Ticket ticket = ticketDao.findByCodeLocked(conn, ticketCode.trim().toUpperCase())
-                        .orElseThrow(() -> new ServiceException.NotFound("Mã vé không tồn tại"));
-
-                if (ticket.getBranchId() != validatorBranchId) {
-                    throw new ServiceException.Forbidden("Vé thuộc chi nhánh khác — không thể soát tại chi nhánh này");
-                }
-
-                switch (ticket.getStatus()) {
-                    case Ticket.STATUS_PENDING -> throw new ServiceException.BusinessRule(
-                            "TICKET_PENDING", "Vé chưa thanh toán — không thể soát vé");
-                    case Ticket.STATUS_CANCELLED -> throw new ServiceException.BusinessRule(
-                            "TICKET_CANCELLED", "Vé đã bị hủy — không thể soát vé");
-                    case Ticket.STATUS_USED -> throw new ServiceException.Conflict("Vé đã được sử dụng trước đó");
-                    default -> { /* CONFIRMED */ }
-                }
-
-                ShowtimeInfo showtime = queryShowtimeInfo(conn, ticket.getShowtimeId());
-                if (showtime != null) {
-                    if ("CANCELLED".equalsIgnoreCase(showtime.status)) {
-                        throw new ServiceException.BusinessRule("SHOWTIME_CANCELLED",
-                                "Suất chiếu đã bị hủy — không thể soát vé");
+                seatHoldDao.expireElapsedHolds(conn);
+                for (TicketDAO.PointsRedemption redemption : ticketDao.findExpiredPendingRedemptions(conn)) {
+                    if (redemption.redemptionKey() == null) {
+                        throw new ServiceException.Conflict("Thiếu mã đối soát điểm của vé hết hạn");
                     }
-                    LocalDateTime now = LocalDateTime.now(BUSINESS_TZ);
-                    if (showtime.endTime != null && now.isAfter(showtime.endTime)) {
-                        throw new ServiceException.BusinessRule("SHOWTIME_ENDED",
-                                "Suất chiếu đã kết thúc — không thể soát vé");
-                    }
-                    if (showtime.startTime != null && isTooEarlyForCheckIn(now, showtime.startTime)) {
-                        throw new ServiceException.BusinessRule("TOO_EARLY",
-                                "Suất chiếu chưa bắt đầu — chỉ soát trước giờ chiếu tối đa 30 phút");
+                    loyaltyService.refundPoints(conn, redemption.userId(), redemption.pointsUsed(),
+                            "TICKET_REDEMPTION_EXPIRY", redemption.ticketId(),
+                            redemption.redemptionKey() + "-EXPIRED");
+                    if (!ticketDao.updatePointsRedemption(conn, redemption.ticketId(), 0, 0, null)) {
+                        throw new ServiceException.Conflict("Không hoàn được điểm của vé hết hạn");
                     }
                 }
-
-                if (!ticketDao.useGuarded(conn, ticket.getId(), validatorStaffId)) {
-                    throw new ServiceException.Conflict("Vé vừa được soát bởi một yêu cầu khác");
-                }
-
-                conn.commit();
-                logger.info("Ticket " + ticket.getTicketCode() + " validated by staff " + validatorStaffId);
-
-                ticket.setStatus(Ticket.STATUS_USED);
-                ticket.setUsedAt(LocalDateTime.now());
-                ticket.setUsedBy(validatorStaffId);
-                ticket.setSeats(ticketDao.findSeats(conn, ticket.getId()));
-                return ticket;
-
-            } catch (Exception ex) {
-                conn.rollback();
-                throw ex;
-            }
-        }
-    }
-
-    /**
-     * Tra cứu thông tin vé chi tiết phục vụ màn hình Check-in / Soát vé.
-     */
-    public Map<String, Object> lookupTicket(String ticketCode, Long validatorBranchId) throws Exception {
-        if (ticketCode == null || ticketCode.isBlank()) {
-            throw new ServiceException.Validation("Mã vé là bắt buộc");
-        }
-        String sql = """
-            SELECT TOP 1 t.id, t.ticket_code, COALESCE(u.full_name, N'Khách lẻ') AS customer_name,
-                   u.email AS customer_email, m.title AS movie_title,
-                   sc.name AS screen_name, s.start_time AS showtime_start, s.end_time AS showtime_end,
-                   b.name AS branch_name, t.branch_id, t.total_amount, t.refund_amount, t.status,
-                   t.created_at, t.confirmed_at, t.used_at, t.used_by
-            FROM dbo.ticket t
-            LEFT JOIN dbo.user_account u ON u.id = t.user_id
-            JOIN dbo.showtime s ON s.id = t.showtime_id
-            JOIN dbo.movie m ON m.id = s.movie_id
-            JOIN dbo.screen sc ON sc.id = s.screen_id
-            JOIN dbo.branch b ON b.id = t.branch_id
-            WHERE t.ticket_code = ?
-            """;
-        try (Connection conn = DBContext.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, ticketCode.trim().toUpperCase());
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    throw new ServiceException.NotFound("Không tìm thấy thông tin vé với mã: " + ticketCode);
-                }
-                long branchId = rs.getLong("branch_id");
-                if (validatorBranchId != null && validatorBranchId > 0 && branchId != validatorBranchId) {
-                    throw new ServiceException.Forbidden("Vé thuộc chi nhánh khác — không thể tra cứu tại chi nhánh này");
-                }
-                Map<String, Object> map = new HashMap<>();
-                map.put("ticketId", rs.getLong("id"));
-                map.put("ticketCode", rs.getString("ticket_code"));
-                map.put("customerName", rs.getString("customer_name"));
-                map.put("customerEmail", rs.getString("customer_email"));
-                map.put("movieTitle", rs.getString("movie_title"));
-                map.put("screenName", rs.getString("screen_name"));
-                map.put("showtimeStart", rs.getTimestamp("showtime_start"));
-                map.put("showtimeEnd", rs.getTimestamp("showtime_end"));
-                map.put("branchName", rs.getString("branch_name"));
-                map.put("branchId", branchId);
-                map.put("totalAmount", rs.getLong("total_amount"));
-                map.put("refundAmount", rs.getObject("refund_amount"));
-                map.put("status", rs.getString("status"));
-                map.put("createdAt", rs.getTimestamp("created_at"));
-                map.put("confirmedAt", rs.getTimestamp("confirmed_at"));
-                map.put("usedAt", rs.getTimestamp("used_at"));
-                map.put("usedBy", rs.getObject("used_by"));
-
-                List<Ticket.TicketSeat> seats = ticketDao.findSeats(conn, rs.getLong("id"));
-                List<Map<String, Object>> seatList = new ArrayList<>();
-                for (Ticket.TicketSeat s : seats) {
-                    seatList.add(Map.of(
-                            "seatId", s.seatId(),
-                            "label", s.rowLabel() + s.colNo(),
-                            "seatType", s.seatType() != null ? s.seatType() : "STANDARD",
-                            "price", s.price()
-                    ));
-                }
-                map.put("seats", seatList);
-                return map;
-            }
-        }
-    }
-
-    /**
-     * Req 16.5 — Tra cứu danh sách vé đã mua của chính Customer (chặn IDOR).
-     */
-    public List<Ticket> listMyTickets(Long userId) throws SQLException {
-        if (userId == null) return Collections.emptyList();
-
-        try (Connection conn = DBContext.getConnection()) {
-            List<Ticket> tickets = ticketDao.findByUser(userId);
-            if (tickets.isEmpty()) return tickets;
-
-            List<Long> ticketIds = tickets.stream().map(Ticket::getId).toList();
-            Map<Long, List<Ticket.TicketSeat>> seatsByTicket = ticketDao.findSeatsByTickets(conn, ticketIds);
-
-            for (Ticket t : tickets) {
-                t.setSeats(seatsByTicket.getOrDefault(t.getId(), Collections.emptyList()));
-            }
-            return tickets;
-        }
-    }
-
-    /**
-     * Tra cứu vé theo mã vé (Ticket Code).
-     */
-    public Ticket getTicketByCode(String ticketCode, Long actorUserId) throws Exception {
-        if (ticketCode == null || ticketCode.isBlank()) {
-            throw new ServiceException.Validation("Mã vé không được để trống");
-        }
-
-        try (Connection conn = DBContext.getConnection()) {
-            Ticket ticket = ticketDao.findByCodeLocked(conn, ticketCode.trim())
-                    .orElseThrow(() -> new ServiceException.NotFound("Không tìm thấy vé với mã: " + ticketCode));
-
-            if (actorUserId != null && ticket.getUserId() != null && !actorUserId.equals(ticket.getUserId())) {
-                throw new ServiceException.Forbidden("Bạn không có quyền xem vé này");
-            }
-
-            ticket.setSeats(ticketDao.findSeats(conn, ticket.getId()));
-            return ticket;
-        }
-    }
-
-    /**
-     * Giải phóng ghế khi khách hàng bỏ chọn hoặc chủ động hủy giữ.
-     */
-    public void releaseHold(long showtimeId, List<Long> seatIds, Long userId,
-                            Long requestedHoldId) throws Exception {
-        if (seatIds == null || seatIds.isEmpty() || userId == null) {
-            throw new ServiceException.Validation("Thiếu thông tin ghế cần nhả");
-        }
-        List<Long> orderedSeatIds = new ArrayList<>(new TreeSet<>(seatIds));
-        try (Connection conn = DBContext.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                Long holdId = requestedHoldId;
-                if (holdId == null) {
-                    for (Long seatId : orderedSeatIds) {
-                        holdId = seatHoldDao.findHoldIdForSeat(conn, showtimeId, seatId);
-                        if (holdId != null) {
-                            break;
-                        }
-                    }
-                }
-                if (holdId == null) {
-                    throw new ServiceException.Conflict("Ghế không còn được giữ");
-                }
-
-                SeatHoldDAO.HoldRow hold = seatHoldDao.lockHold(conn, holdId);
-                if (hold == null || !userId.equals(hold.userId)
-                        || !"ACTIVE".equalsIgnoreCase(hold.status)
-                        || hold.showtimeId != showtimeId) {
-                    throw new ServiceException.Forbidden("Bạn không có quyền hủy chỗ này");
-                }
-
-                List<Long> heldSeatIds = seatHoldDao.findSeatIdsOfHold(conn, holdId);
-                if (heldSeatIds.isEmpty()) {
-                    throw new ServiceException.Conflict("Lượt giữ ghế không còn ghế hợp lệ");
-                }
-                for (Long seatId : orderedSeatIds) {
-                    SeatHoldDAO.SeatRow seat = seatHoldDao.lockSeat(conn, showtimeId, seatId);
-                    if (seat == null || !"HOLD".equalsIgnoreCase(seat.status)
-                            || !holdId.equals(seat.holdId)) {
-                        throw new ServiceException.Conflict(
-                                "Một ghế không còn thuộc lượt giữ này");
-                    }
-                }
-                var ticket = ticketDao.findByHoldIdLocked(conn, holdId)
-                        .orElseThrow(() -> new ServiceException.NotFound(
-                                "Không tìm thấy vé đang giữ"));
-                if (!ticketDao.cancelPendingGuarded(conn, ticket.getId())) {
-                    throw new ServiceException.Conflict(
-                            "Vé đã được thanh toán hoặc không còn chờ thanh toán");
-                }
-                for (Long seatId : heldSeatIds) {
-                    seatHoldDao.releaseSeat(conn, showtimeId, seatId);
-                }
-                if (!seatHoldDao.updateHoldStatus(conn, holdId, "CANCELLED", "ACTIVE")) {
-                    throw new ServiceException.Conflict("Lượt giữ ghế đã được xử lý");
-                }
-                conn.commit();
-            } catch (Exception ex) {
-                conn.rollback();
-                throw ex;
-            }
-        }
-    }
-
-    /**
-     * Quét và tự động giải phóng tất cả các ghế bị giữ quá 10 phút chưa thanh toán.
-     */
-    public int sweepExpiredHolds() {
-        try (Connection conn = DBContext.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                int count = seatHoldDao.expireElapsedHolds(conn);
                 ticketDao.cancelExpiredPendingTickets(conn);
                 conn.commit();
-                return count;
-            } catch (Exception ex) {
+            } catch (Exception e) {
                 conn.rollback();
-                return 0;
+                logger.warning("expireElapsed failed: " + e.getMessage());
             }
         } catch (SQLException e) {
-            return 0;
+            logger.warning("expireElapsed connection failed: " + e.getMessage());
         }
     }
 
-    // ---- Policy Helpers for Tests & Business Rules ----
+    // ---- helpers ----
 
-    /**
-     * Tính tỷ lệ hoàn tiền theo bậc thang dựa trên múi giờ Việt Nam (+7).
-     * >= 24h: hoàn 100%
-     * 2h - 24h: hoàn 50%
-     * < 2h hoặc đã chiếu: hoàn 0%
-     */
-    public static long refundRatePercent(Instant now, LocalDateTime showtimeStart) {
-        if (showtimeStart == null) return 0;
+    /** Ghế HOLD nhưng hold_expires_at đã qua → coi như AVAILABLE (Req 8.4 lazy expiry). */
+    private static boolean isHoldExpired(LocalDateTime holdExpiresAt) {
+        return holdExpiresAt != null && LocalDateTime.now(ZoneOffset.UTC).isAfter(holdExpiresAt);
+    }
+
+    static boolean isTooEarlyForCheckIn(LocalDateTime now, LocalDateTime showtimeStart) {
+        return now.isBefore(showtimeStart.minusMinutes(30));
+    }
+
+    private static boolean isHoldExpired(SeatHoldDAO.SeatRow row) {
+        return "HOLD".equals(row.status) && isHoldExpired(row.holdExpiresAt);
+    }
+
+    /** Refund policy compares UTC instants with showtimes stored as Vietnam local time. */
+    static long refundRatePercent(Instant now, LocalDateTime showtimeStart) {
         LocalDateTime businessNow = LocalDateTime.ofInstant(now, BUSINESS_TZ);
+        if (showtimeStart == null) return 0;
         Duration until = Duration.between(businessNow, showtimeStart);
-        if (until.isNegative()) return 0;
+        if (until.isNegative()) return 0; // đã chiếu
         if (until.toHours() >= 24) return 100;
         if (until.toHours() >= 2) return 50;
         return 0;
     }
 
-    /**
-     * Chỉ cho phép soát vé trước giờ chiếu tối đa 30 phút.
-     */
-    public static boolean isTooEarlyForCheckIn(LocalDateTime now, LocalDateTime showtimeStart) {
-        if (showtimeStart == null) return false;
-        return now.isBefore(showtimeStart.minusMinutes(30));
+    /** Cộng điểm cho khách sau booking confirm (Req 17.2) — caller giữ transaction. */
+    private int earnPoints(Connection conn, long userId, long amountPaid, long ticketId) throws Exception {
+        return loyaltyService.addPointsForPurchase(conn, userId, amountPaid, "TICKET", ticketId);
     }
 
-    private LocalDateTime queryShowtimeStartTime(Connection conn, long showtimeId) {
-        String sql = "SELECT start_time FROM dbo.showtime WHERE id = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setLong(1, showtimeId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    Timestamp ts = rs.getTimestamp("start_time");
-                    if (ts != null) return ts.toLocalDateTime();
-                }
+    private long applyTicketPointRedemption(Connection conn, Ticket ticket, Long userId,
+                                             long payable, int requestedPoints) throws Exception {
+        if (ticket.pointsUsed() > 0) {
+            if (userId == null || ticket.pointsRedemptionKey() == null) {
+                throw new ServiceException.Conflict("Không thể đối soát điểm đã giữ cho vé");
             }
-        } catch (SQLException ignored) { }
-        return null;
-    }
-
-    private ShowtimeInfo queryShowtimeInfo(Connection conn, long showtimeId) {
-        String sql = "SELECT status, start_time, end_time FROM dbo.showtime WHERE id = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setLong(1, showtimeId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    String status = rs.getString("status");
-                    Timestamp start = rs.getTimestamp("start_time");
-                    Timestamp end = rs.getTimestamp("end_time");
-                    return new ShowtimeInfo(
-                            status,
-                            start != null ? start.toLocalDateTime() : null,
-                            end != null ? end.toLocalDateTime() : null
-                    );
-                }
+            loyaltyService.refundPoints(conn, userId, ticket.pointsUsed(),
+                    "TICKET_REDEMPTION_RELEASE", ticket.id(),
+                    ticket.pointsRedemptionKey() + "-RELEASE");
+            if (!ticketDao.updatePointsRedemption(conn, ticket.id(), 0, 0, null)) {
+                throw new ServiceException.Conflict("Không thể giải phóng điểm đã giữ cho vé");
             }
-        } catch (SQLException ignored) { }
-        return null;
+            ticket.setPointsUsed(0);
+            ticket.setPointsDiscount(0);
+            ticket.setPointsRedemptionKey(null);
+        }
+        if (requestedPoints < -1) {
+            throw new ServiceException.Validation("Số điểm sử dụng không hợp lệ");
+        }
+        if (requestedPoints == 0) return payable;
+        if (userId == null) {
+            if (requestedPoints == -1) return payable;
+            throw new ServiceException.Forbidden("Cần đăng nhập để sử dụng điểm");
+        }
+        int redemptionRate = loyaltyService.getRedemptionRate();
+        int maxRedeemablePoints = loyaltyService.calculateMaxRedeemablePoints(conn, userId, payable);
+        int pointsUsed = requestedPoints == -1 ? maxRedeemablePoints : requestedPoints;
+        if (pointsUsed > maxRedeemablePoints) {
+            throw new ServiceException.Validation("Số điểm sử dụng vượt quá số dư hiện có");
+        }
+        long pointsDiscount = (long) pointsUsed * redemptionRate;
+        if (pointsUsed <= 0 || pointsDiscount <= 0) return payable;
+
+        String redemptionKey = "TICKET-" + ticket.id() + "-" + UUID.randomUUID();
+        loyaltyService.redeemPoints(conn, userId, pointsUsed, "TICKET", ticket.id(), redemptionKey);
+        if (!ticketDao.updatePointsRedemption(
+                conn, ticket.id(), pointsUsed, pointsDiscount, redemptionKey)) {
+            throw new ServiceException.Conflict("Không thể ghi nhận điểm đã sử dụng cho vé");
+        }
+        ticket.setPointsUsed(pointsUsed);
+        ticket.setPointsDiscount(pointsDiscount);
+        ticket.setPointsRedemptionKey(redemptionKey);
+        return Math.max(0, payable - pointsDiscount);
     }
 
-    public static class ShowtimeInfo {
-        public final String status;
-        public final LocalDateTime startTime;
-        public final LocalDateTime endTime;
-        public ShowtimeInfo(String status, LocalDateTime startTime, LocalDateTime endTime) {
-            this.status = status;
-            this.startTime = startTime;
-            this.endTime = endTime;
+    /** Ticket id gắn với hold — tra qua cột ticket.hold_id (vé tạo cùng lúc hold, 1:1). */
+    private long ticketIdOfHold(Connection conn, long holdId) throws SQLException {
+        String sql = "SELECT id FROM dbo.ticket WHERE hold_id = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, holdId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new ServiceException.NotFound("Không tìm thấy vé của bản ghi giữ ghế");
+                }
+                return rs.getLong("id");
+            }
         }
     }
 
-    private long calculateSeatPrice(String seatType) {
-        if (seatType == null) return 75_000L;
-        return switch (seatType.toUpperCase()) {
-            case "VIP" -> 90_000L;
-            case "COUPLE" -> 150_000L;
-            default -> 75_000L;
-        };
+    /**
+     * Đọc lại vé ngay trong transaction hiện tại.
+     *
+     * <p>Không mở connection mới ở đây: các bước booking đang giữ row lock
+     * trên vé và ghế. Connection mới sẽ chờ chính transaction đang chờ nó
+     * đọc dữ liệu, làm request bị treo.</p>
+     */
+    private Ticket reloadWithSeats(Connection conn, long ticketId) throws SQLException {
+        Ticket ticket = ticketDao.findByIdLocked(conn, ticketId)
+                .orElseThrow(() -> new ServiceException.NotFound("Vé không tồn tại"));
+        ticket.setSeats(ticketDao.findSeats(conn, ticketId));
+        return ticket;
     }
 
-    private String getSeatType(Connection conn, long seatId) {
-        String sql = "SELECT seat_type FROM dbo.seat WHERE id = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setLong(1, seatId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getString("seat_type");
-            }
-        } catch (SQLException ignored) { }
-        return "STANDARD";
+    /** Mã vé duy nhất: TCK- + 8 ký tự hex ngẫu nhiên (UNIQUE constraint chốt chặn). */
+    private static String generateTicketCode() {
+        return "TCK-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
-    private long queryBranchId(Connection conn, long showtimeId) {
-        String sql = "SELECT branch_id FROM dbo.showtime WHERE id = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setLong(1, showtimeId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getLong("branch_id");
-            }
-        } catch (SQLException ignored) { }
-        return 1L;
-    }
-
-    private String generateTicketCode() {
-        String datePart = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        String randPart = UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase();
-        return "TK-" + datePart + "-" + randPart;
+    /** Thông báo lỗi an toàn cho luồng hold (không lộ chi tiết kỹ thuật). */
+    private static String safeMessage(Exception e, String fallback) {
+        return e instanceof ServiceException ? e.getMessage() : fallback;
     }
 }
