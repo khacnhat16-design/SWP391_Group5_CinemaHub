@@ -1,14 +1,12 @@
 package com.cinema.controller.auth;
 
+import com.cinema.common.CsrfUtil;
+import com.cinema.common.ServiceException;
 import com.cinema.dao.auth.CustomerProfileDAO;
 import com.cinema.dao.auth.UserDAO;
 import com.cinema.model.auth.Role;
 import com.cinema.model.auth.User;
-import com.cinema.model.branch.Branch;
 import com.cinema.service.auth.AuthService;
-
-import com.cinema.common.CsrfUtil;
-import com.cinema.common.ServiceException;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;

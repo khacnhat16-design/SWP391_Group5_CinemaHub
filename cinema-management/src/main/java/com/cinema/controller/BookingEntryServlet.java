@@ -54,15 +54,12 @@ public final class BookingEntryServlet extends HttpServlet {
             <meta name="viewport" content="width=device-width,initial-scale=1">
             <meta name="ctx" content="__CTX__">
             <meta name="user-role" content="CUSTOMER">
-            <link rel="stylesheet" href="__CTX__/assets/css/cinema.css?v=20261031-booking-checkout-3">
+            <link rel="stylesheet" href="__CTX__/assets/css/cinema.css?v=20261009-customer-header-2">
             <script src="__CTX__/assets/js/app.js?v=20261009-customer-header-1"></script>
             <title>Đặt vé - CinemaHub</title></head><body>
             <header class="nav-wrapper"><div class="nav container">
             <a class="logo" href="__CTX__/">Cinema<span class="accent">Hub</span></a>
             <nav><span class="account-summary"><strong>__NAME__</strong><small>Khách hàng</small></span>
-            <span class="customer-nav-summary" aria-label="Điểm tài khoản">
-              <span><small>Điểm</small><strong id="customerPoints">—</strong></span>
-            </span>
             <span class="nav-notif-wrap"><button id="notificationBell" class="nav-bell" type="button" aria-label="Thong bao" aria-expanded="false" title="Thong bao">
               <span aria-hidden="true">&#128276;</span><span id="notifCount" class="nav-badge" hidden>0</span>
             </button><div id="notificationPopover" class="notification-popover" hidden></div></span>
@@ -71,60 +68,30 @@ public final class BookingEntryServlet extends HttpServlet {
             <main class="container booking-page">
               <div class="page-heading"><div><span class="eyebrow">CINEMAHUB BOOKING</span>
               <h1>Chọn suất chiếu và ghế</h1>
-              <p class="muted">Chọn suất chiếu, giữ ghế trong 10 phút và thanh toán qua VNPay.</p></div></div>
+              <p class="muted">Chọn suất chiếu, giữ ghế trong 10 phút và thanh toán qua VNPay Sandbox.</p></div></div>
               <div id="message"></div>
               <div class="booking-layout">
                 <section class="panel"><h2>Suất chiếu đang mở bán</h2>
                   <div id="showtimes" class="showtimes"><div class="loading-state">Đang tải suất chiếu...</div></div>
                   <div id="seatArea" hidden>
                     <h2>Chọn ghế</h2><div id="showInfo" class="muted"></div>
-                    <div class="screen-label">MÀN HÌNH</div>
-                    <div class="seat-map-scroll"><div id="seats" class="seat-map"></div></div>
+                    <div class="screen-label">MÀN HÌNH</div><div id="seats" class="seat-map"></div>
                     <div class="legend"><span><i class="seat-dot"></i>Ghế thường</span>
                     <span><i class="seat-dot vip"></i>Ghế VIP</span>
-                    <span><i class="seat-dot couple"></i>Ghế đôi (chiếm 2 chỗ)</span>
+                    <span><i class="seat-dot couple"></i>Ghế đôi</span>
                     <span><i class="seat-dot selected"></i>Đang chọn</span>
-                    <span><i class="seat-dot sold"></i>Đã bán</span>
-                    <span><i class="seat-dot maintenance"></i>Bảo trì</span></div>
+                    <span><i class="seat-dot sold"></i>Đã bán</span></div>
                   </div>
                 </section>
-                <aside class="panel order-summary">
-                  <div class="checkout-heading">
-                    <span class="eyebrow">ĐẶT VÉ</span>
-                    <h2>Chi tiết đơn hàng</h2>
-                  </div>
+                <aside class="panel order-summary"><h2>Thanh toán</h2>
                   <div id="summary"><p class="muted">Chưa chọn ghế.</p></div>
                   <div id="paymentArea" hidden>
-                    <p class="checkout-hold-note">Ghế được giữ trong 10 phút. Hoàn tất thanh toán để xác nhận vé.</p>
-                    <label class="checkout-points" for="usePointsInput">Số điểm muốn sử dụng</label>
-                    <input id="usePointsInput" class="checkout-points-input" type="number" min="0" step="1" value="0" inputmode="numeric" />
-                    <div id="pointsMsg" class="checkout-points-note"></div>
+                    <p class="tiny">Ghế được giữ trong 10 phút. Thanh toán an toàn qua cổng VNPay Sandbox.</p>
                     <div class="payment-method selected">
-                      <span><strong>Thanh toán qua VNPay</strong><small>An toàn và nhanh chóng</small></span>
+                      <span><strong>VNPay Sandbox</strong><small>Thanh toán trực tiếp qua cổng thử nghiệm VNPay</small></span>
                     </div>
-                    <button id="payButton" class="btn full checkout-pay-button" type="button">Thanh toán bằng VNPay</button>
+                    <button id="payButton" class="btn full" type="button">Thanh toán qua VNPay Sandbox</button>
                   </div>
-                  <section class="voucher-box" aria-labelledby="voucherHeading">
-                    <div class="voucher-heading">
-                      <div>
-                        <h3 id="voucherHeading">Ví voucher</h3>
-                        <p>Các mã ưu đãi hiện có, chọn một mã để áp dụng cho đơn vé.</p>
-                      </div>
-                      <span id="availableVoucherCount" class="voucher-count" aria-live="polite"></span>
-                    </div>
-                    <div id="availableVouchers" class="voucher-list" aria-live="polite">Đang tải voucher...</div>
-                    <div class="voucher-entry">
-                      <label for="voucherInput">Hoặc nhập mã voucher</label>
-                      <div class="voucher-entry-controls">
-                        <input id="voucherInput" type="text" placeholder="Ví dụ: WELCOME10"
-                          autocomplete="off" />
-                        <button id="voucherBtn" class="btn voucher-apply-button" type="button">Áp dụng</button>
-                        <button id="voucherClearBtn" class="btn ghost small voucher-clear-button"
-                          type="button" hidden>Gỡ mã</button>
-                      </div>
-                    </div>
-                    <div id="voucherMsg" class="voucher-message" role="status" aria-live="polite"></div>
-                  </section>
                   <div id="successTicket" class="ticket-success" hidden></div>
                 </aside>
               </div>
@@ -143,15 +110,6 @@ public final class BookingEntryServlet extends HttpServlet {
               const message = document.getElementById('message');
               const paymentArea = document.getElementById('paymentArea');
               const payButton = document.getElementById('payButton');
-              const voucherInput = document.getElementById('voucherInput');
-              const voucherBtn = document.getElementById('voucherBtn');
-              const voucherClearBtn = document.getElementById('voucherClearBtn');
-              const voucherMsg = document.getElementById('voucherMsg');
-              const availableVouchers = document.getElementById('availableVouchers');
-              const availableVoucherCount = document.getElementById('availableVoucherCount');
-              const usePointsInput = document.getElementById('usePointsInput');
-              const pointsMsg = document.getElementById('pointsMsg');
-              let voucherCode = '';
               // Back/Forward cache can restore stale seat buttons after a completed booking.
               // Bắt buộc reload khi page được restore từ bfcache — browser có thể
               // cache HTML cũ với seat status lỗi thời; reload để render đúng SOLD/HOLD.
@@ -165,7 +123,6 @@ public final class BookingEntryServlet extends HttpServlet {
               let holdId = null;
               let holdRequestInFlight = false;
               let quoteRevision = 0;
-              let quoteContext = '';
 
               function node(tag, attrs, text) {
                 const item = document.createElement(tag);
@@ -180,78 +137,10 @@ public final class BookingEntryServlet extends HttpServlet {
               function money(value) {
                 return Number(value || 0).toLocaleString('vi-VN') + 'đ';
               }
-              function formatVoucherDate(value) {
-                const date = new Date(value);
-                return Number.isNaN(date.getTime())
-                  ? String(value || '—')
-                  : date.toLocaleDateString('vi-VN');
-              }
-              function updateVoucherCards() {
-                const inputCode = (voucherInput.value || '').trim().toUpperCase();
-                availableVouchers.querySelectorAll('.voucher-offer').forEach(offer => {
-                  const isApplied = offer.dataset.code === voucherCode;
-                  const isPending = !isApplied && offer.dataset.code === inputCode;
-                  offer.classList.toggle('is-applied', isApplied);
-                  offer.classList.toggle('is-pending', isPending);
-                  const chooseButton = offer.querySelector('.voucher-select-button');
-                  chooseButton.textContent = isApplied ? 'Đang áp dụng'
-                    : isPending ? 'Đã chọn' : 'Chọn mã';
-                  chooseButton.setAttribute('aria-pressed', String(isApplied || isPending));
-                });
-                voucherClearBtn.hidden = !voucherCode;
-              }
-              async function loadAvailableVouchers() {
-                const response = await fetch(ctx + '/voucher/available', { credentials: 'same-origin' });
-                const vouchers = await response.json();
-                if (!response.ok) {
-                  throw new Error((vouchers.error && vouchers.error.message) || 'Không thể tải voucher.');
-                }
-                if (!Array.isArray(vouchers)) {
-                  throw new Error('Danh sách voucher trả về không hợp lệ.');
-                }
-                availableVouchers.replaceChildren();
-                availableVoucherCount.textContent = vouchers.length + ' mã';
-                if (vouchers.length === 0) {
-                  availableVoucherCount.textContent = '';
-                  availableVouchers.appendChild(node('p', { class: 'voucher-empty' },
-                    'Hiện chưa có voucher khả dụng. Vui lòng quay lại sau nhé.'));
-                  return;
-                }
-                vouchers.forEach(voucher => {
-                  const offer = node('article', { class: 'voucher-offer' });
-                  offer.dataset.code = String(voucher.code || '').toUpperCase();
-                  const discount = String(voucher.discountType).toUpperCase() === 'PERCENT'
-                    ? 'Giảm ' + voucher.discountValue + '%'
-                    : 'Giảm ' + money(voucher.discountValue);
-                  const details = node('div', { class: 'voucher-details' });
-                  details.append(
-                    node('span', {}, 'Đơn tối thiểu ' + money(voucher.minOrderAmount)),
-                    node('span', {}, 'Hạn dùng đến ' + formatVoucherDate(voucher.validTo))
-                  );
-                  const info = node('div', { class: 'voucher-offer-info' });
-                  info.append(
-                    node('span', { class: 'voucher-code' }, voucher.code),
-                    node('strong', { class: 'voucher-discount' }, discount),
-                    details
-                  );
-                  const chooseButton = node('button', {
-                    class: 'btn voucher-select-button',
-                    type: 'button',
-                    'aria-pressed': 'false'
-                  }, 'Chọn mã');
-                  offer.append(info, chooseButton);
-                  chooseButton.addEventListener('click', () => {
-                    voucherInput.value = voucher.code;
-                    updateVoucherCards();
-                    if (currentShow && selectedSeats.length) {
-                      voucherBtn.click();
-                    } else {
-                      voucherMsg.textContent = 'Đã chọn mã. Chọn ghế rồi nhấn “Áp dụng”.';
-                    }
-                  });
-                  availableVouchers.appendChild(offer);
-                });
-                updateVoucherCards();
+              function seatCode(seat) {
+                const start = String(seat.rowLabel || '') + String(seat.colNo || '');
+                return String(seat.seatType || '').toUpperCase() === 'COUPLE'
+                  ? start + '-' + (Number(seat.colNo) + 1) : start;
               }
               function holdOwnerId(seat) {
                 return seat.holdUserId ?? seat.hold_user_id ?? seat.userId ?? seat.user_id;
@@ -316,133 +205,33 @@ public final class BookingEntryServlet extends HttpServlet {
                 }
                 const seats = selectedSeats.slice();
                 const seatIds = seats.map(seat => seat.seatId);
-                const nextQuoteContext = JSON.stringify([
-                  currentShow.id, seatIds, voucherCode
-                ]);
-                const contextChanged = nextQuoteContext !== quoteContext;
-                if (contextChanged) {
-                  quoteContext = nextQuoteContext;
-                  delete usePointsInput.dataset.maxRedeemablePoints;
-                }
-                // Ghế đôi (COUPLE) chiếm 2 slot/người ngồi → tổng slot = số ghế thường + 2 × số ghế đôi.
-                const slotCount = seats.reduce((sum, seat) =>
-                  sum + (String(seat.seatType || '').toUpperCase() === 'COUPLE' ? 2 : 1), 0);
-                const slotLabel = slotCount !== seats.length
-                  ? 'Đang chọn: ' + seats.length + ' ghế (' + slotCount + ' chỗ, ghế đôi tính 2 chỗ)'
-                  : 'Đang chọn: ' + seats.length + ' ghế (' + slotCount + ' chỗ)';
-                const seatLabel = seat => seat.rowLabel + seat.colNo
-                  + (String(seat.seatType || '').toUpperCase() === 'COUPLE'
-                    ? '-' + (Number(seat.colNo) + 1) : '');
-                const selectedPoints = Number(usePointsInput.value || 0);
-                if (!Number.isSafeInteger(selectedPoints) || selectedPoints < 0) {
-                  pointsMsg.textContent = 'Số điểm phải là số nguyên không âm.';
-                  pointsMsg.classList.add('is-error');
-                  usePointsInput.setAttribute('aria-invalid', 'true');
-                  usePointsInput.classList.add('is-invalid');
-                  payButton.disabled = true;
-                  summary.replaceChildren(
-                    node('div', { class: 'summary-line error' }, 'Vui lòng nhập số điểm hợp lệ.')
-                  );
-                  return;
-                }
-                const knownMax = Number(usePointsInput.dataset.maxRedeemablePoints);
-                const exceedsKnownMax = !contextChanged
-                  && Number.isFinite(knownMax) && selectedPoints > knownMax;
-                let pointsUsed = contextChanged || exceedsKnownMax ? 0 : selectedPoints;
-                pointsMsg.classList.toggle('is-error', exceedsKnownMax);
-                usePointsInput.classList.toggle('is-invalid', exceedsKnownMax);
-                usePointsInput.setAttribute('aria-invalid', String(exceedsKnownMax));
-                if (exceedsKnownMax) {
-                  pointsMsg.textContent = 'Số điểm vượt quá số dư hiện có: '
-                    + knownMax.toLocaleString('vi-VN')
-                    + ' điểm.';
-                } else if (Number.isFinite(knownMax)) {
-                  pointsMsg.textContent = knownMax > 0
-                    ? 'Có thể dùng tối đa ' + knownMax.toLocaleString('vi-VN')
-                      + ' điểm theo số dư hiện có.'
-                    : 'Số dư hiện tại không có điểm để sử dụng.';
-                }
-                payButton.disabled = true;
+                const selectedCapacity = seats.reduce((total, seat) =>
+                  total + (String(seat.seatType || '').toUpperCase() === 'COUPLE' ? 2 : 1), 0);
                 summary.replaceChildren(
                   node('div', { class: 'summary-line' }, currentShow.movieTitle || 'Suất chiếu'),
-                  node('div', { class: 'summary-line' }, slotLabel),
-                  node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seatLabel).join(', ')),
+                  node('div', { class: 'summary-line' }, 'Đang chọn: ' + selectedCapacity + ' chỗ'),
+                  node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seatCode).join(', ')),
                   node('div', { class: 'summary-line total' }, 'Đang tính giá…')
                 );
                 paymentArea.hidden = !holdId;
                 api('/booking/quote', {
                   method: 'POST',
-                  body: {
-                    showtimeId: currentShow.id,
-                    seatIds: seatIds.join(','),
-                    voucherCode: voucherCode,
-                    pointsUsed: pointsUsed
-                  }
+                  body: { showtimeId: currentShow.id, seatIds: seatIds.join(',') }
                 }).then(order => {
                   if (revision !== quoteRevision) return;
-                  const maxRedeemablePoints = Number(order.maxRedeemablePoints || 0);
-                  usePointsInput.dataset.maxRedeemablePoints = String(maxRedeemablePoints);
-                  const exceedsMax = selectedPoints > maxRedeemablePoints;
-                  usePointsInput.classList.toggle('is-invalid', exceedsMax);
-                  usePointsInput.setAttribute('aria-invalid', String(exceedsMax));
-                  pointsMsg.classList.toggle('is-error', exceedsMax);
-                  if (exceedsMax) {
-                    pointsMsg.textContent = 'Số điểm vượt quá số dư hiện có: '
-                      + maxRedeemablePoints.toLocaleString('vi-VN')
-                      + ' điểm.';
-                  } else {
-                    pointsMsg.textContent = maxRedeemablePoints > 0
-                      ? 'Có thể dùng tối đa ' + maxRedeemablePoints.toLocaleString('vi-VN')
-                        + ' điểm theo số dư hiện có.'
-                      : 'Số dư hiện tại không có điểm để sử dụng.';
-                  }
-                  if (contextChanged && selectedPoints > 0 && !exceedsMax) {
-                    renderSummary();
-                    return;
-                  }
-                  payButton.disabled = exceedsMax;
                   const lines = [
                     node('div', { class: 'summary-line' }, currentShow.movieTitle || 'Suất chiếu'),
-                    node('div', { class: 'summary-line' }, slotLabel),
-                    node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seat => seat.rowLabel + seat.colNo).join(', ')),
-                    node('div', { class: 'summary-line' }, 'Giá vé trước ưu đãi: ' + money(order.baseTotal))
+                    node('div', { class: 'summary-line' }, 'Đang chọn: ' + selectedCapacity + ' chỗ'),
+                    node('div', { class: 'summary-line' }, 'Ghế: ' + seats.map(seatCode).join(', '))
                   ];
-                  if (order.tierDiscount > 0) {
-                    lines.push(node('div', { class: 'summary-line' },
-                      'Ưu đãi hạng thành viên: -' + money(order.tierDiscount)));
-                  }
-                  if (order.voucherDiscount > 0) {
-                    lines.push(node('div', { class: 'summary-line' },
-                      'Ưu đãi mã voucher: -' + money(order.voucherDiscount)));
-                  }
-                  if (order.pointsDiscount > 0) {
-                    lines.push(node('div', { class: 'summary-line' },
-                      'Giảm bằng điểm (' + order.pointsUsed + ' điểm): -' + money(order.pointsDiscount)));
-                  }
                   lines.push(node('div', { class: 'summary-line total' },
-                    'Cần thanh toán: ' + money(Math.max(0, order.payableAfterPoints))));
+                    'Tổng thanh toán: ' + money(order.baseTotal)));
                   summary.replaceChildren(...lines);
                 }).catch(error => {
                   if (revision !== quoteRevision) return;
-                  const currentPoints = Number(usePointsInput.value || 0);
-                  const latestMax = Number(usePointsInput.dataset.maxRedeemablePoints);
-                  const invalidPoints = !Number.isSafeInteger(currentPoints)
-                    || currentPoints < 0
-                    || (Number.isFinite(latestMax) && currentPoints > latestMax);
-                  payButton.disabled = invalidPoints;
-                  if (invalidPoints && Number.isFinite(latestMax)
-                      && currentPoints > latestMax) {
-                    pointsMsg.textContent = 'Số điểm vượt quá số dư hiện có: '
-                      + latestMax.toLocaleString('vi-VN')
-                      + ' điểm.';
-                    pointsMsg.classList.add('is-error');
-                    usePointsInput.classList.add('is-invalid');
-                    usePointsInput.setAttribute('aria-invalid', 'true');
-                  }
                   summary.replaceChildren(
                     node('div', { class: 'summary-line' }, currentShow.movieTitle || 'Suất chiếu'),
-                    node('div', { class: 'summary-line error' },
-                      error.message || 'Không thể tính giá vé.')
+                    node('div', { class: 'summary-line error' }, 'Không thể tính giá vé.')
                   );
                   notify(error.message);
                 });
@@ -459,42 +248,38 @@ public final class BookingEntryServlet extends HttpServlet {
                   const rowLabel = String.fromCharCode(65 + rowIndex);
                   const row = node('div', { class: 'seat-row' });
                   row.appendChild(node('small', {}, rowLabel));
+                  let occupiedThrough = 0;
                   for (let colNo = 1; colNo <= seatColumns; colNo++) {
+                    if (colNo <= occupiedThrough) continue;
                     const seat = seatsByPosition.get(rowLabel + ':' + colNo);
                     if (!seat) {
-                      const maintenanceSeat = node('button', {
-                        class: 'seat maintenance',
-                        type: 'button',
-                        disabled: true,
-                        title: 'Ghế ' + rowLabel + colNo + ' - đang bảo trì'
-                      }, String(colNo));
-                      maintenanceSeat.setAttribute('aria-label',
-                        'Ghế ' + rowLabel + colNo + ', đang bảo trì');
-                      row.appendChild(maintenanceSeat);
+                      row.appendChild(node('span', {
+                        class: 'seat-empty',
+                        'aria-hidden': 'true'
+                      }));
                       continue;
                     }
                     const status = seatStatus(seat);
                     const seatType = String(seat.seatType || 'STANDARD').toUpperCase();
                     const typeClass = seatType === 'VIP' ? 'vip' : seatType === 'COUPLE' ? 'couple' : '';
+                    const isMaintenance = status === 'MAINTENANCE' || status === 'UNAVAILABLE'
+                      || status === 'INACTIVE';
                     const statusClass = status === 'SOLD' ? 'sold'
-                      : status === 'HOLD' ? 'hold'
-                      : status === 'MAINTENANCE' ? 'maintenance' : '';
+                      : status === 'HOLD' ? 'hold' : isMaintenance ? 'maintenance' : '';
                     const button = node('button', {
                       class: ['seat', typeClass, statusClass].filter(Boolean).join(' '),
                       type: 'button'
                     }, seatType === 'COUPLE'
-                      ? seat.colNo + '-' + (Number(seat.colNo) + 1) : String(seat.colNo));
-                    const seatCode = rowLabel + seat.colNo
-                      + (seatType === 'COUPLE' ? '-' + (Number(seat.colNo) + 1) : '');
-                    button.title = seatCode + ' - ' + seat.seatType
-                      + (seatType === 'COUPLE' ? ' (chiếm 2 chỗ)' : '');
+                      ? String(seat.colNo) + '-' + (Number(seat.colNo) + 1)
+                      : String(seat.colNo));
+                    button.title = seatCode(seat) + ' - ' + seat.seatType;
                     const typeLabel = seatType === 'VIP' ? 'VIP'
-                      : seatType === 'COUPLE' ? 'đôi (chiếm 2 chỗ)' : 'thường';
+                      : seatType === 'COUPLE' ? 'đôi' : 'thường';
                     const statusLabel = status === 'SOLD' ? 'đã bán'
                       : status === 'HOLD' ? 'đang được giữ'
-                      : status === 'MAINTENANCE' ? 'đang bảo trì' : 'còn trống';
+                        : isMaintenance ? 'bảo trì/không khả dụng' : 'còn trống';
                     button.setAttribute('aria-label',
-                      'Ghế ' + seatCode + ', loại ' + typeLabel + ', ' + statusLabel);
+                      'Ghế ' + seatCode(seat) + ', loại ' + typeLabel + ', ' + statusLabel);
                     const isOwnHold = belongsToCurrentUser(seat);
                     const isSelected = isOwnHold || selectedSeats.some(item => item.seatId === seat.seatId);
                     if (isSelected) button.classList.add('selected');
@@ -547,8 +332,7 @@ public final class BookingEntryServlet extends HttpServlet {
                       }
                     });
                     row.appendChild(button);
-                    // Bản ghi ghế đôi đã chiếm cả cột hiện tại và cột kế tiếp.
-                    if (seatType === 'COUPLE') colNo++;
+                    if (seatType === 'COUPLE') occupiedThrough = Number(seat.colNo) + 1;
                   }
                   seatsNode.appendChild(row);
                 }
@@ -643,35 +427,10 @@ public final class BookingEntryServlet extends HttpServlet {
               }
               payButton.addEventListener('click', async () => {
                 try {
-                  const selectedPoints = Number(usePointsInput.value || 0);
-                  const maxRedeemablePoints = Number(usePointsInput.dataset.maxRedeemablePoints);
-                  if (!Number.isSafeInteger(selectedPoints) || selectedPoints < 0) {
-                    pointsMsg.textContent = 'Số điểm phải là số nguyên không âm.';
-                    pointsMsg.classList.add('is-error');
-                    usePointsInput.classList.add('is-invalid');
-                    usePointsInput.setAttribute('aria-invalid', 'true');
-                    usePointsInput.focus();
-                    return;
-                  }
-                  if (Number.isFinite(maxRedeemablePoints) && selectedPoints > maxRedeemablePoints) {
-                    pointsMsg.textContent = 'Số điểm vượt quá số dư hiện có: '
-                      + maxRedeemablePoints.toLocaleString('vi-VN')
-                      + ' điểm.';
-                    pointsMsg.classList.add('is-error');
-                    usePointsInput.classList.add('is-invalid');
-                    usePointsInput.setAttribute('aria-invalid', 'true');
-                    usePointsInput.focus();
-                    return;
-                  }
                   payButton.disabled = true;
                   const result = await api('/booking/confirm', {
                     method: 'POST',
-                    body: {
-                      holdId,
-                      paymentMethod: 'VNPAY',
-                      voucherCode: voucherCode,
-                      pointsUsed: selectedPoints
-                    }
+                    body: { holdId, paymentMethod: 'VNPAY' }
                   });
                   if (result.redirectUrl) {
                     window.location.href = result.redirectUrl;
@@ -711,54 +470,9 @@ public final class BookingEntryServlet extends HttpServlet {
                   notify(error.message);
                 }
               });
-              payButton.textContent = 'Thanh toán bằng VNPay';
-              // Voucher don gian: nhap ma -> goi /voucher/lookup de xem giam bao nhieu -> tinh lai gia
-              if (voucherBtn) {
-                voucherBtn.addEventListener('click', async () => {
-                  const requestedCode = (voucherInput.value || '').trim().toUpperCase();
-                  voucherInput.value = requestedCode;
-                  voucherMsg.textContent = '';
-                  if (!requestedCode) {
-                    voucherMsg.textContent = 'Nhập mã voucher trước khi áp dụng.';
-                    return;
-                  }
-                  if (!currentShow || !selectedSeats.length) {
-                    voucherMsg.textContent = 'Chọn ghế trước rồi mới áp mã.';
-                    return;
-                  }
-                  try {
-                    voucherMsg.textContent = 'Đang kiểm tra mã...';
-                    const res = await fetch(ctx + '/voucher/lookup?code=' + encodeURIComponent(requestedCode)
-                      + '&orderTotal=999999999', { credentials: 'same-origin' });
-                    const data = await res.json();
-                    if (!res.ok || !data.success) throw new Error((data.error && data.error.message) || 'Mã không hợp lệ');
-                    voucherCode = requestedCode;
-                    updateVoucherCards();
-                    voucherMsg.textContent = 'Đã áp dụng ' + voucherCode + '. Đang cập nhật giá vé.';
-                    renderSummary();
-                  } catch (e) {
-                    voucherCode = '';
-                    updateVoucherCards();
-                    voucherMsg.textContent = e.message || 'Mã không hợp lệ.';
-                    renderSummary();
-                  }
-                });
-              }
-              voucherInput.addEventListener('input', updateVoucherCards);
-              voucherClearBtn.addEventListener('click', () => {
-                voucherCode = '';
-                voucherInput.value = '';
-                voucherMsg.textContent = 'Đã gỡ voucher khỏi đơn hàng.';
-                updateVoucherCards();
-                renderSummary();
-              });
-              usePointsInput.addEventListener('input', renderSummary);
+              payButton.textContent = 'Thanh toán qua VNPay Sandbox';
               load().catch(error => {
                 showtimesNode.replaceChildren(node('p', { class: 'muted' }, 'Không thể tải suất chiếu: ' + error.message));
-              });
-              loadAvailableVouchers().catch(error => {
-                availableVouchers.textContent = 'Không thể tải voucher: ' + error.message;
-                console.error('[CinemaHub booking] Failed to load available vouchers', error);
               });
 
               // VNPay / callback: nếu URL có ?payment=success&ticketCode=... thì hiện popup barcode
@@ -788,7 +502,7 @@ public final class BookingEntryServlet extends HttpServlet {
                         <canvas class="ticket-barcode" width="240" height="82"></canvas>
                       </div>
                       <div class="booking-payment-foot">
-                        <a class="btn secondary" href="__CTX__/console?module=my-tickets">Xem vé của tôi</a>
+                        <a class="btn secondary" href="${ctx}/console?module=my-tickets">Xem vé của tôi</a>
                         <button type="button" class="btn" id="__closeAndReload">Đóng</button>
                       </div>
                     </div>`;
